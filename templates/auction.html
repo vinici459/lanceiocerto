@@ -130,7 +130,7 @@
     {% if entity.chat_paused %}<div class="alert">O chat está pausado pelo administrador.</div>{% endif %}
     <div id="chat-messages" class="chat-messages">
       {% for msg in chat_messages %}
-      <div class="chat-line"><strong>{{ display_user_name(msg.user) }}</strong> <span>{{ msg.created_at.strftime('%H:%M:%S') }}</span><p>{{ msg.message }}</p></div>
+      <div class="chat-line"><strong>{{ msg.user.full_name }}</strong> <span>{{ msg.created_at.strftime('%H:%M:%S') }}</span><p>{{ msg.message }}</p></div>
       {% endfor %}
     </div>
     {% if user %}

@@ -1092,7 +1092,7 @@
 <div class="panel-card">
   <div class="section-head"><div><h1>Meu Cadastro</h1><p>Dados básicos, acesso e endereço principal.</p></div></div>
   <div class="profile-grid">
-    <div><span>Nome completo</span><strong>{{ display_user_name(user) }}</strong></div>
+    <div><span>Nome completo</span><strong>{{ user.full_name }}</strong></div>
     <div><span>Apelido / ID de login</span><strong>{{ user.username or user.nickname or user.user or '—' }}</strong></div>
     <div><span>E-mail</span><strong>{{ user.email }}</strong></div>
     <div><span>CPF</span><strong>{{ user.cpf or '—' }}</strong></div>

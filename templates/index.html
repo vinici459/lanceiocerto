@@ -3,16 +3,25 @@
 
 <section class="container lc-home">
 
-  <div class="lc-hero">
+  <div class="lc-hero lc-hero-pro">
     <div class="lc-hero-copy">
-      
-
-      <h1>Leilões online em uma experiência direta, limpa e confiável.</h1>
+      <span class="eyebrow">Leilões online com acompanhamento em tempo real</span>
+      <h1>Dispute produtos selecionados em uma plataforma segura, moderna e transparente.</h1>
       <p>
-        Encontre disputas ao vivo, acompanhe os próximos produtos e consulte leilões encerrados sem excesso de informação.
+        Acompanhe leilões ao vivo, veja os próximos produtos e participe usando seu apelido público, sem expor seu nome completo na página principal.
       </p>
+      <div class="hero-actions">
+        <a href="/register" class="btn">Criar conta</a>
+        <a href="#home-active-auctions" class="btn ghost">Ver leilões</a>
+      </div>
+    </div>
 
-      
+    <div class="hero-visual-card" aria-label="Destaque visual do Lancei o Certo">
+      <div class="hero-orbit one"></div>
+      <div class="hero-orbit two"></div>
+      <img src="https://images.unsplash.com/photo-1516321497487-e288fb19713f?q=80&w=1400&auto=format&fit=crop" alt="Pessoa acompanhando leilões online pelo notebook">
+      <div class="hero-floating-badge top">AO VIVO</div>
+      <div class="hero-floating-badge bottom">Lances em tempo real</div>
     </div>
 
     <aside class="lc-market-card">
@@ -31,14 +40,14 @@
       <div class="market-row">
         <span>Indicações</span>
         <strong>{{ suggestion_products|length if suggestion_products is defined else 0 }}</strong>
-      </div>      
+      </div>
     </aside>
   </div>
 
   <div class="lc-toolbar">
     <div>
-      <h2>Leilões</h2>
-      <p>Escolha uma disputa ativa, veja os próximos produtos ou consulte resultados.</p>
+      <h2>Leilões disponíveis</h2>
+      <p>Escolha uma disputa ativa, acompanhe os próximos produtos ou consulte resultados encerrados.</p>
     </div>
 
     <div class="lc-tools">

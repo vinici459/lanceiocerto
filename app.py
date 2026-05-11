@@ -34,8 +34,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 
 APP_NAME = "Lanceio Certo"
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./lanceiocerto.db")
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,7 +54,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     full_name: Mapped[str] = mapped_column(String(120))
-    nickname: Mapped[str] = mapped_column(String(50), default="", index=True)
+    public_name: Mapped[str] = mapped_column(String(40), default="", index=True)
     email: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     password: Mapped[str] = mapped_column(String(120))
     cpf: Mapped[str] = mapped_column(String(20), default="")
@@ -410,6 +408,22 @@ def fmt_money(v: float) -> str:
     return f"{BR(v):.2f}".replace(".", ",")
 
 
+def public_user_name(user: Optional["User"]) -> str:
+    if not user:
+        return "—"
+    nickname = (getattr(user, "public_name", "") or "").strip()
+    if nickname:
+        return f"@{nickname}"
+    first = (getattr(user, "full_name", "") or "Participante").strip().split()[0]
+    return first or "Participante"
+
+
+def normalize_public_name(value: str) -> str:
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9._-]", "", value)
+    return value[:24]
+
+
 def fmt_deadline(dt: Optional[datetime]) -> str:
     if not dt:
         return "—"
@@ -431,21 +445,6 @@ def remaining_label(dt: Optional[datetime]) -> str:
         return f"{hours}h {minutes}min"
     return f"{minutes}min"
 
-
-def clean_nickname(value: str) -> str:
-    value = (value or "").strip().lower()
-    value = re.sub(r"[^a-z0-9._-]", "", value)
-    return value[:30]
-
-
-def display_user_name(user: Optional[User]) -> str:
-    if not user:
-        return "—"
-    nick = (getattr(user, "nickname", "") or "").strip()
-    return f"@{nick}" if nick else user.full_name
-
-
-templates.env.globals["display_user_name"] = display_user_name
 
 def current_user(request: Request, db: Session) -> Optional[User]:
     token = request.cookies.get("session_token")
@@ -578,7 +577,7 @@ def clamp_initial_duration(minutes: int | float | None) -> int:
 def public_auction_payload(item: AuctionItem, db: Session) -> dict:
     bids_count = db.query(Bid).filter(Bid.auction_id == item.id).count()
     last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
-    last_bidder = display_user_name(last_bid.user) if last_bid else None
+    last_bidder = public_user_name(last_bid.user) if last_bid else None
     remaining = 0
     if item.status == "live" and item.ends_at:
         remaining = max(0, int((item.ends_at - datetime.utcnow()).total_seconds()))
@@ -597,7 +596,7 @@ def public_auction_payload(item: AuctionItem, db: Session) -> dict:
         "start_remaining": start_remaining,
         "ends_at": item.ends_at.isoformat() if item.ends_at else None,
         "remaining_seconds": remaining,
-        "winner_name": display_user_name(item.winner) if item.winner else None,
+        "winner_name": public_user_name(item.winner) if item.winner else None,
         "winner_deadline": item.winner_deadline.isoformat() if item.winner_deadline else None,
         "turbo_level": item.turbo_level,
         "turbo_label": turbo_label(item.turbo_level),
@@ -681,7 +680,7 @@ def build_returned_items(db: Session) -> list[dict]:
             "expected_profit_if_paid": expected_profit_if_paid,
             "suggested_turbo_base": suggested_turbo_base,
             "suggested_turbo_trigger_amount": suggested_turbo_trigger_amount,
-            "winner_name": display_user_name(order.user) if order.user else "—",
+            "winner_name": public_user_name(order.user) if order.user else "—",
             "expired_at": order.expired_at,
         })
     return returned
@@ -818,7 +817,7 @@ def cashback_payload(item: AuctionItem, db: Session, user: Optional[User] = None
         "join_remaining_seconds": remaining,
         "joined": joined,
         "user_spent": BR(user_spent),
-        "winner_name": display_user_name(event.winner) if event.winner else None,
+        "winner_name": public_user_name(event.winner) if event.winner else None,
         "cashback_amount": BR(event.cashback_amount),
     }
 
@@ -890,15 +889,6 @@ def suggestion_vote_stats(db: Session) -> list[dict]:
     return rows
 
 
-def _dialect_ddl(sqlite_ddl: str) -> str:
-    if engine.dialect.name == "postgresql":
-        return (sqlite_ddl
-            .replace("DATETIME", "TIMESTAMP")
-            .replace("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE")
-            .replace("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"))
-    return sqlite_ddl
-
-
 def ensure_columns() -> None:
     Base.metadata.create_all(bind=engine)
     inspector = inspect(engine)
@@ -906,7 +896,7 @@ def ensure_columns() -> None:
         if inspector.has_table("users"):
             cols = {c["name"] for c in inspector.get_columns("users")}
             for name, ddl in {
-                "nickname": "VARCHAR(50) DEFAULT ''",
+                "public_name": "VARCHAR(40) DEFAULT ''",
                 "identity_status": "VARCHAR(30) DEFAULT 'pending'",
                 "identity_note": "TEXT DEFAULT ''",
                 "document_type": "VARCHAR(40) DEFAULT 'CPF'",
@@ -916,7 +906,7 @@ def ensure_columns() -> None:
                 "verified_at": "DATETIME",
             }.items():
                 if name not in cols:
-                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {_dialect_ddl(ddl)}"))
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
 
         if inspector.has_table("auction_items"):
             cols = {c["name"] for c in inspector.get_columns("auction_items")}
@@ -935,7 +925,7 @@ def ensure_columns() -> None:
                 "cashback_enabled": "BOOLEAN DEFAULT 0",
             }.items():
                 if name not in cols:
-                    conn.execute(text(f"ALTER TABLE auction_items ADD COLUMN {name} {_dialect_ddl(ddl)}"))
+                    conn.execute(text(f"ALTER TABLE auction_items ADD COLUMN {name} {ddl}"))
 
         if inspector.has_table("winner_orders"):
             cols = {c["name"] for c in inspector.get_columns("winner_orders")}
@@ -947,7 +937,7 @@ def ensure_columns() -> None:
                 "delivered_at": "DATETIME",
             }.items():
                 if name not in cols:
-                    conn.execute(text(f"ALTER TABLE winner_orders ADD COLUMN {name} {_dialect_ddl(ddl)}"))
+                    conn.execute(text(f"ALTER TABLE winner_orders ADD COLUMN {name} {ddl}"))
 
 
 def save_uploaded_image(file: Optional[UploadFile]) -> str:
@@ -992,27 +982,65 @@ def seed() -> None:
     ensure_columns()
     db = SessionLocal()
     try:
-        admin = db.query(User).filter(User.email == "admin@lanceiocerto.local").first()
-        if not admin:
-            admin = User(
-                full_name="Administrador Principal",
-                nickname="admin",
-                email="admin@lanceiocerto.local",
-                password="123456",
-                cpf="000.000.000-00",
-                phone="(00) 00000-0000",
-                cep="14000-000",
-                street="Rua Principal",
-                number="100",
-                district="Centro",
-                city="Ribeirão Preto",
-                state="SP",
-                is_admin=True,
-                is_superadmin=True,
-                wallet_balance=500.0,
-            )
-            db.add(admin)
+        admin_email = (os.getenv("ADMIN_EMAIL") or "").strip().lower()
+        admin_password = (os.getenv("ADMIN_PASSWORD") or "").strip()
+        admin_name = (os.getenv("ADMIN_NAME") or "Administrador Geral").strip()
+
+        if admin_email:
+            admin = db.query(User).filter(User.email == admin_email).first()
+            if not admin:
+                admin = User(
+                    full_name=admin_name,
+                    public_name=normalize_public_name(os.getenv("ADMIN_PUBLIC_NAME") or "admin"),
+                    email=admin_email,
+                    password=admin_password or secrets.token_urlsafe(12),
+                    cpf="",
+                    phone="",
+                    is_admin=True,
+                    is_superadmin=True,
+                    identity_status="verified",
+                    verified_at=datetime.utcnow(),
+                    wallet_balance=0.0,
+                )
+                db.add(admin)
+            else:
+                admin.is_admin = True
+                admin.is_superadmin = True
+                admin.identity_status = "verified"
+                if not admin.public_name:
+                    admin.public_name = normalize_public_name(os.getenv("ADMIN_PUBLIC_NAME") or "admin")
+                if admin_password:
+                    admin.password = admin_password
+            default_admin = db.query(User).filter(User.email == "admin@lanceiocerto.local").first()
+            if default_admin and default_admin.email != admin_email:
+                default_admin.is_admin = False
+                default_admin.is_superadmin = False
+                default_admin.is_banned = True
+                default_admin.password = secrets.token_urlsafe(24)
             db.flush()
+        elif DATABASE_URL.startswith("sqlite"):
+            admin = db.query(User).filter(User.email == "admin@lanceiocerto.local").first()
+            if not admin:
+                admin = User(
+                    full_name="Administrador Principal",
+                    public_name="admin",
+                    email="admin@lanceiocerto.local",
+                    password="123456",
+                    cpf="000.000.000-00",
+                    phone="(00) 00000-0000",
+                    cep="14000-000",
+                    street="Rua Principal",
+                    number="100",
+                    district="Centro",
+                    city="Ribeirão Preto",
+                    state="SP",
+                    is_admin=True,
+                    is_superadmin=True,
+                    identity_status="verified",
+                    wallet_balance=500.0,
+                )
+                db.add(admin)
+                db.flush()
 
         if db.query(AuctionItem).count() == 0:
             now = datetime.utcnow()
@@ -1197,7 +1225,7 @@ def register_page(request: Request):
 def register(
     request: Request,
     full_name: str = Form(...),
-    nickname: str = Form(...),
+    public_name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
     cpf: str = Form(""),
@@ -1211,24 +1239,23 @@ def register(
 ):
     db = SessionLocal()
     try:
-        nick = clean_nickname(nickname)
-        if len(nick) < 3:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Escolha um apelido com pelo menos 3 caracteres."})
+        clean_public_name = normalize_public_name(public_name)
+        if len(clean_public_name) < 3:
+            return templates.TemplateResponse("register.html", {"request": request, "error": "Escolha um apelido público com pelo menos 3 caracteres."})
         exists = db.query(User).filter(User.email == email.strip().lower()).first()
         if exists:
             return templates.TemplateResponse("register.html", {"request": request, "error": "E-mail já cadastrado."})
-        nick_exists = db.query(User).filter(User.nickname == nick).first()
-        if nick_exists:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Este apelido já está em uso. Escolha outro."})
-        cpf_clean = cpf.strip()
-        if cpf_clean and db.query(User).filter(User.cpf == cpf_clean).first():
+        if db.query(User).filter(User.public_name == clean_public_name).first():
+            return templates.TemplateResponse("register.html", {"request": request, "error": "Este apelido público já está em uso."})
+        clean_cpf = cpf.strip()
+        if clean_cpf and db.query(User).filter(User.cpf == clean_cpf).first():
             return templates.TemplateResponse("register.html", {"request": request, "error": "CPF já cadastrado."})
         user = User(
             full_name=full_name.strip(),
-            nickname=nick,
+            public_name=clean_public_name,
             email=email.strip().lower(),
             password=password.strip(),
-            cpf=cpf_clean,
+            cpf=cpf.strip(),
             phone=phone.strip(),
             cep=cep.strip(),
             street=street.strip(),
@@ -1437,7 +1464,7 @@ def send_chat(request: Request, auction_id: int, message: str = Form(...)):
         db.refresh(msg)
         payload = {
             "type": "chat_message",
-            "message": {"author": display_user_name(user), "text": msg.message, "created_at": msg.created_at.strftime("%H:%M:%S")},
+            "message": {"author": public_user_name(user), "text": msg.message, "created_at": msg.created_at.strftime("%H:%M:%S")},
         }
     finally:
         db.close()
@@ -1681,7 +1708,7 @@ def build_finished_auctions(db: Session) -> list[dict]:
         result = BR(final_price + fees_total + (final_price if order and order.status in ["paid", "processing", "purchased", "sent", "delivered"] else 0.0) - source_price)
         rows.append({
             "title": item.title,
-            "winner_name": display_user_name(item.winner) if item.winner else "",
+            "winner_name": public_user_name(item.winner) if item.winner else "",
             "source_price": source_price,
             "final_price": final_price,
             "fees_total": fees_total,
@@ -1714,7 +1741,7 @@ def admin_dashboard(request: Request):
         users_query = db.query(User)
         if search:
             like = f"%{search}%"
-            users_query = users_query.filter((User.full_name.ilike(like)) | (User.nickname.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
+            users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
         users = users_query.order_by(desc(User.created_at)).limit(200).all()
         items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).all()
         for item in items:

@@ -337,7 +337,7 @@
                   <td>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</td>
                   <td>{{ item.turbo_level }}</td>
                   <td>{{ item.collected_percent if item.collected_percent is defined else '—' }}%</td>
-                  <td>{% if item.winner %}{{ display_user_name(item.winner) }}{% else %}—{% endif %}</td>
+                  <td>{% if item.winner %}{{ item.winner.full_name }}{% else %}—{% endif %}</td>
                   <td>
                     <div class="admin-action-stack admin-action-grid-pro">
                       <form method="post" action="/admin/item/{{ item.id }}/start-now" class="inline-form"><button class="btn small" type="submit">Começar</button></form>
@@ -410,7 +410,7 @@
                 {% if o.status == 'pending_payment' %}
                 <tr>
                   <td>{{ o.auction.title }}</td>
-                  <td>{{ display_user_name(o.user) }}</td>
+                  <td>{{ o.user.full_name }}</td>
                   <td>{{ o.user.email }}</td>
                   <td>{{ o.user.phone or '—' }}</td>
                   <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
@@ -451,7 +451,7 @@
                 {% if o.status in ['paid', 'processing', 'purchased'] %}
                 <tr>
                   <td>{{ o.auction.title }}</td>
-                  <td>{{ display_user_name(o.user) }}<br><small>{{ o.user.email }}</small></td>
+                  <td>{{ o.user.full_name }}<br><small>{{ o.user.email }}</small></td>
                   <td>{{ o.user.cpf or '—' }}</td>
                   <td>{{ o.user.phone or '—' }}</td>
                   <td>
@@ -507,7 +507,7 @@
               <tbody>
                 {% for u in users %}
                 <tr class="user-summary-row" data-user-panel="user-panel-{{ u.id }}">
-                  <td><button class="link-button admin-user-toggle" type="button" data-user-panel="user-panel-{{ u.id }}">{{ display_user_name(u) }}</button></td>
+                  <td><button class="link-button admin-user-toggle" type="button" data-user-panel="user-panel-{{ u.id }}">{{ u.full_name }}</button></td>
                   <td>{{ u.email }}</td>
                   <td>{{ u.cpf or '—' }}</td>
                   <td>R$ {{ '%.2f'|format(u.wallet_balance)|replace('.', ',') }}</td>
@@ -519,7 +519,7 @@
                   <td colspan="7">
                     <div class="admin-user-detail-card">
                       <div class="profile-grid">
-                        <div><span>Nome</span><strong>{{ display_user_name(u) }}</strong></div>
+                        <div><span>Nome</span><strong>{{ u.full_name }}</strong></div>
                         <div><span>E-mail</span><strong>{{ u.email }}</strong></div>
                         <div><span>CPF</span><strong>{{ u.cpf or '—' }}</strong></div>
                         <div><span>Telefone</span><strong>{{ u.phone or '—' }}</strong></div>
@@ -626,7 +626,7 @@
                   <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}">
                   <div>
                     <h3>{{ o.auction.title }}</h3>
-                    <p><strong>Ganhador:</strong> {{ display_user_name(o.user) }} • {{ o.user.email }}</p>
+                    <p><strong>Ganhador:</strong> {{ o.user.full_name }} • {{ o.user.email }}</p>
                     <p><strong>Status:</strong> {{ o.status }} • <strong>Valor:</strong> R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
                     <p><strong>Arrematado em:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
                   </div>
@@ -637,7 +637,7 @@
                   <div class="order-detail-grid">
                     <div class="panel-card mini-detail-card">
                       <h4>Cliente</h4>
-                      <p><strong>Nome:</strong> {{ display_user_name(o.user) }}</p>
+                      <p><strong>Nome:</strong> {{ o.user.full_name }}</p>
                       <p><strong>E-mail:</strong> {{ o.user.email }}</p>
                       <p><strong>CPF:</strong> {{ o.user.cpf or '—' }}</p>
                       <p><strong>Telefone:</strong> {{ o.user.phone or '—' }}</p>
@@ -711,7 +711,7 @@
                     <div class="direct-message-box">
                       {% for msg in card.messages %}
                       <div class="direct-message-line {% if not msg.is_open %}closed{% endif %}">
-                        <strong>{{ display_user_name(msg.admin) if msg.admin else 'Admin' }}</strong>
+                        <strong>{{ msg.admin.full_name if msg.admin else 'Admin' }}</strong>
                         <span>{{ msg.created_at.strftime('%d/%m/%Y %H:%M') if msg.created_at else '—' }}</span>
                         <p>{{ msg.message }}</p>
                         {% if not msg.is_open %}<small>Atendimento fechado</small>{% endif %}

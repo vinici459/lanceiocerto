@@ -1,85 +1,47 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="register-pro-wrap">
-  <div class="register-pro-shell">
-    <aside class="register-pro-copy">
-      <span class="register-pro-badge">Cadastro seguro</span>
+<section class="register-pro-shell">
+  <div class="register-pro-card">
+    <div class="register-pro-left">
+      <span class="eyebrow">Cadastro seguro</span>
       <h1>Crie sua conta no Lancei o Certo</h1>
-      <p>Use dados reais para participar dos leilões, receber produtos, acompanhar pagamentos e manter seu histórico organizado.</p>
-      <div class="register-pro-list">
-        <div><strong>Apelido público</strong><span>Esse será o nome exibido nos lances, vencedores e ranking da página principal.</span></div>
-        <div><strong>Dados de entrega</strong><span>Endereço completo para agilizar o envio quando você vencer um produto.</span></div>
-        <div><strong>Conta protegida</strong><span>Depois o admin poderá conferir seus documentos e liberar o selo de conta verificada.</span></div>
+      <p>Use um apelido público para participar dos leilões sem expor seu nome completo. Seus dados pessoais ficam reservados para verificação, pagamentos e entrega.</p>
+      <div class="trust-list">
+        <div><strong>🔐 Identidade protegida</strong><span>O público verá apenas seu apelido.</span></div>
+        <div><strong>🏷️ Participação transparente</strong><span>Lances, chat e vencedores aparecem com @apelido.</span></div>
+        <div><strong>📦 Dados para entrega</strong><span>Endereço usado somente quando houver compra/envio.</span></div>
       </div>
-    </aside>
+    </div>
 
-    <form class="register-pro-card" method="post" action="/register" autocomplete="on">
-      <div class="register-pro-head">
-        <h2>Nova conta</h2>
-        <p>Preencha com atenção. O apelido é público; seus dados pessoais ficam para conferência interna.</p>
-      </div>
-
+    <form class="register-pro-form" method="post" action="/register">
+      <h2>Dados de acesso</h2>
       {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-
-      <div class="form-section-title"><h3>Acesso</h3><p>Informações usadas para entrar e aparecer nos leilões.</p></div>
       <div class="grid-2">
         <label>Nome completo<input name="full_name" placeholder="Seu nome completo" required></label>
-        <label>Apelido público<input name="nickname" placeholder="Ex: vinicius10" minlength="3" maxlength="30" pattern="[A-Za-z0-9._-]{3,30}" required><small>Use letras, números, ponto, hífen ou underline. Exibido como @apelido.</small></label>
+        <label>Apelido público<input name="public_name" placeholder="ex: vinici459" minlength="3" maxlength="24" required><small>Aparecerá como @apelido nos leilões.</small></label>
         <label>E-mail<input type="email" name="email" placeholder="voce@email.com" required></label>
-        <label>Senha<input type="password" name="password" placeholder="Crie uma senha" minlength="6" required></label>
+        <label>Senha<input type="password" name="password" placeholder="Crie uma senha segura" minlength="6" required></label>
       </div>
 
-      <div class="form-section-title"><h3>Identificação</h3><p>Esses dados ajudam o painel admin a validar a conta e evitar duplicidade.</p></div>
+      <h2>Dados pessoais</h2>
       <div class="grid-2">
         <label>CPF<input name="cpf" placeholder="000.000.000-00"></label>
         <label>Telefone<input name="phone" placeholder="(00) 00000-0000"></label>
       </div>
 
-      <div class="form-section-title"><h3>Endereço de entrega</h3><p>Usado quando você vencer um leilão e o produto for enviado.</p></div>
+      <h2>Endereço</h2>
       <div class="grid-2">
         <label>CEP<input name="cep" placeholder="00000-000"></label>
         <label>Rua<input name="street" placeholder="Nome da rua"></label>
         <label>Número<input name="number" placeholder="Nº"></label>
         <label>Bairro<input name="district" placeholder="Bairro"></label>
         <label>Cidade<input name="city" placeholder="Cidade"></label>
-        <label>Estado<input name="state" placeholder="UF" maxlength="2"></label>
-      </div>
-
-      <div class="register-terms-box">
-        <strong>Importante</strong>
-        <span>Ao criar a conta, você confirma que os dados informados são verdadeiros e aceita que o apelido escolhido apareça publicamente nos leilões.</span>
+        <label>Estado<input name="state" placeholder="UF"></label>
       </div>
 
       <button class="btn full" type="submit">Criar minha conta</button>
-      <p class="form-footer">Na versão de teste, novas contas recebem R$ 20,00 de saldo inicial.</p>
+      <p class="form-footer">Ao criar a conta, você concorda em usar informações verdadeiras para segurança das compras, entregas e eventuais verificações.</p>
     </form>
   </div>
 </section>
-
-<style>
-  .register-pro-wrap{padding:34px 18px;min-height:calc(100vh - 84px);background:radial-gradient(circle at top left,rgba(59,130,246,.20),transparent 30%),linear-gradient(135deg,#071124,#0b1530 55%,#06101f)}
-  .register-pro-shell{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:.92fr 1.25fr;gap:22px;align-items:start}
-  .register-pro-copy,.register-pro-card{border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.84);box-shadow:0 24px 60px rgba(0,0,0,.28);border-radius:26px}
-  .register-pro-copy{padding:30px;position:sticky;top:94px;overflow:hidden}
-  .register-pro-copy:before{content:"";position:absolute;inset:auto -80px -100px auto;width:240px;height:240px;background:rgba(34,197,94,.16);filter:blur(10px);border-radius:999px}
-  .register-pro-badge{display:inline-flex;padding:8px 12px;border-radius:999px;background:rgba(59,130,246,.14);border:1px solid rgba(96,165,250,.35);color:#bfdbfe;font-weight:900;font-size:13px}
-  .register-pro-copy h1{font-size:42px;line-height:1.02;margin:18px 0 12px;color:#fff;letter-spacing:-1px}
-  .register-pro-copy p{color:#b7c6e6;line-height:1.55;margin:0 0 22px}
-  .register-pro-list{display:grid;gap:12px;position:relative;z-index:1}
-  .register-pro-list div,.register-terms-box{padding:14px;border-radius:18px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16)}
-  .register-pro-list strong,.register-pro-list span,.register-terms-box strong,.register-terms-box span{display:block}
-  .register-pro-list strong,.register-terms-box strong{color:#fff;margin-bottom:5px}
-  .register-pro-list span,.register-terms-box span{color:#b7c6e6;font-size:14px;line-height:1.45}
-  .register-pro-card{padding:24px}
-  .register-pro-head h2{font-size:30px;margin:0;color:#fff}
-  .register-pro-head p{color:#b7c6e6;margin:7px 0 18px;line-height:1.45}
-  .form-section-title{margin:18px 0 10px;padding-top:14px;border-top:1px solid rgba(148,163,184,.14)}
-  .form-section-title h3{margin:0;color:#fff;font-size:18px}
-  .form-section-title p{margin:4px 0 0;color:#b7c6e6;font-size:13px;line-height:1.4}
-  .register-pro-card label{font-weight:800;color:#dbeafe}
-  .register-pro-card input{margin-top:8px;background:rgba(255,255,255,.075);border:1px solid rgba(148,163,184,.22);border-radius:14px;color:#fff;padding:13px 14px}
-  .register-pro-card small{display:block;color:#93a4c4;margin-top:6px;font-size:12px;line-height:1.35}
-  .register-terms-box{margin:18px 0}
-  @media(max-width:900px){.register-pro-shell{grid-template-columns:1fr}.register-pro-copy{position:relative;top:0}.register-pro-copy h1{font-size:34px}}
-</style>
 {% endblock %}
