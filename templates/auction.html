@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="container auction-layout" data-auction-id="{{ item.id }}" id="auction-layout">
+  <div class="auction-main">
+    <img class="auction-image" src="{{ entity.image_url }}" alt="{{ entity.title }}">
+    <div class="auction-panel">
+      <div class="status-row">
+        <span class="status {{ item.status }}" id="auction-status">{{ item.status|upper }}</span>
+        {% if user and user.is_admin %}<span class="admin-chip">ADMIN</span>{% endif %}
+      </div>
+
+      <h1>{{ entity.title }}</h1>
+
+      <div class="price-box">
+        <div><span>Preço atual</span><strong id="current-price">R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}</strong></div>
+        <div><span>Preço original</span><strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></div>
+        <div>
+          <span id="countdown-label">{% if item.status in ['scheduled', 'relisted'] %}Começa em{% else %}Tempo restante{% endif %}</span>
+          <strong id="countdown" data-seconds="{% if item.status in ['scheduled', 'relisted'] %}{{ item.start_remaining }}{% else %}{{ item.remaining_seconds }}{% endif %}">--</strong>
+        </div>
+      </div>
+
+      <div class="meta-grid">
+        <div><span>Lances</span><strong id="bids-count">{{ item.bids_count }}</strong></div>
+        <div><span>Último lance</span><strong id="last-bidder">{{ item.last_bidder or '—' }}</strong></div>
+        <div><span>Taxa interna</span><strong>{{ item.bid_fee_percent }}%</strong></div>
+      </div>
+
+      {% if user and user.is_admin %}
+      <div class="strategy-card admin-only-strategy" id="strategy-card">
+        <div class="strategy-top">
+          <span id="turbo-badge" class="turbo-badge turbo-{{ item.turbo_level }}">{{ item.turbo_label }}</span>
+          <strong id="progress-label">{{ '%.2f'|format(item.progress_percent)|replace('.', ',') }}% arrecadado</strong>
+        </div>
+
+        <div class="progress-track">
+          <span id="progress-bar" style="width: {{ item.progress_percent if item.progress_percent < 100 else 100 }}%"></span>
+        </div>
+
+        <div class="strategy-marks">
+          <span>Normal</span>
+          <span>Turbo 2.0: {{ item.turbo_trigger_percent }}% ≈ R$ {{ '%.2f'|format(item.turbo_start_amount)|replace('.', ',') }}</span>
+          <span>Turbo 3.0: {{ item.turbo_level_3_percent }}% ≈ R$ {{ '%.2f'|format(item.turbo_level_3_amount)|replace('.', ',') }}</span>
+          <span>Turbo 4.0: {{ item.turbo_level_4_percent }}% ≈ R$ {{ '%.2f'|format(item.turbo_level_4_amount)|replace('.', ',') }}</span>
+        </div>
+
+        <p id="strategy-help">
+          Visível somente para admin. O turbo considera preço atual + taxas acumuladas. O vencedor paga apenas o preço final.
+        </p>
+        <p class="admin-fee-note">
+          Taxas acumuladas: <strong>R$ {{ '%.2f'|format(item.total_bid_fees)|replace('.', ',') }}</strong> •
+          Caixa antes do pagamento: <strong>R$ {{ '%.2f'|format(item.cash_reserved_before_payment)|replace('.', ',') }}</strong> •
+          Total se pago: <strong>R$ {{ '%.2f'|format(item.total_if_paid)|replace('.', ',') }}</strong> •
+          Resultado estimado: <strong>R$ {{ '%.2f'|format(item.expected_profit_if_paid)|replace('.', ',') }}</strong>
+        </p>
+      </div>
+      {% endif %}
+
+      <div id="turbo-announcement" class="turbo-announcement" aria-live="polite"></div>
+
+      {% if user %}
+        {% if item.status == 'live' %}
+        <form id="bid-form" class="bid-grid">
+          {% for v in allowed_bids %}
+          <button type="button" class="bid-btn" data-bid="{{ '%.2f'|format(v) }}">R$ {{ '%.2f'|format(v)|replace('.', ',') }}</button>
+          {% endfor %}
+        </form>
+        <p class="muted">Escolha o botão com estratégia: no normal existe força progressiva; no turbo cada valor define uma janela curta até o próximo lance.</p>
+        <div id="bid-feedback" class="bid-feedback" aria-live="polite"></div>
+        {% elif item.status in ['scheduled', 'relisted'] %}
+        <div class="alert scheduled-alert">Este leilão ainda não começou. A contagem regressiva está acima.</div>
+        {% else %}
+        <div class="alert">Este leilão não está em andamento neste momento.</div>
+        {% endif %}
+      {% else %}
+        <div class="alert">Faça login para participar do leilão.</div>
+      {% endif %}
+
+      {% if item.cashback.available %}
+      <div class="strategy-card cashback-card" id="cashback-card">
+        <div class="strategy-top">
+          <span class="turbo-badge">🎁 Cashback do leilão</span>
+          <strong id="cashback-status">
+            {% if item.cashback.status == 'open' %}
+              Participe em até <span id="cashback-countdown" data-seconds="{{ item.cashback.join_remaining_seconds }}">--</span>
+            {% elif item.cashback.status == 'drawn' %}
+              Sorteado: {{ item.cashback.winner_name or '—' }}
+            {% else %}
+              Encerrado
+            {% endif %}
+          </strong>
+        </div>
+        {% if item.cashback.status == 'open' %}
+          {% if item.cashback.joined %}
+            <p>Você já entrou no sorteio. Se for sorteado, recebe de volta o valor usado somente neste leilão.</p>
+          {% else %}
+            <p>Quem participou deste leilão pode entrar no sorteio aleatório para receber de volta o valor usado somente neste leilão.</p>
+            <button class="btn full" type="button" id="join-cashback-btn">Participar do sorteio de cashback</button>
+          {% endif %}
+        {% elif item.cashback.status == 'drawn' %}
+          <p>Vencedor público do cashback: <strong>{{ item.cashback.winner_name or '—' }}</strong>. Valor: <strong>R$ {{ '%.2f'|format(item.cashback.cashback_amount)|replace('.', ',') }}</strong>.</p>
+        {% else %}
+          <p>O prazo de participação foi encerrado.</p>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if user and user.is_admin %}
+      <div class="panel-card admin-actions-card">
+        <h2>Ações do admin</h2>
+        <div class="inline-form">
+          {% if entity.status != 'live' %}
+          <form method="post" action="/admin/item/{{ entity.id }}/start-now"><button class="btn small">Começar agora</button></form>
+          {% endif %}
+          <form method="post" action="/admin/item/{{ entity.id }}/toggle-chat">
+            <button class="btn small ghost">{% if entity.chat_paused %}Iniciar chat{% else %}Pausar chat{% endif %}</button>
+          </form>
+          {% if entity.status != 'live' %}
+          <form method="post" action="/admin/item/{{ entity.id }}/delete"><button class="btn small danger">Excluir leilão</button></form>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <aside class="chat-card">
+    <h2>Chat deste produto</h2>
+    <p class="chat-note">Cada produto possui seu próprio chat.</p>
+    {% if entity.chat_paused %}<div class="alert">O chat está pausado pelo administrador.</div>{% endif %}
+    <div id="chat-messages" class="chat-messages">
+      {% for msg in chat_messages %}
+      <div class="chat-line"><strong>{{ display_user_name(msg.user) }}</strong> <span>{{ msg.created_at.strftime('%H:%M:%S') }}</span><p>{{ msg.message }}</p></div>
+      {% endfor %}
+    </div>
+    {% if user %}
+    <form id="chat-form" class="chat-form">
+      <input type="text" name="message" maxlength="250" placeholder="Digite sua mensagem..." />
+      <button class="btn small" type="submit">Enviar</button>
+    </form>
+    {% else %}
+    <div class="muted">Entre na conta para participar do chat.</div>
+    {% endif %}
+  </aside>
+</section>
+
+<section class="container product-details-section">
+  <div class="product-details-card">
+    <h2>Descrição e referência do produto</h2>
+    <p>{{ entity.description or 'O vendedor ainda não inseriu uma descrição detalhada para este produto.' }}</p>
+
+    <div class="product-reference-grid">
+      <div>
+        <span>Loja de referência</span>
+        <strong>{{ entity.source_store or '—' }}</strong>
+      </div>
+      <div>
+        <span>Preço original usado no cálculo</span>
+        <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong>
+      </div>
+      {% if entity.source_url %}
+      <div class="reference-link-box">
+        <span>Link de referência</span>
+        <a href="{{ entity.source_url }}" target="_blank" rel="noopener noreferrer">{{ entity.source_url }}</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<style>
+.strategy-card{
+  margin:16px 0;
+  padding:14px;
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:18px;
+  background:linear-gradient(135deg,rgba(15,23,42,.84),rgba(30,41,59,.58));
+}
+.strategy-top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px}
+.turbo-badge{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;font-weight:900;border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.06)}
+.turbo-2,.turbo-3,.turbo-4{animation:turboPulse 1.1s ease-in-out infinite alternate}
+.turbo-2{color:#fbbf24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.12)}
+.turbo-3{color:#fb7185;border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.12)}
+.turbo-4{color:#f97316;border-color:rgba(249,115,22,.55);background:rgba(249,115,22,.16)}
+.progress-track{height:11px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+.progress-track span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#22c55e,#fbbf24,#f97316);transition:width .4s ease}
+.strategy-marks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px;color:#b7c6e6;font-size:12px}
+.strategy-card p{margin:10px 0 0;color:#b7c6e6;line-height:1.45}
+.bid-feedback{min-height:22px;margin-top:8px;font-weight:800;color:#fbbf24}
+.bid-btn.cooling{opacity:.55;cursor:not-allowed;filter:grayscale(.15)}
+.chat-note{margin-top:-8px;color:#b7c6e6;font-size:13px}
+.scheduled-alert{border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.09)}
+.turbo-announcement{
+  display:none;
+  margin:14px 0;
+  padding:14px;
+  border-radius:16px;
+  text-align:center;
+  font-weight:950;
+  letter-spacing:.02em;
+  border:1px solid rgba(251,191,36,.35);
+  background:linear-gradient(135deg,rgba(251,191,36,.12),rgba(249,115,22,.12));
+}
+.turbo-announcement.active{display:block;animation:turboAnnouncement 1.8s ease both}
+.auction-layout.turbo-screen-flash{animation:turboScreenFlash 1.15s ease both}
+.product-details-section{margin-top:18px;margin-bottom:30px}
+.product-details-card{
+  border:1px solid rgba(148,163,184,.18);
+  border-radius:22px;
+  background:rgba(15,23,42,.86);
+  padding:22px;
+  box-shadow:0 18px 42px rgba(0,0,0,.22);
+}
+.product-details-card h2{margin:0 0 10px}
+.product-details-card p{color:#dbeafe;line-height:1.55}
+.product-reference-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+.product-reference-grid>div{border:1px solid rgba(148,163,184,.18);border-radius:16px;padding:14px;background:rgba(255,255,255,.035)}
+.product-reference-grid span{display:block;color:#b7c6e6;font-size:13px;margin-bottom:6px}
+.product-reference-grid a{color:#93c5fd;word-break:break-all;font-weight:800}
+.reference-link-box{grid-column:span 3}
+@keyframes turboPulse{from{transform:scale(1)}to{transform:scale(1.035);box-shadow:0 0 22px rgba(251,191,36,.20)}}
+@keyframes turboScreenFlash{0%{filter:brightness(1)}35%{filter:brightness(1.22)}100%{filter:brightness(1)}}
+@keyframes turboAnnouncement{0%{transform:scale(.96);opacity:0}25%{transform:scale(1.02);opacity:1}100%{transform:scale(1);opacity:1}}
+@media(max-width:760px){
+  .strategy-marks{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .strategy-top{align-items:flex-start;flex-direction:column}
+  .product-reference-grid{grid-template-columns:1fr}
+  .reference-link-box{grid-column:auto}
+}
+</style>
+
+<script>
+window.__AUCTION__ = {{ item | tojson }};
+(function(){
+  const auctionId = document.querySelector("[data-auction-id]")?.dataset.auctionId;
+  const layout = document.getElementById("auction-layout");
+  const countdown = document.getElementById("countdown");
+  const countdownLabel = document.getElementById("countdown-label");
+  const currentPrice = document.getElementById("current-price");
+  const bidsCount = document.getElementById("bids-count");
+  const lastBidder = document.getElementById("last-bidder");
+  const statusEl = document.getElementById("auction-status");
+  const progressLabel = document.getElementById("progress-label");
+  const progressBar = document.getElementById("progress-bar");
+  const turboBadge = document.getElementById("turbo-badge");
+  const strategyCard = document.getElementById("strategy-card");
+  const turboAnnouncement = document.getElementById("turbo-announcement");
+  const feedback = document.getElementById("bid-feedback");
+  const cooldowns = {};
+  let auction = window.__AUCTION__ || {};
+  let remaining = Number((auction.status === "scheduled" || auction.status === "relisted") ? auction.start_remaining : auction.remaining_seconds || 0);
+  let lastTurbo = 0;
+  let turboAlreadyAnnounced = false;
+
+  function bidKey(value){ return Number(value || 0).toFixed(2); }
+  function cooldownForBid(value){ return bidKey(value) === "0.10" ? 10 : 30; }
+  function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
+
+  function timeLabel(total){
+    total = Math.max(0, Math.ceil(Number(total || 0)));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if(h > 0) return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  }
+
+  function renderBidButton(btn){
+    const key = bidKey(btn.dataset.bid);
+    const seconds = Number(cooldowns[key] || 0);
+    if(seconds > 0) {
+      btn.disabled = true;
+      btn.classList.add("cooling");
+      btn.textContent = `${moneyBR(key)} • ${seconds}s`;
+    } else {
+      btn.disabled = false;
+      btn.classList.remove("cooling");
+      btn.textContent = moneyBR(key);
+    }
+  }
+
+  function startButtonCooldown(value){
+    const key = bidKey(value);
+    cooldowns[key] = cooldownForBid(key);
+    const btn = document.querySelector(`.bid-btn[data-bid="${key}"]`);
+    if(btn) renderBidButton(btn);
+  }
+
+  function showTurboAnimation(level){
+    const label = level === 4 ? "🔥 TURBO 4.0 ATIVADO" : level === 3 ? "⚡ TURBO 3.0 ATIVADO" : "🚀 TURBO 2.0 ATIVADO";
+    if(turboAnnouncement) {
+      turboAnnouncement.textContent = label;
+      turboAnnouncement.classList.remove("active");
+      void turboAnnouncement.offsetWidth;
+      turboAnnouncement.classList.add("active");
+    }
+    if(layout) {
+      layout.classList.remove("turbo-screen-flash");
+      void layout.offsetWidth;
+      layout.classList.add("turbo-screen-flash");
+    }
+    if(strategyCard) {
+      strategyCard.classList.remove("turbo-flash");
+      void strategyCard.offsetWidth;
+      strategyCard.classList.add("turbo-flash");
+    }
+  }
+
+  function renderAuction(data){
+    auction = data || auction;
+    const isScheduled = auction.status === "scheduled" || auction.status === "relisted";
+    remaining = Number(isScheduled ? auction.start_remaining : auction.remaining_seconds || 0);
+
+    if(countdownLabel) countdownLabel.textContent = isScheduled ? "Começa em" : "Tempo restante";
+    if(currentPrice) currentPrice.textContent = moneyBR(auction.current_price);
+    if(bidsCount) bidsCount.textContent = auction.bids_count ?? "0";
+    if(lastBidder) lastBidder.textContent = auction.last_bidder || "—";
+    if(statusEl) {
+      statusEl.textContent = String(auction.status || "").toUpperCase();
+      statusEl.className = "status " + (auction.status || "");
+    }
+
+    if(progressLabel) progressLabel.textContent = `${Number(auction.progress_percent || 0).toFixed(2).replace(".", ",")}% arrecadado`;
+    if(progressBar) progressBar.style.width = `${Math.min(100, Number(auction.progress_percent || 0))}%`;
+
+    const level = Number(auction.turbo_level || 0);
+    if(turboBadge) {
+      turboBadge.textContent = auction.turbo_label || (level ? `Turbo ${level}.0` : "Modo Normal");
+      turboBadge.className = `turbo-badge turbo-${level}`;
+    }
+    if(level >= 2 && (level !== lastTurbo || !turboAlreadyAnnounced)) {
+      showTurboAnimation(level);
+      turboAlreadyAnnounced = true;
+    }
+    lastTurbo = level;
+  }
+
+  setInterval(() => {
+    if(remaining > 0) remaining -= 1;
+    if(countdown) countdown.textContent = timeLabel(remaining);
+
+    Object.keys(cooldowns).forEach((key) => {
+      if(cooldowns[key] > 0) cooldowns[key] -= 1;
+      const btn = document.querySelector(`.bid-btn[data-bid="${key}"]`);
+      if(btn) renderBidButton(btn);
+    });
+  }, 1000);
+
+  document.querySelectorAll(".bid-btn").forEach((btn) => {
+    btn.dataset.bid = bidKey(btn.dataset.bid);
+    renderBidButton(btn);
+
+    btn.addEventListener("click", async () => {
+      const value = bidKey(btn.dataset.bid);
+      if(Number(cooldowns[value] || 0) > 0) return;
+
+      const form = new FormData();
+      form.append("bid_value", value);
+      btn.disabled = true;
+      btn.classList.add("cooling");
+      if(feedback) feedback.textContent = "Enviando lance...";
+      try {
+        const res = await fetch(`/api/auction/${auctionId}/bid`, {method:"POST", body:form});
+        const json = await res.json().catch(() => ({}));
+        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
+        renderAuction(json.auction);
+        startButtonCooldown(value);
+        if(feedback) feedback.textContent = `Lance registrado. Esse botão libera em ${cooldownForBid(value)}s.`;
+      } catch(err) {
+        cooldowns[value] = 0;
+        renderBidButton(btn);
+        if(feedback) feedback.textContent = err.message || "Erro ao enviar lance.";
+      }
+    });
+  });
+
+  if(auctionId) {
+    const protocol = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${protocol}://${location.host}/ws/auction/${auctionId}`);
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if(payload.type === "auction_update") renderAuction(payload.auction);
+        if(payload.type === "chat_message") {
+          const box = document.getElementById("chat-messages");
+          if(box) {
+            const line = document.createElement("div");
+            line.className = "chat-line";
+            line.innerHTML = `<strong>${payload.message.author}</strong> <span>${payload.message.created_at}</span><p>${payload.message.text}</p>`;
+            box.appendChild(line);
+            box.scrollTop = box.scrollHeight;
+          }
+        }
+      } catch(e){}
+    };
+  }
+
+  const cashbackCountdown = document.getElementById("cashback-countdown");
+  let cashbackRemaining = Number(cashbackCountdown?.dataset.seconds || 0);
+  if(cashbackCountdown) {
+    setInterval(() => {
+      if(cashbackRemaining > 0) cashbackRemaining -= 1;
+      cashbackCountdown.textContent = timeLabel(cashbackRemaining);
+    }, 1000);
+  }
+
+  const joinCashbackBtn = document.getElementById("join-cashback-btn");
+  if(joinCashbackBtn) {
+    joinCashbackBtn.addEventListener("click", async () => {
+      joinCashbackBtn.disabled = true;
+      joinCashbackBtn.textContent = "Entrando no sorteio...";
+      try {
+        const res = await fetch(`/api/auction/${auctionId}/cashback/join`, {method:"POST"});
+        const json = await res.json().catch(() => ({}));
+        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível entrar no cashback.");
+        joinCashbackBtn.textContent = "Você já está participando";
+      } catch(err) {
+        joinCashbackBtn.disabled = false;
+        joinCashbackBtn.textContent = err.message || "Tentar novamente";
+      }
+    });
+  }
+
+  const chatForm = document.getElementById("chat-form");
+  if(chatForm) {
+    chatForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = chatForm.querySelector("input[name='message']");
+      const text = (input?.value || "").trim();
+      if(!text) return;
+      const form = new FormData();
+      form.append("message", text);
+      const res = await fetch(`/api/auction/${auctionId}/chat`, {method:"POST", body:form});
+      if(res.ok && input) input.value = "";
+    });
+  }
+
+  renderAuction(auction);
+})();
+</script>
+{% endblock %}

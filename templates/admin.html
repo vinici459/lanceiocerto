@@ -1,0 +1,962 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="container account-page admin-page-pro admin-production-page">
+  <div class="account-layout admin-layout-pro">
+    <aside class="account-sidebar admin-sidebar-clean admin-production-sidebar">
+      <div class="admin-sidebar-top">
+        <span class="admin-badge">⚙️ Painel Admin</span>
+        <h2>Controle Geral</h2>
+        <p>Gestão profissional de leilões, caixa, usuários e operação.</p>
+      </div>
+
+      <button class="side-link admin-link active" data-target="admin-dashboard" type="button">Resumo Geral</button>
+      <button class="side-link admin-link" data-target="admin-cashflow" type="button">Fluxo de Caixa</button>
+      <button class="side-link admin-link" data-target="admin-product" type="button">Cadastrar Produto</button>
+      <button class="side-link admin-link" data-target="admin-returned" type="button">Produtos Retornados</button>
+      <button class="side-link admin-link" data-target="admin-auctions" type="button">Gerenciar Leilões</button>
+      <button class="side-link admin-link" data-target="admin-finished" type="button">Leilões Finalizados</button>
+      <button class="side-link admin-link" data-target="admin-pending-payments" type="button">Leilões Pendentes</button>
+      <button class="side-link admin-link" data-target="admin-shipping" type="button">Envios Pendentes</button>
+      <button class="side-link admin-link" data-target="admin-users" type="button">Usuários</button>
+      <button class="side-link admin-link" data-target="admin-withdrawals" type="button">Saques</button>
+      <button class="side-link admin-link" data-target="admin-tickets" type="button">Chamados/Disputas</button>
+      <button class="side-link admin-link" data-target="admin-suggestions" type="button">Indicações</button>
+      <button class="side-link admin-link" data-target="admin-search-orders" type="button">Consulta</button>
+      <button class="side-link admin-link" data-target="admin-moderation" type="button">Moderação</button>
+    </aside>
+
+    <div class="account-content admin-content-clean admin-production-content">
+      <section id="admin-dashboard" class="admin-panel active">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Resumo Geral</h1>
+            <p>Visão executiva da operação, com indicadores de leilões, usuários, caixa e risco financeiro.</p>
+          </div>
+          <button class="btn small admin-open-tab" data-target="admin-cashflow" type="button">Abrir fluxo de caixa</button>
+        </div>
+
+        <div class="stats-grid account-stats admin-stats-pro admin-kpi-grid">
+          <div class="stat"><span>Usuários cadastrados</span><strong>{{ stats.users }}</strong><small>Total de contas criadas</small></div>
+          <div class="stat"><span>Usuários ativos</span><strong>{{ stats.active_users if stats.active_users is defined else '—' }}</strong><small>Com acesso ou atividade recente</small></div>
+          <div class="stat"><span>Ao vivo</span><strong>{{ stats.live }}</strong><small>Leilões em disputa</small></div>
+          <div class="stat"><span>Próximos</span><strong>{{ stats.scheduled }}</strong><small>Leilões agendados</small></div>
+          <div class="stat"><span>Pagamentos pendentes</span><strong>{{ stats.pending_payment }}</strong><small>Vencedores aguardando pagamento</small></div>
+          <div class="stat"><span>Encerrados</span><strong>{{ stats.completed }}</strong><small>Leilões já finalizados</small></div>
+          <div class="stat"><span>Identidades pendentes</span><strong>{{ stats.identity_pending if stats.identity_pending is defined else 0 }}</strong><small>Documentos para conferência</small></div>
+          <div class="stat"><span>Saques pendentes</span><strong>{{ stats.pending_withdrawals if stats.pending_withdrawals is defined else 0 }}</strong><small>Solicitações aguardando admin</small></div>
+          <div class="stat"><span>Chamados abertos</span><strong>{{ stats.open_tickets if stats.open_tickets is defined else 0 }}</strong><small>Disputas ou suporte</small></div>
+        </div>
+
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat finance-card positive"><span>Taxas arrecadadas</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita gerada pelos lances</small></div>
+          <div class="stat finance-card"><span>Pagamentos recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Valores pagos por vencedores</small></div>
+          <div class="stat finance-card warning"><span>Saldo dos usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong><small>Valor em custódia dos clientes</small></div>
+          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Compra/envio de produtos</small></div>
+          <div class="stat finance-card"><span>Lucro estimado</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit if finance is defined and finance.estimated_profit is defined else 0)|replace('.', ',') }}</strong><small>Resultado operacional estimado</small></div>
+          <div class="stat finance-card danger"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Produtos vendidos abaixo do equilíbrio</small></div>
+        </div>
+
+        <div class="notice-grid admin-overview-grid">
+          <div class="panel-card admin-card-pro">
+            <div class="card-title-row"><h2>Saúde da operação</h2><span class="pill-soft">Auditoria</span></div>
+            <div class="profile-grid">
+              <div><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong></div>
+              <div><span>Reservado para usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong></div>
+              <div><span>Produtos aguardando compra</span><strong>{{ stats.pending_shipping if stats.pending_shipping is defined else '—' }}</strong></div>
+              <div><span>Produtos retornados</span><strong>{{ stats.returned_products if stats.returned_products is defined else '—' }}</strong></div>
+            </div>
+          </div>
+
+          <div class="panel-card admin-card-pro">
+            <div class="card-title-row"><h2>Alertas importantes</h2><span class="pill-soft warn">Atenção</span></div>
+            <div class="admin-alert-list">
+              <div><strong>Pagamentos pendentes</strong><span>{{ stats.pending_payment }} leilões aguardando pagamento.</span></div>
+              <div><strong>Envios pendentes</strong><span>{{ stats.pending_shipping if stats.pending_shipping is defined else '—' }} produtos pagos aguardando envio.</span></div>
+              <div><strong>Controle de risco</strong><span>Revise lucro/prejuízo antes de relançar produtos retornados.</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-cashflow" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Fluxo de Caixa</h1>
+            <p>Controle rigoroso de entradas, saídas, taxas, pagamentos autorizados, saldo em custódia e resultado por leilão.</p>
+          </div>
+        </div>
+
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat"><span>Total de entradas</span><strong>R$ {{ '%.2f'|format(finance.total_income if finance is defined and finance.total_income is defined else 0)|replace('.', ',') }}</strong><small>Taxas + pagamentos</small></div>
+          <div class="stat"><span>Total de saídas</span><strong>R$ {{ '%.2f'|format(finance.total_outgoing if finance is defined and finance.total_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Compras, envios e ajustes</small></div>
+          <div class="stat"><span>Taxas de lance</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita da plataforma</small></div>
+          <div class="stat"><span>Resultado líquido</span><strong>R$ {{ '%.2f'|format(finance.net_result if finance is defined and finance.net_result is defined else 0)|replace('.', ',') }}</strong><small>Entradas - saídas</small></div>
+          <div class="stat"><span>Saques pendentes</span><strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong><small>Dinheiro solicitado pelos usuários</small></div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Movimentações financeiras</h2><span class="pill-soft">Contabilidade</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Entrada</th><th>Saída</th><th>Saldo</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for m in cashflow_movements if cashflow_movements is defined %}
+                <tr>
+                  <td>{{ m.created_at.strftime('%d/%m/%Y %H:%M') if m.created_at else '—' }}</td>
+                  <td>{{ m.type }}</td>
+                  <td>{{ m.description }}</td>
+                  <td>{% if m.amount > 0 %}R$ {{ '%.2f'|format(m.amount)|replace('.', ',') }}{% else %}—{% endif %}</td>
+                  <td>{% if m.amount < 0 %}R$ {{ '%.2f'|format((m.amount * -1))|replace('.', ',') }}{% else %}—{% endif %}</td>
+                  <td>R$ {{ '%.2f'|format(m.balance_after if m.balance_after is defined else 0)|replace('.', ',') }}</td>
+                  <td>{{ m.status }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7">Nenhuma movimentação financeira registrada ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Resultado por leilão</h2><span class="pill-soft">Produto a produto</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Preço original</th><th>Valor pago pelo vencedor</th><th>Taxas arrecadadas</th><th>Complemento do site</th><th>Resultado</th><th>Situação</th></tr></thead>
+              <tbody>
+                {% for r in auction_results if auction_results is defined %}
+                <tr>
+                  <td>{{ r.title }}</td>
+                  <td>R$ {{ '%.2f'|format(r.source_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.final_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.fees_total)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.site_complement)|replace('.', ',') }}</td>
+                  <td class="{% if r.result >= 0 %}positive-text{% else %}danger-text{% endif %}">R$ {{ '%.2f'|format(r.result)|replace('.', ',') }}</td>
+                  <td>{{ r.status_label }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7">Nenhum resultado por leilão disponível ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-product" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Cadastrar Produto</h1>
+            <p>Cadastro avançado com agendamento, calendário, regras de turbo, margem mínima e controle financeiro do produto.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <form class="form-card no-shadow admin-advanced-form" method="post" action="/admin/item/create" enctype="multipart/form-data">
+            <div class="form-section-title"><h2>Dados principais</h2><p>Informações básicas do produto e origem de compra.</p></div>
+            <div class="profile-grid admin-form-grid">
+              <label>Título do produto<input name="title" required></label>
+              <label>Loja de origem<input name="source_store" value="Mercado Livre"></label>
+              <label>Link oficial do produto<input name="source_url" placeholder="https://..."></label>
+              <label>Preço original<input type="number" step="0.01" name="source_price" required></label>
+              <label>Imagem por URL<input name="image_url" placeholder="https://..."></label>
+              <label>Imagem do computador<input type="file" name="image_file" accept="image/*"></label>
+            </div>
+            <label>Descrição do produto<textarea name="description" placeholder="Descreva o produto com clareza, sem exageros e com informações reais."></textarea></label>
+
+            <div class="form-section-title"><h2>Agendamento</h2><p>Escolha início por tempo ou por data exata.</p></div>
+            <div class="profile-grid admin-form-grid">
+              <label>Tipo de início
+                <select name="schedule_mode" id="schedule-mode">
+                  <option value="minutes">Iniciar em minutos</option>
+                  <option value="datetime">Agendar por data e hora</option>
+                </select>
+              </label>
+              <label class="schedule-minutes-field">Iniciar em quantos minutos?<input type="number" name="start_in_minutes" value="60" min="0"></label>
+              <label class="schedule-datetime-field">Data e hora do início<input type="datetime-local" name="scheduled_start_at"></label>
+              <label>Tempo inicial do leilão em minutos
+                <input type="number" name="initial_duration_minutes" value="30" min="1" max="60">
+                <small>Máximo recomendado: 60 minutos. O backend limita automaticamente.</small>
+              </label>
+            </div>
+
+            <div class="form-section-title"><h2>Modo turbo automático, taxa e cashback</h2><p>O sistema calcula sozinho, mas você pode editar os parâmetros antes de cadastrar.</p></div>
+            <div class="profile-grid admin-form-grid">
+              <label>Ativar turbo automático
+                <select name="turbo_enabled">
+                  <option value="1">Sim</option>
+                  <option value="0">Não</option>
+                </select>
+              </label>
+              <label>Meta de lucro/taxa desejada (%)
+                <input type="number" step="0.01" name="turbo_fee_target_percent" value="10" min="0" max="40">
+              </label>
+              <label>Preço mínimo desejado antes do turbo (%)
+                <input type="number" step="0.01" name="winner_min_percent" value="50" min="1" max="90">
+              </label>
+              <label>Forçar Turbo 2.0 em (%)
+                <input type="number" step="0.01" name="turbo_trigger_percent" value="0" min="0" max="95">
+                <small>0 = cálculo automático. Ex.: 50% + 10% = 60%.</small>
+              </label>
+              <label>Taxa interna por lance (%)
+                <input type="number" step="0.01" name="bid_fee_percent" value="10" min="0" max="50">
+                <small>Ex.: R$ 1,00 de lance gera R$ 0,10 de taxa para o site.</small>
+              </label>
+              <label>Complemento máximo do site (%)
+                <input type="number" step="0.01" name="max_site_complement_percent" value="50" min="0" max="100">
+              </label>
+              <label>Cashback opcional no fim do leilão
+                <select name="cashback_enabled">
+                  <option value="0">Não ativar</option>
+                  <option value="1">Ativar neste leilão</option>
+                </select>
+                <small>Use apenas em leilões estratégicos, quando houver caixa disponível.</small>
+              </label>
+            </div>
+
+            <div class="admin-strategy-box" id="turbo-preview-box">
+              <strong>Prévia do Turbo:</strong>
+              <p id="turbo-preview-text">Digite o preço original para ver o valor aproximado em que o Turbo 2.0 será ativado.</p>
+            </div>
+
+            <div class="admin-toolbar-end">
+              <button class="btn" type="submit">Criar leilão profissional</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section id="admin-returned" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Produtos Retornados</h1>
+            <p>Produtos que voltaram por falta de pagamento. Clique em abrir para editar e relançar com regra especial de turbo.</p>
+          </div>
+        </div>
+
+        <div class="returned-card-grid">
+          {% for item in returned_items if returned_items is defined %}
+          <article class="returned-mini-card">
+            <img src="{{ item.image_url }}" alt="{{ item.title }}">
+            <div>
+              <h3>{{ item.title }}</h3>
+              <p>Original: <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></p>
+              <p>Caixa reservado: <strong>R$ {{ '%.2f'|format(item.reserved_cash)|replace('.', ',') }}</strong></p>
+              <p>Se tivesse pago: <strong>R$ {{ '%.2f'|format(item.expected_total_if_paid)|replace('.', ',') }}</strong></p>
+              <button class="btn small returned-open-btn" type="button" data-returned-panel="returned-panel-{{ item.id }}">Abrir / editar</button>
+            </div>
+          </article>
+
+          <div id="returned-panel-{{ item.id }}" class="panel-card admin-card-pro returned-edit-panel">
+            <div class="card-title-row">
+              <h2>Editar e relançar: {{ item.title }}</h2>
+              <span class="pill-soft warn">Retornado</span>
+            </div>
+
+            <div class="profile-grid returned-summary-grid">
+              <div><span>Preço original mantido</span><strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></div>
+              <div><span>Último valor final</span><strong>R$ {{ '%.2f'|format(item.last_final_price)|replace('.', ',') }}</strong></div>
+              <div><span>Taxas acumuladas</span><strong>R$ {{ '%.2f'|format(item.accumulated_fees)|replace('.', ',') }}</strong></div>
+              <div><span>Caixa reservado</span><strong>R$ {{ '%.2f'|format(item.reserved_cash)|replace('.', ',') }}</strong></div>
+              <div><span>Total se tivesse pago</span><strong>R$ {{ '%.2f'|format(item.expected_total_if_paid)|replace('.', ',') }}</strong></div>
+              <div><span>Resultado se tivesse pago</span><strong>R$ {{ '%.2f'|format(item.expected_profit_if_paid)|replace('.', ',') }}</strong></div>
+            </div>
+
+            <form class="form-card no-shadow admin-advanced-form returned-product-form" method="post" action="/admin/item/{{ item.id }}/returned-update-relist" enctype="multipart/form-data">
+              <div class="profile-grid admin-form-grid">
+                <label>Título do produto<input name="title" value="{{ item.title }}" required></label>
+                <label>Preço original<input value="R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}" readonly></label>
+                <label>Loja de origem<input name="source_store" value="{{ item.source_store or '' }}"></label>
+                <label>Link oficial do produto<input name="source_url" value="{{ item.source_url or '' }}" placeholder="https://..."></label>
+                <label>Imagem por URL<input name="image_url" value="{{ item.image_url or '' }}" placeholder="https://..."></label>
+                <label>Nova imagem<input type="file" name="image_file" accept="image/*"></label>
+              </div>
+
+              <label>Descrição do produto<textarea name="description">{{ item.description or '' }}</textarea></label>
+
+              <div class="form-section-title"><h2>Relançamento estratégico</h2><p>Digite o valor-base. O Turbo 2.0 entrará na metade desse valor-base, considerando preço atual + taxas.</p></div>
+
+              <div class="profile-grid admin-form-grid">
+                <label>Valor-base para calcular o Turbo
+                  <input type="number" step="0.01" name="turbo_base_value" value="{{ item.suggested_turbo_base }}" required>
+                </label>
+                <label>Taxa interna por lance (%)
+                  <input type="number" step="0.01" name="bid_fee_percent" value="10" min="0" max="50">
+                </label>
+                <label>Relançar em quantos minutos?
+                  <input type="number" name="start_in_minutes" value="5" min="0">
+                </label>
+                <label>Tempo inicial em minutos
+                  <input type="number" name="initial_duration_minutes" value="30" min="1" max="60">
+                </label>
+                <label>Cashback opcional
+                  <select name="cashback_enabled">
+                    <option value="0">Não ativar</option>
+                    <option value="1">Ativar neste relançamento</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="admin-strategy-box">
+                <strong>Regra especial do produto retornado:</strong>
+                <p>O preço original permanece R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}. O Turbo 2.0 será calculado pela metade do valor-base digitado.</p>
+              </div>
+
+              <div class="admin-toolbar-end returned-actions">
+                <a class="btn small ghost" href="/auction/{{ item.id }}">Abrir produto</a>
+                <button class="btn" type="submit">Salvar e relançar produto</button>
+              </div>
+            </form>
+          </div>
+          {% else %}
+          <div class="panel-card admin-card-pro">
+            <p>Nenhum produto retornado por falta de pagamento.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section id="admin-auctions" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Gerenciar Leilões</h1>
+            <p>Controle operacional dos leilões ao vivo, agendados e em preparação.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Status</th><th>Preço atual</th><th>Origem</th><th>Turbo</th><th>Arrecadado</th><th>Vencedor</th><th>Ações</th></tr></thead>
+              <tbody>
+                {% for item in items %}
+                <tr>
+                  <td>{{ item.title }}</td>
+                  <td><span class="status {{ item.status }}">{{ item.status }}</span></td>
+                  <td>R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</td>
+                  <td>{{ item.turbo_level }}</td>
+                  <td>{{ item.collected_percent if item.collected_percent is defined else '—' }}%</td>
+                  <td>{% if item.winner %}{{ display_user_name(item.winner) }}{% else %}—{% endif %}</td>
+                  <td>
+                    <div class="admin-action-stack admin-action-grid-pro">
+                      <form method="post" action="/admin/item/{{ item.id }}/start-now" class="inline-form"><button class="btn small" type="submit">Começar</button></form>
+                      <form method="post" action="/admin/item/{{ item.id }}/relist" class="inline-form">
+                        <input type="number" name="start_in_minutes" value="60" min="0" required title="Começar em quantos minutos">
+                        <input type="number" name="initial_duration_minutes" value="30" min="1" max="60" required title="Tempo inicial do leilão">
+                        <button class="btn small ghost" type="submit">Relançar</button>
+                      </form>
+                      {% if item.status != 'live' %}<form method="post" action="/admin/item/{{ item.id }}/delete" class="inline-form"><button class="btn small danger" type="submit">Excluir</button></form>{% endif %}
+                      <a class="btn small ghost" href="/auction/{{ item.id }}">Abrir</a>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8">Nenhum leilão cadastrado.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-finished" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Leilões Finalizados</h1>
+            <p>Histórico completo com valor de saída, taxa arrecadada, complemento do site, lucro e prejuízo.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Vencedor</th><th>Original</th><th>Saiu por</th><th>Taxas</th><th>Site completou</th><th>Lucro/Prejuízo</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for item in finished_auctions if finished_auctions is defined %}
+                <tr>
+                  <td>{{ item.title }}</td>
+                  <td>{{ item.winner_name or 'Sem vencedor' }}</td>
+                  <td>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.final_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.fees_total)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.site_complement)|replace('.', ',') }}</td>
+                  <td class="{% if item.result >= 0 %}positive-text{% else %}danger-text{% endif %}">R$ {{ '%.2f'|format(item.result)|replace('.', ',') }}</td>
+                  <td>{{ item.status_label }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8">Nenhum leilão finalizado com contabilidade calculada ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-pending-payments" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Leilões Pendentes</h1>
+            <p>Produtos vencidos que aguardam pagamento do vencedor dentro do prazo.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Vencedor</th><th>E-mail</th><th>Telefone</th><th>Valor</th><th>Prazo</th><th>Status</th><th>Ação</th></tr></thead>
+              <tbody>
+                {% for o in orders %}
+                {% if o.status == 'pending_payment' %}
+                <tr>
+                  <td>{{ o.auction.title }}</td>
+                  <td>{{ display_user_name(o.user) }}</td>
+                  <td>{{ o.user.email }}</td>
+                  <td>{{ o.user.phone or '—' }}</td>
+                  <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
+                  <td>{{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</td>
+                  <td>{{ o.status }}</td>
+                  <td>
+                    <a class="btn small ghost" href="/auction/{{ o.auction.id }}">Abrir</a>
+                    <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
+                      <input type="number" name="extra_minutes" value="10" min="1" title="Minutos extras">
+                      <button class="btn small" type="submit">Dar mais prazo</button>
+                    </form>
+                  </td>
+                </tr>
+                {% endif %}
+                {% else %}
+                <tr><td colspan="8">Nenhum leilão pendente de pagamento.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-shipping" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Envios Pendentes</h1>
+            <p>Produtos já pagos que precisam ser comprados, separados e enviados ao vencedor.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Cliente</th><th>CPF</th><th>Contato</th><th>Endereço</th><th>Valor</th><th>Rastreio</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for o in orders %}
+                {% if o.status in ['paid', 'processing', 'purchased'] %}
+                <tr>
+                  <td>{{ o.auction.title }}</td>
+                  <td>{{ display_user_name(o.user) }}<br><small>{{ o.user.email }}</small></td>
+                  <td>{{ o.user.cpf or '—' }}</td>
+                  <td>{{ o.user.phone or '—' }}</td>
+                  <td>
+                    {{ o.delivery_street or o.user.street or '—' }}, {{ o.delivery_number or o.user.number or '—' }}<br>
+                    {{ o.delivery_district or o.user.district or '—' }} - {{ o.delivery_city or o.user.city or '—' }}/{{ o.delivery_state or o.user.state or '—' }}<br>
+                    CEP: {{ o.delivery_cep or o.user.cep or '—' }}
+                  </td>
+                  <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
+                  <td>
+                    <form method="post" action="/admin/order/{{ o.id }}/tracking" class="inline-form">
+                      <input type="text" name="tracking_code" value="{{ o.tracking_code or '' }}" placeholder="Código">
+                      <button class="btn small" type="submit">Salvar</button>
+                    </form>
+                  </td>
+                  <td>
+                    <form method="post" action="/admin/order/{{ o.id }}/set-status" class="inline-form">
+                      <select name="status">
+                        <option value="processing" {% if o.status == 'processing' %}selected{% endif %}>processing</option>
+                        <option value="purchased" {% if o.status == 'purchased' %}selected{% endif %}>purchased</option>
+                        <option value="sent" {% if o.status == 'sent' %}selected{% endif %}>sent</option>
+                        <option value="delivered" {% if o.status == 'delivered' %}selected{% endif %}>delivered</option>
+                      </select>
+                      <button class="btn small ghost" type="submit">Atualizar</button>
+                    </form>
+                  </td>
+                </tr>
+                {% endif %}
+                {% else %}
+                <tr><td colspan="8">Nenhum envio pendente.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin-users" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Usuários</h1>
+            <p>Controle contábil dos saldos, documentos, selo confirmado, bloqueio, chat e auditoria do usuário.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <form method="get" action="/admin" class="inline-form" style="margin-bottom:14px">
+            <input name="q" value="{{ search if search is defined else '' }}" placeholder="Buscar por nome, e-mail, CPF ou telefone">
+            <button class="btn small" type="submit">Buscar usuário</button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nome</th><th>E-mail</th><th>CPF</th><th>Saldo no site</th><th>Identidade</th><th>Status</th><th>Detalhes</th></tr></thead>
+              <tbody>
+                {% for u in users %}
+                <tr class="user-summary-row" data-user-panel="user-panel-{{ u.id }}">
+                  <td><button class="link-button admin-user-toggle" type="button" data-user-panel="user-panel-{{ u.id }}">{{ display_user_name(u) }}</button></td>
+                  <td>{{ u.email }}</td>
+                  <td>{{ u.cpf or '—' }}</td>
+                  <td>R$ {{ '%.2f'|format(u.wallet_balance)|replace('.', ',') }}</td>
+                  <td>{% if u.identity_status == 'verified' %}<span class="pill-soft">Confirmado</span>{% elif u.identity_status == 'rejected' %}<span class="pill-soft warn">Recusado</span>{% else %}<span class="pill-soft warn">Pendente</span>{% endif %}</td>
+                  <td>{% if u.is_banned %}Banido{% else %}Ativo{% endif %}{% if u.chat_muted %}<br>Chat mutado{% endif %}{% if u.is_admin %}<br>Admin{% endif %}</td>
+                  <td><button class="btn small ghost admin-user-toggle" type="button" data-user-panel="user-panel-{{ u.id }}">Abrir ficha</button></td>
+                </tr>
+                <tr id="user-panel-{{ u.id }}" class="admin-user-detail-row">
+                  <td colspan="7">
+                    <div class="admin-user-detail-card">
+                      <div class="profile-grid">
+                        <div><span>Nome</span><strong>{{ display_user_name(u) }}</strong></div>
+                        <div><span>E-mail</span><strong>{{ u.email }}</strong></div>
+                        <div><span>CPF</span><strong>{{ u.cpf or '—' }}</strong></div>
+                        <div><span>Telefone</span><strong>{{ u.phone or '—' }}</strong></div>
+                        <div><span>Endereço</span><strong>{{ u.street or '—' }}, {{ u.number or '—' }} - {{ u.city or '—' }}/{{ u.state or '—' }}</strong></div>
+                        <div><span>Saldo</span><strong>R$ {{ '%.2f'|format(u.wallet_balance)|replace('.', ',') }}</strong></div>
+                        <div><span>Documento</span><strong>{{ u.document_type or 'CPF' }}: {{ u.document_number or u.cpf or '—' }}</strong></div>
+                        <div><span>Status identidade</span><strong>{{ u.identity_status or 'pending' }}</strong></div>
+                        <div><span>Observação</span><strong>{{ u.identity_note or '—' }}</strong></div>
+                      </div>
+                      <div class="admin-user-docs">
+                        {% if u.document_file_url %}<a class="btn small ghost" href="{{ u.document_file_url }}" target="_blank">Abrir documento</a>{% endif %}
+                        {% if u.selfie_file_url %}<a class="btn small ghost" href="{{ u.selfie_file_url }}" target="_blank">Abrir selfie</a>{% endif %}
+                      </div>
+                      <div class="admin-user-actions">
+                        <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form"><input name="note" placeholder="Observação da conferência"><button class="btn small" type="submit">Dar selo confirmado</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form"><input name="note" placeholder="Motivo da recusa"><button class="btn small danger" type="submit">Recusar documento</button></form>
+                      </div>
+                      <div class="admin-user-actions">
+                       
+                        {% if not u.is_superadmin %}
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">{% if u.is_banned %}Desbanir usuário{% else %}Banir usuário{% endif %}</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
+                        {% endif %}
+                      </div>
+                      <div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Descrição</th></tr></thead><tbody>{% for tx in user_audit[u.id].transactions if user_audit is defined and user_audit[u.id] is defined %}<tr><td>{{ tx.created_at.strftime('%d/%m/%Y %H:%M') }}</td><td>{{ tx.kind }}</td><td>R$ {{ '%.2f'|format(tx.amount)|replace('.', ',') }}</td><td>{{ tx.note }}</td></tr>{% else %}<tr><td colspan="4">Sem movimentações recentes.</td></tr>{% endfor %}</tbody></table></div>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7">Nenhum usuário cadastrado.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      <section id="admin-suggestions" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Indicações de Produtos</h1>
+            <p>Produtos mais pedidos pelos usuários para próximos leilões. Cada usuário pode votar uma vez por dia.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row">
+            <h2>Ranking de interesse</h2>
+            <span class="pill-soft">Votação</span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Posição</th>
+                  <th>Produto</th>
+                  <th>Categoria</th>
+                  <th>Faixa</th>
+                  <th>Votos</th>
+                  <th>Percentual</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in suggestion_vote_stats if suggestion_vote_stats is defined %}
+                <tr>
+                  <td>#{{ loop.index }}</td>
+                  <td>{{ item.name }}</td>
+                  <td>{{ item.category }}</td>
+                  <td>{{ item.price_level }}</td>
+                  <td>{{ item.votes }}</td>
+                  <td>
+                    <strong>{{ '%.2f'|format(item.percent)|replace('.', ',') }}%</strong>
+                    <div class="suggestion-admin-bar">
+                      <span style="width: {{ item.percent if item.percent <= 100 else 100 }}%"></span>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6">Nenhuma votação registrada ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+            <section id="admin-search-orders" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Central de Controle de Arremates</h1>
+            <p>Pesquise e abra o painel interno do pedido para controlar compra, pagamento, envio, rastreio e mensagens.</p>
+          </div>
+        </div>
+        <div class="panel-card admin-card-pro">
+          <input id="admin-order-search" placeholder="Pesquisar por cliente, e-mail, CPF, produto ou status...">
+          <div class="admin-order-list">
+            {% for card in admin_order_cards if admin_order_cards is defined %}
+              {% set o = card.order %}
+              {% set f = card.finance %}
+              <article class="admin-order-card" data-search="{{ (o.user.full_name ~ ' ' ~ o.user.email ~ ' ' ~ o.user.cpf ~ ' ' ~ o.auction.title ~ ' ' ~ o.status)|lower }}">
+                <div class="admin-order-summary">
+                  <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}">
+                  <div>
+                    <h3>{{ o.auction.title }}</h3>
+                    <p><strong>Ganhador:</strong> {{ display_user_name(o.user) }} • {{ o.user.email }}</p>
+                    <p><strong>Status:</strong> {{ o.status }} • <strong>Valor:</strong> R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
+                    <p><strong>Arrematado em:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
+                  </div>
+                  <button class="btn small order-panel-btn" type="button" data-order-panel="order-panel-{{ o.id }}">Abrir painel</button>
+                </div>
+
+                <div id="order-panel-{{ o.id }}" class="admin-order-detail">
+                  <div class="order-detail-grid">
+                    <div class="panel-card mini-detail-card">
+                      <h4>Cliente</h4>
+                      <p><strong>Nome:</strong> {{ display_user_name(o.user) }}</p>
+                      <p><strong>E-mail:</strong> {{ o.user.email }}</p>
+                      <p><strong>CPF:</strong> {{ o.user.cpf or '—' }}</p>
+                      <p><strong>Telefone:</strong> {{ o.user.phone or '—' }}</p>
+                    </div>
+                    <div class="panel-card mini-detail-card">
+                      <h4>Produto</h4>
+                      <p><strong>Produto:</strong> {{ o.auction.title }}</p>
+                      <p><strong>Loja:</strong> {{ o.auction.source_store or '—' }}</p>
+                      <p><strong>Preço original:</strong> R$ {{ '%.2f'|format(o.auction.source_price)|replace('.', ',') }}</p>
+                      {% if o.auction.source_url %}
+                      <p><a href="{{ o.auction.source_url }}" target="_blank" rel="noopener noreferrer" class="btn small ghost">Abrir link de compra original</a></p>
+                      {% endif %}
+                    </div>
+                    <div class="panel-card mini-detail-card">
+                      <h4>Pagamento e prazo</h4>
+                      <p><strong>Arrematou:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
+                      <p><strong>Pagamento:</strong> {{ o.paid_at.strftime('%d/%m/%Y %H:%M') if o.paid_at else 'Não confirmado' }}</p>
+                      <p><strong>Prazo:</strong> {{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</p>
+                      {% if o.status == 'expired' or not o.paid_at %}
+                      <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
+                        <input type="number" name="extra_minutes" value="10" min="1">
+                        <button class="btn small" type="submit">Dar mais prazo</button>
+                      </form>
+                      {% endif %}
+                    </div>
+                    <div class="panel-card mini-detail-card">
+                      <h4>Contabilidade</h4>
+                      <p><strong>Lances acumulados:</strong> R$ {{ '%.2f'|format(f.bid_pool)|replace('.', ',') }}</p>
+                      <p><strong>Taxas:</strong> R$ {{ '%.2f'|format(f.fees)|replace('.', ',') }}</p>
+                      <p><strong>Caixa antes do pagamento:</strong> R$ {{ '%.2f'|format(f.reserved_before_payment)|replace('.', ',') }}</p>
+                      <p><strong>Total se pago:</strong> R$ {{ '%.2f'|format(f.total_if_paid)|replace('.', ',') }}</p>
+                      <p><strong>Resultado estimado:</strong> R$ {{ '%.2f'|format(f.result_if_paid)|replace('.', ',') }}</p>
+                    </div>
+                  </div>
+
+                  <div class="panel-card admin-card-pro">
+                    <h3>Compra, envio e rastreio</h3>
+                    <form method="post" action="/admin/order/{{ o.id }}/admin-update" class="order-admin-form">
+                      <div class="profile-grid admin-form-grid">
+                        <label>Link de compra do admin
+                          <input name="purchase_link" value="{{ o.purchase_link or o.auction.source_url or '' }}" placeholder="https://...">
+                        </label>
+                        <label>Status da compra externa
+                          <select name="purchase_status">
+                            <option value="" {% if not o.purchase_status %}selected{% endif %}>Não comprado ainda</option>
+                            <option value="comprar" {% if o.purchase_status == 'comprar' %}selected{% endif %}>A comprar</option>
+                            <option value="comprado" {% if o.purchase_status == 'comprado' %}selected{% endif %}>Comprado</option>
+                            <option value="aguardando_envio" {% if o.purchase_status == 'aguardando_envio' %}selected{% endif %}>Aguardando envio</option>
+                            <option value="enviado" {% if o.purchase_status == 'enviado' %}selected{% endif %}>Enviado</option>
+                            <option value="entregue" {% if o.purchase_status == 'entregue' %}selected{% endif %}>Entregue</option>
+                          </select>
+                        </label>
+                        <label>Código de rastreio
+                          <input name="tracking_code" value="{{ o.tracking_code or '' }}" placeholder="Ex.: BR123456789BR">
+                        </label>
+                      </div>
+                      <label>Observação interna
+                        <textarea name="admin_note">{{ o.admin_note or '' }}</textarea>
+                      </label>
+                      <div class="admin-checkbox-row">
+                        <label><input type="checkbox" name="mark_purchased" value="1"> Marcar comprado</label>
+                        <label><input type="checkbox" name="mark_sent" value="1"> Marcar enviado</label>
+                        <label><input type="checkbox" name="mark_delivered" value="1"> Marcar entregue</label>
+                      </div>
+                      <button class="btn" type="submit">Salvar controle</button>
+                    </form>
+                  </div>
+
+                  <div class="panel-card admin-card-pro">
+                    <h3>Mensagem direta ao ganhador</h3>
+                    <div class="direct-message-box">
+                      {% for msg in card.messages %}
+                      <div class="direct-message-line {% if not msg.is_open %}closed{% endif %}">
+                        <strong>{{ display_user_name(msg.admin) if msg.admin else 'Admin' }}</strong>
+                        <span>{{ msg.created_at.strftime('%d/%m/%Y %H:%M') if msg.created_at else '—' }}</span>
+                        <p>{{ msg.message }}</p>
+                        {% if not msg.is_open %}<small>Atendimento fechado</small>{% endif %}
+                      </div>
+                      {% else %}
+                      <p class="muted">Nenhuma mensagem direta enviada ainda.</p>
+                      {% endfor %}
+                    </div>
+                    <form method="post" action="/admin/order/{{ o.id }}/message">
+                      <textarea name="message" placeholder="Escreva uma mensagem direta..." required></textarea>
+                      <button class="btn small" type="submit">Enviar mensagem</button>
+                    </form>
+                    <div class="admin-toolbar-end">
+                      <form method="post" action="/admin/order/{{ o.id }}/close-chat" class="inline-form"><button class="btn small ghost" type="submit">Fechar atendimento</button></form>
+                      <form method="post" action="/admin/order/{{ o.id }}/reopen-chat" class="inline-form"><button class="btn small" type="submit">Reabrir atendimento</button></form>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            {% else %}
+              <p>Nenhum arremate encontrado.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+
+<section id="admin-moderation" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Moderação</h1>
+            <p>Área de segurança para infrações, chat, bloqueios e estabilidade da operação.</p>
+          </div>
+        </div>
+
+        <div class="notice-grid">
+          <div class="panel-card admin-card-pro">
+            <h2>Conduta e segurança</h2>
+            <div class="profile-grid">
+              <div><span>Usuários</span><strong>Banimento apenas por infração real</strong></div>
+              <div><span>Chat</span><strong>Mutar comportamentos abusivos</strong></div>
+              <div><span>Leilões</span><strong>Pausar chat em momentos críticos</strong></div>
+              <div><span>Auditoria</span><strong>Registrar motivo das ações</strong></div>
+            </div>
+          </div>
+          <div class="panel-card admin-card-pro">
+            <h2>Boas práticas</h2>
+            <div class="admin-alert-list">
+              <div><strong>Transparência</strong><span>Manter leilões, resultados e vencedores auditáveis.</span></div>
+              <div><strong>Contabilidade</strong><span>Separar saldo dos usuários do caixa operacional.</span></div>
+              <div><strong>Risco</strong><span>Não relançar produto sem revisar margem e prejuízo acumulado.</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</section>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const links = document.querySelectorAll(".admin-link");
+  const panels = document.querySelectorAll(".admin-panel");
+  const openTabButtons = document.querySelectorAll(".admin-open-tab");
+
+  function openPanel(target) {
+    links.forEach((item) => item.classList.remove("active"));
+    panels.forEach((panel) => panel.classList.remove("active"));
+    const link = document.querySelector(`.admin-link[data-target="${target}"]`);
+    const selected = document.getElementById(target);
+    if (link) link.classList.add("active");
+    if (selected) selected.classList.add("active");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  links.forEach((link) => link.addEventListener("click", function () { openPanel(this.getAttribute("data-target")); }));
+  openTabButtons.forEach((button) => button.addEventListener("click", function () { openPanel(this.getAttribute("data-target")); }));
+
+  const scheduleMode = document.getElementById("schedule-mode");
+  const minuteField = document.querySelector(".schedule-minutes-field");
+  const dateField = document.querySelector(".schedule-datetime-field");
+  function toggleScheduleFields() {
+    if (!scheduleMode || !minuteField || !dateField) return;
+    const byDate = scheduleMode.value === "datetime";
+    minuteField.style.display = byDate ? "none" : "block";
+    dateField.style.display = byDate ? "block" : "none";
+  }
+  if (scheduleMode) {
+    scheduleMode.addEventListener("change", toggleScheduleFields);
+    toggleScheduleFields();
+  }
+
+  document.querySelectorAll(".returned-open-btn").forEach((button) => {
+    button.addEventListener("click", function () {
+      const id = this.getAttribute("data-returned-panel");
+      const panel = document.getElementById(id);
+      if (panel) panel.classList.toggle("active");
+    });
+  });
+
+  document.querySelectorAll(".order-panel-btn").forEach((button) => {
+    button.addEventListener("click", function () {
+      const id = this.getAttribute("data-order-panel");
+      const panel = document.getElementById(id);
+      if (panel) panel.classList.toggle("active");
+    });
+  });
+
+  const orderSearch = document.getElementById("admin-order-search");
+  if (orderSearch) {
+    orderSearch.addEventListener("input", function () {
+      const term = this.value.toLowerCase().trim();
+      document.querySelectorAll("#admin-order-table tbody tr[data-search]").forEach((row) => {
+        row.style.display = row.getAttribute("data-search").includes(term) ? "" : "none";
+      });
+    });
+  }
+
+  document.querySelectorAll(".admin-user-toggle").forEach((button) => {
+    button.addEventListener("click", function () {
+      const id = this.getAttribute("data-user-panel");
+      const panel = document.getElementById(id);
+      if (panel) panel.classList.toggle("active");
+    });
+  });
+});
+</script>
+
+<style>
+.admin-production-page .admin-panel { display: none; }
+.admin-production-page .admin-panel.active { display: block; }
+.admin-production-sidebar { position: sticky; top: 86px; align-self: flex-start; }
+.admin-sidebar-top { margin-bottom: 18px; }
+.admin-sidebar-top p { margin: 8px 0 0; opacity: .78; line-height: 1.4; }
+.admin-badge { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 12px; margin-bottom: 10px; }
+.admin-section-head-pro { align-items: center; gap: 14px; }
+.admin-kpi-grid, .admin-finance-grid { margin-bottom: 18px; }
+.admin-kpi-grid .stat small, .admin-finance-grid .stat small { display: block; margin-top: 6px; opacity: .72; font-size: 12px; font-weight: 500; }
+.admin-card-pro { overflow: hidden; }
+.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.card-title-row h2 { margin: 0; }
+.pill-soft { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; background: rgba(34,197,94,.12); color: #86efac; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pill-soft.warn { background: rgba(245,158,11,.12); color: #fcd34d; }
+.finance-card.positive { border-color: rgba(34,197,94,.32); }
+.finance-card.warning { border-color: rgba(245,158,11,.35); }
+.finance-card.danger { border-color: rgba(239,68,68,.35); }
+.admin-alert-list { display: grid; gap: 12px; }
+.admin-alert-list div { padding: 12px; border-radius: 14px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); }
+.admin-alert-list strong { display: block; margin-bottom: 4px; }
+.admin-alert-list span { opacity: .78; font-size: 13px; }
+.form-section-title { margin: 22px 0 12px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }
+.form-section-title:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.form-section-title h2 { margin: 0 0 4px; }
+.form-section-title p { margin: 0; opacity: .75; }
+.admin-form-grid label { min-width: 0; }
+.admin-strategy-box { margin-top: 14px; padding: 14px; border-radius: 16px; background: rgba(59,130,246,.10); border: 1px solid rgba(59,130,246,.22); }
+.admin-strategy-box p { margin: 6px 0 0; opacity: .82; line-height: 1.45; }
+.admin-toolbar-end { display: flex; justify-content: flex-end; margin-top: 18px; }
+.admin-action-grid-pro { gap: 8px; }
+.admin-action-grid-pro .inline-form { flex-wrap: wrap; }
+.positive-text { color: #86efac; font-weight: 800; }
+.danger-text { color: #fca5a5; font-weight: 800; }
+.link-button { background: none; border: 0; color: inherit; font: inherit; font-weight: 800; cursor: pointer; padding: 0; text-align: left; }
+.link-button:hover { text-decoration: underline; }
+.admin-user-detail-row { display: none; }
+.admin-user-detail-row.active { display: table-row; }
+.admin-user-detail-card { padding: 16px; border-radius: 16px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); }
+.admin-user-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.admin-production-page table small { opacity: .72; }
+@media (max-width: 980px) { .admin-production-sidebar { position: static; } .admin-section-head-pro { align-items: flex-start; } }
+
+.suggestion-admin-bar {
+  width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  margin-top: 6px;
+  background: rgba(255,255,255,.08);
+  overflow: hidden;
+}
+.suggestion-admin-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg,#22c55e,#3b82f6);
+}
+.returned-edit-card{margin-bottom:18px}.returned-summary-grid{margin-bottom:18px}.returned-product-form{margin-top:14px}.returned-actions{gap:10px;align-items:center}
+.returned-card-grid{display:grid;gap:14px}
+.returned-mini-card{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center;border:1px solid rgba(148,163,184,.18);border-radius:18px;background:rgba(15,23,42,.72);padding:14px}
+.returned-mini-card img{width:96px;height:96px;object-fit:cover;border-radius:14px}
+.returned-mini-card h3{margin:0 0 6px}
+.returned-mini-card p{margin:3px 0;color:#cbd5e1}
+.returned-edit-panel{display:none}
+.returned-edit-panel.active{display:block}
+.returned-summary-grid{margin-bottom:18px}
+.returned-actions{gap:10px;align-items:center}
+
+.admin-order-list{display:grid;gap:14px;margin-top:16px}
+.admin-order-card{border:1px solid rgba(148,163,184,.18);border-radius:18px;background:rgba(15,23,42,.72);padding:14px}
+.admin-order-summary{display:grid;grid-template-columns:82px 1fr auto;gap:14px;align-items:center}
+.admin-order-summary img{width:82px;height:82px;border-radius:14px;object-fit:cover}
+.admin-order-summary h3{margin:0 0 6px}
+.admin-order-summary p{margin:3px 0;color:#cbd5e1}
+.admin-order-detail{display:none;margin-top:16px}
+.admin-order-detail.active{display:block}
+.order-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.mini-detail-card{margin:0;padding:14px}
+.mini-detail-card h4{margin:0 0 10px}
+.order-admin-form textarea,.admin-order-detail textarea{width:100%;min-height:90px;margin-top:8px;padding:12px;border-radius:12px;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.08);color:#fff}
+.admin-checkbox-row{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.admin-checkbox-row label{display:flex;gap:8px;align-items:center;color:#dbeafe}
+.admin-checkbox-row input{width:auto}
+.direct-message-box{display:grid;gap:10px;margin-bottom:12px}
+.direct-message-line{border:1px solid rgba(59,130,246,.22);background:rgba(59,130,246,.08);border-radius:14px;padding:12px}
+.direct-message-line.closed{opacity:.65}
+.direct-message-line span{display:block;color:#b7c6e6;font-size:12px;margin-top:3px}
+.direct-message-line p{margin:8px 0 0}
+@media(max-width:900px){.admin-order-summary{grid-template-columns:1fr}.order-detail-grid{grid-template-columns:1fr}}
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const priceInput = document.querySelector('input[name="source_price"]');
+  const targetInput = document.querySelector('input[name="turbo_fee_target_percent"]');
+  const previewText = document.getElementById("turbo-preview-text");
+
+  function moneyBR(value) {
+    return "R$ " + Number(value || 0).toFixed(2).replace(".", ",");
+  }
+
+  function updateTurboPreview() {
+    if (!priceInput || !targetInput || !previewText) return;
+    const price = Number(String(priceInput.value || "0").replace(",", "."));
+    const target = Number(String(targetInput.value || "10").replace(",", "."));
+    const triggerPercent = Math.min(95, Math.max(1, 50 + target));
+    const amount = price * (triggerPercent / 100);
+    if (price > 0) {
+      previewText.textContent = `Com esse preço, o Turbo 2.0 entrará aproximadamente em ${moneyBR(amount)} (${triggerPercent.toFixed(2).replace(".", ",")}% do produto, contando o valor arrecadado com taxas). Turbo 3.0 e 4.0 entram automaticamente depois.`;
+    } else {
+      previewText.textContent = "Digite o preço original para ver o valor aproximado em que o Turbo 2.0 será ativado.";
+    }
+  }
+
+  priceInput?.addEventListener("input", updateTurboPreview);
+  targetInput?.addEventListener("input", updateTurboPreview);
+  updateTurboPreview();
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,1641 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minha Conta</title>
+
+  <style>
+    :root {
+      --bg: #081326;
+      --panel: rgba(15, 23, 42, .86);
+      --panel-2: rgba(30, 41, 73, .78);
+      --line: rgba(148, 163, 184, .18);
+      --text: #ffffff;
+      --muted: #b7c6e6;
+      --blue: #3b82f6;
+      --green: #4ade80;
+      --warn: #fbbf24;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(59,130,246,.18), transparent 28%),
+        linear-gradient(135deg, #071124, #0b1530 52%, #081326);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    a {
+      color: inherit;
+    }
+
+
+    .site-topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(3, 7, 18, .92);
+      border-bottom: 1px solid rgba(148, 163, 184, .12);
+      backdrop-filter: blur(14px);
+    }
+
+    .site-topbar-inner {
+      height: 74px;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .site-logo {
+      color: #fff;
+      text-decoration: none;
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: .01em;
+    }
+
+    .site-logo span {
+      color: var(--blue);
+    }
+
+    .site-nav {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      color: #fff;
+      font-weight: 800;
+    }
+
+    .site-nav a {
+      text-decoration: none;
+      color: #fff;
+      opacity: .9;
+    }
+
+    .site-nav a:hover {
+      opacity: 1;
+      color: #bfdbfe;
+    }
+
+    .site-user-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 9px 13px;
+      border-radius: 13px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .055);
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .site-user-card strong {
+      font-size: 13px;
+      color: #fff;
+    }
+
+    .site-user-card span {
+      align-self: flex-end;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(74,222,128,.45);
+      background: rgba(74,222,128,.10);
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+
+    .account-shell {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+      padding: 24px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .account-sidebar {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 22px;
+      padding: 20px;
+      box-shadow: 0 18px 45px rgba(0,0,0,.28);
+    }
+
+    .account-sidebar h2 {
+      margin: 0 0 18px;
+      color: #fff;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .account-side-link {
+      display: block;
+      width: 100%;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      border-radius: 13px;
+      background: rgba(255,255,255,.045);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      transition: .18s ease;
+    }
+
+    .account-side-link:hover,
+    .account-side-link.active {
+      background: rgba(59,130,246,.22);
+    }
+
+    .account-side-balance {
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .account-side-balance:hover {
+      background: rgba(59,130,246,.22);
+    }
+
+    .account-main {
+      min-width: 0;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .section-head h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.1;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .section-head p,
+    .muted {
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .stat,
+    .panel-card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 20px;
+      box-shadow: 0 14px 36px rgba(0,0,0,.22);
+    }
+
+    .stat {
+      padding: 16px;
+    }
+
+    .stat span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 24px;
+      color: #fff;
+    }
+
+    .panel-card {
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+
+    .account-wallet-panel {
+      display: none;
+    }
+
+    .account-wallet-panel.active {
+      display: block;
+    }
+
+    .compact-head {
+      margin-bottom: 16px;
+    }
+
+    .wallet-badge {
+      display: inline-flex;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(74,222,128,.45);
+      background: rgba(74,222,128,.10);
+      color: var(--green);
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .wallet-action-tabs {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .wallet-action-btn,
+    .wallet-choice-btn,
+    .btn {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.055);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-weight: 900;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      border-color: rgba(59,130,246,.45);
+    }
+
+    .btn.small {
+      padding: 9px 12px;
+      font-size: 13px;
+    }
+
+    .btn.full {
+      width: 100%;
+    }
+
+    .btn.ghost {
+      background: rgba(255,255,255,.055);
+    }
+
+    .wallet-action-btn.active,
+    .wallet-choice-btn.active {
+      background: rgba(59,130,246,.18);
+      border-color: rgba(59,130,246,.38);
+    }
+
+    .wallet-mode-panel,
+    .deposit-panel {
+      display: none;
+    }
+
+    .wallet-mode-panel.active,
+    .deposit-panel.active {
+      display: block;
+    }
+
+    .wallet-choice-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .wallet-card {
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      max-width: 560px;
+    }
+
+    .wallet-card label,
+    .form-card label {
+      display: block;
+      color: var(--muted);
+      font-weight: 700;
+      margin: 12px 0;
+    }
+
+    input {
+      width: 100%;
+      margin-top: 7px;
+      padding: 12px 13px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      outline: none;
+    }
+
+    input::placeholder {
+      color: rgba(255,255,255,.45);
+    }
+
+    .wallet-card-head {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+
+    .wallet-card-head h3,
+    .wallet-card-head p {
+      margin: 0;
+    }
+
+    .wallet-card-head p {
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .wallet-icon {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      background: rgba(59,130,246,.14);
+      color: #b9d5ff;
+      font-weight: 900;
+      flex: 0 0 auto;
+    }
+
+    .withdraw-card .wallet-icon {
+      background: rgba(74,222,128,.12);
+      color: var(--green);
+    }
+
+    .withdraw-fee-box {
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(74,222,128,.22);
+      background: rgba(74,222,128,.07);
+      margin-bottom: 14px;
+    }
+
+    .withdraw-fee-box strong,
+    .withdraw-fee-box span {
+      display: block;
+    }
+
+    .withdraw-fee-box span {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .wallet-notes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .wallet-notes div {
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.025);
+    }
+
+    .wallet-notes strong,
+    .wallet-notes span {
+      display: block;
+    }
+
+    .wallet-notes span {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .notice-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .mini-auction,
+    .pending-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .mini-auction img {
+      width: 74px;
+      height: 74px;
+      object-fit: cover;
+      border-radius: 14px;
+    }
+
+    .highlight-warn {
+      color: var(--warn);
+      font-weight: 800;
+    }
+
+    .profile-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .profile-grid div {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      border-radius: 15px;
+      padding: 14px;
+    }
+
+    .profile-grid span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 20px;
+      overflow: hidden;
+    }
+
+    .card-image {
+      width: 100%;
+      height: 160px;
+      object-fit: cover;
+    }
+
+    .card-body {
+      padding: 14px;
+    }
+
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 16px;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .checkout-grid {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 18px;
+    }
+
+    .checkout-summary img {
+      width: 100%;
+      border-radius: 18px;
+      margin-bottom: 12px;
+    }
+
+    .form-card {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      border-radius: 20px;
+      padding: 18px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+
+    select {
+      width: 100%;
+      margin-top: 7px;
+      padding: 12px 13px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.08);
+      color: #fff;
+      outline: none;
+    }
+
+    select option {
+      background: #111827;
+      color: #fff;
+    }
+
+    .checkout-grid-pro {
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      align-items: start;
+    }
+
+    .checkout-summary-pro {
+      position: sticky;
+      top: 92px;
+    }
+
+    .checkout-box {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      border-radius: 18px;
+      padding: 14px;
+      margin: 14px 0;
+    }
+
+    .checkout-box h3 {
+      margin: 0 0 12px;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      color: var(--muted);
+    }
+
+    .summary-row strong {
+      color: #fff;
+      text-align: right;
+    }
+
+    .summary-row.total {
+      border-bottom: none;
+      color: #fff;
+      font-size: 17px;
+    }
+
+    .summary-note,
+    .fee-info {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .checkout-form-pro {
+      overflow: hidden;
+    }
+
+    .checkout-step {
+      display: none;
+    }
+
+    .checkout-step.active {
+      display: block;
+    }
+
+    .checkout-step-head {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .checkout-step-head > span {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      background: rgba(59,130,246,.18);
+      color: #bfdbfe;
+      font-weight: 900;
+      flex: 0 0 auto;
+    }
+
+    .checkout-step-head h2,
+    .checkout-step-head p {
+      margin: 0;
+    }
+
+    .checkout-step-head p {
+      margin-top: 5px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .security-box,
+    .fee-info {
+      border: 1px solid rgba(74,222,128,.22);
+      background: rgba(74,222,128,.07);
+      border-radius: 14px;
+      padding: 12px;
+      color: #d8ffe7;
+      margin: 14px 0;
+    }
+
+    .terms-check {
+      display: flex !important;
+      align-items: flex-start;
+      gap: 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      border-radius: 14px;
+      padding: 12px;
+      color: var(--text) !important;
+    }
+
+    .terms-check input {
+      width: auto;
+      margin: 4px 0 0;
+      flex: 0 0 auto;
+    }
+
+    .terms-check span {
+      line-height: 1.45;
+    }
+
+    .link-button {
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: #93c5fd;
+      font-weight: 900;
+      cursor: pointer;
+      padding: 0;
+      text-decoration: underline;
+    }
+
+    .payment-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .payment-option {
+      text-align: left;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      color: #fff;
+      border-radius: 16px;
+      padding: 14px;
+      cursor: pointer;
+    }
+
+    .payment-option.active {
+      border-color: rgba(59,130,246,.55);
+      background: rgba(59,130,246,.16);
+    }
+
+    .payment-option strong,
+    .payment-option span {
+      display: block;
+    }
+
+    .payment-option span {
+      margin-top: 5px;
+      color: var(--muted);
+      line-height: 1.4;
+      font-size: 13px;
+    }
+
+    .payment-panel {
+      display: none;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    .payment-panel.active {
+      display: block;
+    }
+
+    .checkout-actions {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .checkout-success {
+      display: none;
+      text-align: center;
+      border: 1px solid rgba(74,222,128,.28);
+      background: rgba(74,222,128,.08);
+      border-radius: 18px;
+      padding: 24px;
+    }
+
+    .checkout-success.active {
+      display: block;
+    }
+
+    .terms-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(2, 6, 23, .72);
+      backdrop-filter: blur(8px);
+    }
+
+    .terms-modal.active {
+      display: flex;
+    }
+
+    .terms-modal-card {
+      width: min(720px, 100%);
+      max-height: 86vh;
+      overflow: auto;
+      border: 1px solid var(--line);
+      background: #0f172a;
+      border-radius: 22px;
+      padding: 18px;
+      box-shadow: 0 24px 70px rgba(0,0,0,.42);
+    }
+
+    .terms-modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .terms-modal-head h2 {
+      margin: 0;
+    }
+
+    .terms-close {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      color: #fff;
+      cursor: pointer;
+      font-size: 22px;
+    }
+
+    .terms-modal-body {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 16px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .terms-modal-body p {
+      margin: 0;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    @media (max-width: 980px) {
+      .site-topbar-inner {
+        height: auto;
+        padding: 14px;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .site-nav {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .site-user-card {
+        width: 100%;
+      }
+
+      .site-user-card span {
+        align-self: flex-start;
+      }
+
+      .account-shell {
+        grid-template-columns: 1fr;
+        padding: 14px;
+      }
+
+      .stats-grid,
+      .notice-grid,
+      .wallet-notes,
+      .profile-grid,
+      .checkout-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .section-head,
+      .compact-head {
+        flex-direction: column;
+      }
+
+      .wallet-card {
+        max-width: 100%;
+      }
+
+      .checkout-summary-pro {
+        position: static;
+      }
+
+      .payment-options,
+      .checkout-actions {
+        grid-template-columns: 1fr;
+      }
+    }
+  
+.direct-user-messages{display:grid;gap:10px}
+.direct-user-message{border:1px solid rgba(59,130,246,.22);background:rgba(59,130,246,.08);border-radius:14px;padding:12px}
+.direct-user-message.closed{opacity:.65}
+.direct-user-message span{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+.direct-user-message p{margin:8px 0 0}
+</style>
+</head>
+<body>
+
+<header class="site-topbar">
+  <div class="site-topbar-inner">
+    <a href="/" class="site-logo">Lanceio <span>Certo</span></a>
+
+    <nav class="site-nav">
+      <a href="/">Início</a>
+      <a href="/minha-conta">Minha Conta</a>
+
+      <div class="site-user-card">
+        <strong>{{ user.full_name or user.username or user.user or 'Usuário' }}</strong>
+        <span>Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
+      </div>
+
+      <a href="/logout">Sair</a>
+    </nav>
+  </div>
+</header>
+
+<div class="account-shell">
+  <aside class="account-sidebar">
+    <h2>Minha Conta</h2>
+
+    <a href="/minha-conta" class="account-side-link {% if section == 'dashboard' %}active{% endif %}">
+      Resumo da conta
+    </a>
+
+    <a href="/minha-conta#account-balance-panel"
+       class="account-side-link account-side-balance"
+       data-account-target="account-balance-panel">
+      Saldo
+    </a>
+
+    <a href="/minha-conta/cadastro" class="account-side-link {% if section == 'profile' %}active{% endif %}">
+      Meu Cadastro
+    </a>
+
+    <a href="/minha-conta/participacoes" class="account-side-link {% if section == 'participations' %}active{% endif %}">
+      Leilões Participados
+    </a>
+
+    <a href="/minha-conta/ganhos" class="account-side-link {% if section == 'wins' %}active{% endif %}">
+      Leilões Ganhos
+    </a>
+
+    <a href="/minha-conta/pagamentos" class="account-side-link {% if section == 'payments' %}active{% endif %}">
+      Pagamentos Pendentes
+    </a>
+
+    <a href="/minha-conta/expirados" class="account-side-link {% if section == 'expired' %}active{% endif %}">
+      Produtos Expirados
+    </a>
+  </aside>
+
+  <main class="account-main">
+{% if section == 'dashboard' %}
+<div class="section-head">
+  <div>
+    <h1>Resumo da conta</h1>
+    <p>Acompanhe suas participações, lances e pendências em um só lugar.</p>
+  </div>
+</div>
+
+
+<div class="stats-grid account-stats">
+    <div class="stat"><span>Participações</span><strong>{{ stats.distinct_auctions }}</strong></div>
+  <div class="stat"><span>Lances</span><strong>{{ stats.bids_total }}</strong></div>
+  <div class="stat"><span>Ganhos</span><strong>{{ stats.won }}</strong></div>
+  <div class="stat"><span>Pendentes</span><strong>{{ stats.pending }}</strong></div>
+  <div class="stat"><span>Expirados</span><strong>{{ stats.expired }}</strong></div>
+</div>
+
+<div id="account-balance-panel" class="panel-card account-wallet-panel">
+  <div class="section-head compact-head">
+    <div>
+      <h2>Saldo</h2>
+      <p>Escolha entre depositar saldo ou solicitar saque do valor disponível.</p>
+    </div>
+    <span class="wallet-badge">Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
+  </div>
+
+  <div class="wallet-action-tabs">
+    <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Depositar</button>
+    <button class="wallet-action-btn" type="button" data-wallet-mode="wallet-withdraw-panel">Sacar</button>
+  </div>
+
+  <div id="wallet-deposit-panel" class="wallet-mode-panel active">
+    <div class="wallet-choice-row">
+      <button class="wallet-choice-btn active" type="button" data-deposit-target="deposit-pix-panel">Depositar via PIX</button>
+      <button class="wallet-choice-btn" type="button" data-deposit-target="deposit-card-panel">Depositar via cartão</button>
+    </div>
+
+    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active">
+      <div class="wallet-card-head">
+        <span class="wallet-icon">◆</span>
+        <div>
+          <h3>Depositar via PIX</h3>
+          <p>Informe o valor para gerar o pagamento.</p>
+        </div>
+      </div>
+      <label>Valor do depósito
+        <input type="number" step="0.01" min="1" name="amount" placeholder="Ex: 20,00" required>
+      </label>
+      <button class="btn full" type="submit">Gerar PIX</button>
+    </form>
+
+    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel">
+      <div class="wallet-card-head">
+        <span class="wallet-icon">▣</span>
+        <div>
+          <h3>Depositar via cartão</h3>
+          <p>Use esta opção para testar pagamento por cartão de crédito.</p>
+        </div>
+      </div>
+      <label>Valor do depósito
+        <input type="number" step="0.01" min="1" name="amount" placeholder="Ex: 50,00" required>
+      </label>
+      <button class="btn full ghost" type="submit">Pagar com cartão</button>
+    </form>
+  </div>
+
+  <div id="wallet-withdraw-panel" class="wallet-mode-panel">
+    <form method="post" action="/minha-conta/saque" class="wallet-card withdraw-card">
+      <div class="wallet-card-head">
+        <span class="wallet-icon">↧</span>
+        <div>
+          <h3>Solicitar saque</h3>
+          <p>Saque mínimo de R$ 1,00. Será cobrada taxa de 1% sobre o valor solicitado.</p>
+        </div>
+      </div>
+      <div class="withdraw-fee-box">
+        <strong>Taxa de saque: 1%</strong>
+        <span>Exemplo: em um saque de R$ 100,00, a taxa será de R$ 1,00.</span>
+      </div>
+      <label>Valor do saque
+        <input type="number" step="0.01" min="1" name="amount" placeholder="Mínimo R$ 1,00" required>
+      </label>
+      <label>Chave PIX para recebimento
+        <input name="pix_key" placeholder="CPF, e-mail, telefone ou chave aleatória" required>
+      </label>
+      <button class="btn full" type="submit">Solicitar saque</button>
+    </form>
+  </div>
+
+  <div class="wallet-notes">
+    <div><strong>Depósito</strong><span>Escolha PIX ou cartão para adicionar saldo.</span></div>
+    <div><strong>Saque</strong><span>Valor mínimo de R$ 1,00 com taxa de 1%.</span></div>
+  </div>
+</div>
+
+<div class="notice-grid">
+  <div class="panel-card">
+    <h2>Último leilão ganho</h2>
+    {% if latest_orders %}
+      {% set o = latest_orders[0] %}
+      <div class="mini-auction">
+        <img src="{{ o.image_url }}" alt="{{ o.auction_title }}">
+        <div>
+          <strong>{{ o.auction_title }}</strong>
+          <p>Status: {{ o.status }}</p>
+          <p>Valor final: R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
+          {% if o.status == 'pending_payment' %}
+            <p class="highlight-warn">Prazo restante: {{ o.remaining_label }}</p>
+            <a href="{{ o.payment_link }}" class="btn small">Pagar agora</a>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <p class="muted">Você ainda não ganhou nenhum leilão.</p>
+    {% endif %}
+  </div>
+  <div class="panel-card">
+    <h2>Pagamentos pendentes</h2>
+    {% if pending_orders %}
+      {% for o in pending_orders %}
+      <div class="pending-row">
+        <div>
+          <strong>{{ o.auction_title }}</strong>
+          <p>Valor: R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
+          <p class="highlight-warn">Prazo: {{ o.remaining_label }}</p>
+        </div>
+        <a href="{{ o.payment_link }}" class="btn small">Pagar agora</a>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">Nenhum pagamento pendente no momento.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% elif section == 'profile' %}
+<div class="panel-card">
+  <div class="section-head"><div><h1>Meu Cadastro</h1><p>Dados básicos, acesso e endereço principal.</p></div></div>
+  <div class="profile-grid">
+    <div><span>Nome completo</span><strong>{{ display_user_name(user) }}</strong></div>
+    <div><span>Apelido / ID de login</span><strong>{{ user.username or user.nickname or user.user or '—' }}</strong></div>
+    <div><span>E-mail</span><strong>{{ user.email }}</strong></div>
+    <div><span>CPF</span><strong>{{ user.cpf or '—' }}</strong></div>
+    <div><span>Telefone</span><strong>{{ user.phone or '—' }}</strong></div>
+    <div><span>CEP</span><strong>{{ user.cep or '—' }}</strong></div>
+    <div><span>Rua</span><strong>{{ user.street or '—' }}</strong></div>
+    <div><span>Número</span><strong>{{ user.number or '—' }}</strong></div>
+    <div><span>Bairro</span><strong>{{ user.district or '—' }}</strong></div>
+    <div><span>Cidade</span><strong>{{ user.city or '—' }}</strong></div>
+    <div><span>Estado</span><strong>{{ user.state or '—' }}</strong></div>
+  </div>
+</div>
+
+{% elif section == 'participations' %}
+<div class="panel-card">
+  <div class="section-head"><div><h1>Leilões Participados</h1><p>Histórico de onde você já deu lance.</p></div></div>
+  <div class="cards account-cards">
+    {% for item in items %}
+    <article class="card auction-card compact-card">
+      <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image"/>
+      <div class="card-body">
+        <h3>{{ item.title }}</h3>
+        <p>Total de lances: <strong>{{ item.total_bids }}</strong></p>
+        <p>Total gasto: <strong>R$ {{ '%.2f'|format(item.total_spent)|replace('.', ',') }}</strong></p>
+        <p>Status: {{ item.status }}</p>
+        <p>Resultado: {% if item.won %}<strong>Você venceu</strong>{% else %}Não venceu{% endif %}</p>
+        <a href="/auction/{{ item.auction_id }}" class="btn full">Ver leilão</a>
+      </div>
+    </article>
+    {% else %}
+    <div class="panel-card empty-card"><p class="muted">Você ainda não participou de nenhum leilão.</p></div>
+    {% endfor %}
+  </div>
+</div>
+
+{% elif section == 'payments' %}
+<div class="panel-card">
+  <div class="section-head"><div><h1>Pagamentos Pendentes</h1><p>Produtos aguardando pagamento dentro do prazo de 1 dia.</p></div></div>
+  <div class="cards account-cards">
+    {% for o in orders %}
+    <article class="card auction-card compact-card">
+      <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" class="card-image"/>
+      <div class="card-body">
+        <h3>{{ o.auction_title }}</h3>
+        <p>Valor vencido: <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></p>
+        <p class="highlight-warn">Prazo restante: {{ o.remaining_label }}</p>
+        <a href="{{ o.payment_link }}" class="btn full">Continuar compra</a>
+      </div>
+    </article>
+    {% else %}
+    <div class="panel-card empty-card"><p class="muted">Nenhum pagamento pendente.</p></div>
+    {% endfor %}
+  </div>
+</div>
+
+{% elif section == 'wins' %}
+<div class="panel-card">
+  <div class="section-head"><div><h1>Leilões Ganhos</h1><p>Todos os produtos vencidos por você.</p></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Produto</th><th>Status</th><th>Valor</th><th>Prazo</th><th>Rastreio</th><th>Ação</th></tr></thead>
+      <tbody>
+        {% for o in orders %}
+        <tr>
+          <td>{{ o.auction_title }}</td>
+          <td>{{ o.status }}</td>
+          <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
+          <td>{{ o.remaining_label if o.status == 'pending_payment' else o.deadline_label }}</td>
+          <td>{{ o.tracking_code or '—' }}</td>
+          <td>{% if o.status == 'pending_payment' %}<a class="btn small" href="{{ o.payment_link }}">Pagar agora</a>{% else %}<span class="muted">Sem ação</span>{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">Você ainda não ganhou nenhum leilão.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% elif section == 'expired' %}
+<div class="panel-card">
+  <div class="section-head"><div><h1>Produtos Expirados</h1><p>Itens que você venceu, mas perdeu o prazo.</p></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Produto</th><th>Valor</th><th>Prazo encerrado</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for o in orders %}
+        <tr><td>{{ o.auction_title }}</td><td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td><td>{{ o.deadline_label }}</td><td>{{ o.status }}</td></tr>
+        {% else %}
+        <tr><td colspan="4">Nenhum produto expirado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% elif section == 'checkout' %}
+<div class="panel-card checkout-page-card">
+  <div class="section-head">
+    <div>
+      <h1>Fechamento do pedido</h1>
+      <p>Confirme seus dados de entrega, aceite os termos e escolha a forma de pagamento.</p>
+    </div>
+  </div>
+
+  <div class="checkout-grid checkout-grid-pro">
+
+    <!-- ESQUERDA -->
+    <div class="checkout-summary checkout-summary-pro">
+      <img src="{{ order.image_url }}" alt="{{ order.auction_title }}">
+
+      <h3>{{ order.auction_title }}</h3>
+
+      <div class="checkout-box">
+        <h3>Resumo do pedido</h3>
+
+        <div class="summary-row">
+          <span>Valor do leilão</span>
+          <strong>R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</strong>
+        </div>
+
+        <div class="summary-row">
+          <span>Frete estimado</span>
+          <strong>A calcular</strong>
+        </div>
+
+        <div class="summary-row total">
+          <span>Total inicial</span>
+          <strong>R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</strong>
+        </div>
+
+        <p class="summary-note">As taxas de cartão e parcelamento serão calculadas automaticamente pelo Mercado Pago na etapa de pagamento.</p>
+      </div>
+
+      <div class="checkout-box">
+        <h3>Informações importantes</h3>
+        <p class="highlight-warn">Prazo restante: {{ order.remaining_label }}</p>
+        <p>Após a confirmação do pagamento, o pedido será preparado para envio.</p>
+        <p>Quando o rastreio for informado, você poderá acompanhar pela aba <strong>Rastreio</strong>.</p>
+      </div>
+
+      {% if order.source_url %}
+      <a href="{{ order.source_url }}" target="_blank" class="btn full ghost">Ver produto oficial</a>
+      {% endif %}
+    </div>
+
+    <!-- DIREITA -->
+    <form id="checkoutForm" class="form-card checkout-form-pro" method="post" action="/minha-conta/pagamentos/{{ entity.auction_id }}/confirmar">
+
+      <!-- ETAPA 1 -->
+      <div class="checkout-step active" data-checkout-step="delivery">
+        <div class="checkout-step-head">
+          <span>1</span>
+          <div>
+            <h2>Confirmação dos dados de entrega</h2>
+            <p>Os dados abaixo foram preenchidos com base no seu cadastro. Confira antes de continuar.</p>
+          </div>
+        </div>
+
+        <label>Nome completo do recebedor
+          <input name="delivery_name" value="{{ entity.delivery_name or user.full_name or '' }}" required>
+        </label>
+
+        <div class="grid-2">
+          <label>CPF do recebedor
+            <input name="delivery_cpf" value="{{ user.cpf or '' }}" placeholder="000.000.000-00" required>
+          </label>
+
+          <label>Telefone
+            <input name="delivery_phone" value="{{ user.phone or '' }}" placeholder="(00) 00000-0000" required>
+          </label>
+        </div>
+
+        <div class="grid-2">
+          <label>CEP
+            <input name="delivery_cep" value="{{ entity.delivery_cep or user.cep or '' }}" placeholder="00000-000" required>
+          </label>
+
+          <label>Número
+            <input name="delivery_number" value="{{ entity.delivery_number or user.number or '' }}" required>
+          </label>
+        </div>
+
+        <label>Rua
+          <input name="delivery_street" value="{{ entity.delivery_street or user.street or '' }}" required>
+        </label>
+
+        <label>Bairro
+          <input name="delivery_district" value="{{ entity.delivery_district or user.district or '' }}" required>
+        </label>
+
+        <div class="grid-2">
+          <label>Cidade
+            <input name="delivery_city" value="{{ entity.delivery_city or user.city or '' }}" required>
+          </label>
+
+          <label>Estado
+            <input name="delivery_state" value="{{ entity.delivery_state or user.state or '' }}" maxlength="2" required>
+          </label>
+        </div>
+
+        <label>Complemento
+          <input name="delivery_complement" value="{{ entity.delivery_complement or user.complement or '' }}" placeholder="Apto, bloco, casa, sala">
+        </label>
+
+        <label>Ponto de referência
+          <input name="delivery_reference" value="{{ entity.delivery_reference or '' }}" placeholder="Ex: próximo à padaria">
+        </label>
+
+        <div class="security-box">
+          🔒 Seus dados serão usados apenas para confirmação, pagamento e envio do produto.
+        </div>
+
+        <label class="terms-check">
+          <input id="deliveryTerms" type="checkbox" required>
+          <span>
+            Ao selecionar esta caixa, você confirma que leu e concorda com os
+            <button type="button" class="link-button" data-open-terms>termos de compra</button>.
+          </span>
+        </label>
+
+        <button class="btn full" type="button" id="goToPayment">Finalizar pedido e escolher pagamento</button>
+      </div>
+
+      <!-- ETAPA 2 -->
+      <div class="checkout-step" data-checkout-step="payment">
+        <div class="checkout-step-head">
+          <span>2</span>
+          <div>
+            <h2>Forma de pagamento</h2>
+            <p>Escolha como deseja pagar. A integração final com Mercado Pago será concluída no backend.</p>
+          </div>
+        </div>
+
+        <input type="hidden" name="payment_method" id="paymentMethodInput" value="pix">
+
+        <div class="payment-options">
+          <button type="button" class="payment-option" data-payment-method="wallet">
+            <strong>Saldo da conta</strong>
+            <span>Use seu saldo disponível: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
+          </button>
+
+          <button type="button" class="payment-option active" data-payment-method="pix">
+            <strong>PIX</strong>
+            <span>Pagamento rápido com confirmação automática.</span>
+          </button>
+
+          <button type="button" class="payment-option" data-payment-method="credit_card">
+            <strong>Cartão de crédito</strong>
+            <span>Somente cartão em nome do usuário cadastrado.</span>
+          </button>
+        </div>
+
+        <div id="walletPaymentPanel" class="payment-panel">
+          <h3>Pagar com saldo da conta</h3>
+
+          {% if user.wallet_balance >= order.final_price %}
+            <p>Seu saldo é suficiente para pagar este pedido.</p>
+            <p><strong>Saldo atual:</strong> R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
+            <p><strong>Valor do pedido:</strong> R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</p>
+            <div class="security-box">
+              ⚡ Pagamento instantâneo usando saldo interno. Ao confirmar, o valor será descontado do saldo da conta.
+            </div>
+          {% else %}
+            <p class="highlight-warn">Saldo insuficiente para pagar este pedido.</p>
+            <p><strong>Saldo atual:</strong> R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
+            <p><strong>Valor do pedido:</strong> R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</p>
+            <p><strong>Falta:</strong> R$ {{ '%.2f'|format(order.final_price - user.wallet_balance)|replace('.', ',') }}</p>
+            <a href="/minha-conta?saldo=1" class="btn full ghost">Adicionar saldo</a>
+          {% endif %}
+        </div>
+
+        <div id="pixPaymentPanel" class="payment-panel active">
+          <h3>Pagamento via PIX</h3>
+          <p>Ao confirmar, o sistema seguirá para a geração/validação do PIX.</p>
+          <p class="muted">Código PIX de teste: <code>{{ entity.pix_code }}</code></p>
+        </div>
+
+        <div id="cardPaymentPanel" class="payment-panel">
+          <h3>Pagamento com cartão</h3>
+          <p>O cartão deverá estar no nome do usuário cadastrado no site.</p>
+
+          <div class="grid-2">
+            <label>Nome impresso no cartão
+              <input name="card_holder_name" value="{{ user.full_name or '' }}" placeholder="Nome completo">
+            </label>
+
+            <label>CPF do titular
+              <input name="card_holder_cpf" value="{{ user.cpf or '' }}" placeholder="000.000.000-00">
+            </label>
+          </div>
+
+          <label>Parcelamento
+            <select name="installments">
+              <option value="1">1x - sem parcelamento</option>
+              <option value="2">2x - taxas calculadas pelo Mercado Pago</option>
+              <option value="3">3x - taxas calculadas pelo Mercado Pago</option>
+              <option value="4">4x - taxas calculadas pelo Mercado Pago</option>
+              <option value="5">5x - taxas calculadas pelo Mercado Pago</option>
+              <option value="6">6x - taxas calculadas pelo Mercado Pago</option>
+              <option value="10">10x - taxas calculadas pelo Mercado Pago</option>
+              <option value="12">12x - taxas calculadas pelo Mercado Pago</option>
+            </select>
+          </label>
+
+          <div class="fee-info">
+            As taxas da máquina e do parcelamento serão calculadas automaticamente pelo Mercado Pago antes da confirmação final.
+          </div>
+        </div>
+
+        <label class="terms-check">
+          <input id="paymentTerms" name="accepted_terms" value="1" type="checkbox" required>
+          <span>
+            Confirmo novamente que li e aceito os
+            <button type="button" class="link-button" data-open-terms>termos de compra</button>
+            antes de concluir o pagamento.
+          </span>
+        </label>
+
+        <div class="checkout-actions">
+          <button class="btn ghost" type="button" id="backToDelivery">Voltar aos dados</button>
+          <button class="btn full" type="submit">Confirmar pagamento</button>
+        </div>
+      </div>
+
+      <!-- ETAPA 3 - mensagem visual usada quando o backend futuramente retornar sucesso na mesma página -->
+      <div id="checkoutSuccessMessage" class="checkout-success">
+        <h2>Pagamento finalizado com sucesso 🎉</h2>
+        <p>Parabéns! Em poucos dias seu produto será enviado.</p>
+        <p>Acompanhe tudo pelo site na aba <strong>Rastreio</strong>. Quando o código estiver disponível, ele poderá abrir o link de rastreamento em tempo real.</p>
+        <a href="/minha-conta/ganhos" class="btn full">Acompanhar meu pedido</a>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<div id="termsModal" class="terms-modal" aria-hidden="true">
+  <div class="terms-modal-card">
+    <div class="terms-modal-head">
+      <h2>Termos e regras de compra</h2>
+      <button type="button" class="terms-close" data-close-terms>×</button>
+    </div>
+
+    <div class="terms-modal-body">
+      <p><strong>1. Confirmação dos dados:</strong> o comprador é responsável por conferir nome, CPF, telefone e endereço antes da confirmação.</p>
+      <p><strong>2. Prazo de pagamento:</strong> o vencedor deve concluir o pagamento dentro do prazo informado no pedido.</p>
+      <p><strong>3. Pagamento:</strong> PIX e cartão poderão ser disponibilizados conforme integração com Mercado Pago. Taxas de cartão e parcelamento podem ser aplicadas pela operadora.</p>
+      <p><strong>4. Cartão de crédito:</strong> por segurança, o cartão deve estar em nome do usuário cadastrado ou do responsável validado pela plataforma.</p>
+      <p><strong>5. Envio:</strong> o produto será preparado após a confirmação do pagamento. O prazo de entrega depende da transportadora/Correios.</p>
+      <p><strong>6. Rastreio:</strong> quando o código for informado, o acompanhamento poderá ser feito pela aba Rastreio.</p>
+      <p><strong>7. Dados pessoais:</strong> os dados informados serão usados para pagamento, emissão de comprovantes e envio do produto.</p>
+      <p><strong>8. Produto:</strong> imagens, descrições e informações do item devem ser conferidas antes da finalização da compra.</p>
+    </div>
+
+    <button type="button" class="btn full" data-close-terms>Entendi</button>
+  </div>
+</div>
+{% endif %}
+  
+    <section class="panel-card">
+      <div class="section-head compact-head">
+        <div>
+          <h2>Mensagens do admin</h2>
+          <p>Atualizações diretas sobre seus produtos arrematados, compra e envio.</p>
+        </div>
+      </div>
+      <div class="direct-user-messages">
+        {% for msg in direct_messages if direct_messages is defined %}
+        <div class="direct-user-message {% if not msg.is_open %}closed{% endif %}">
+          <strong>{{ msg.order.auction.title if msg.order and msg.order.auction else 'Produto' }}</strong>
+          <span>{{ msg.created_at.strftime('%d/%m/%Y %H:%M') if msg.created_at else '—' }}</span>
+          <p>{{ msg.message }}</p>
+          {% if not msg.is_open %}<small>Atendimento fechado pelo admin.</small>{% endif %}
+        </div>
+        {% else %}
+        <p class="muted">Nenhuma mensagem direta no momento.</p>
+        {% endfor %}
+      </div>
+    </section>
+</main>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  function openBalancePanel(scroll = true) {
+    const panel = document.getElementById("account-balance-panel");
+    if (!panel) return;
+    panel.classList.add("active");
+    if (scroll) {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
+  const balanceButtons = document.querySelectorAll("[data-account-target]");
+  balanceButtons.forEach((button) => {
+    button.addEventListener("click", function (event) {
+      const target = this.getAttribute("data-account-target");
+      const panel = document.getElementById(target);
+
+      if (!panel) {
+        return;
+      }
+
+      event.preventDefault();
+      panel.classList.toggle("active");
+
+      if (panel.classList.contains("active")) {
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  });
+
+  if (window.location.hash === "#account-balance-panel" || new URLSearchParams(window.location.search).get("saldo") === "1") {
+    setTimeout(() => openBalancePanel(true), 200);
+  }
+
+  const walletButtons = document.querySelectorAll("[data-wallet-mode]");
+  const walletPanels = document.querySelectorAll(".wallet-mode-panel");
+
+  walletButtons.forEach((button) => {
+    button.addEventListener("click", function () {
+      const target = this.getAttribute("data-wallet-mode");
+
+      walletButtons.forEach((item) => item.classList.remove("active"));
+      walletPanels.forEach((panel) => panel.classList.remove("active"));
+
+      this.classList.add("active");
+
+      const selected = document.getElementById(target);
+      if (selected) selected.classList.add("active");
+    });
+  });
+
+  const depositButtons = document.querySelectorAll("[data-deposit-target]");
+  const depositPanels = document.querySelectorAll(".deposit-panel");
+
+  depositButtons.forEach((button) => {
+    button.addEventListener("click", function () {
+      const target = this.getAttribute("data-deposit-target");
+
+      depositButtons.forEach((item) => item.classList.remove("active"));
+      depositPanels.forEach((panel) => panel.classList.remove("active"));
+
+      this.classList.add("active");
+
+      const selected = document.getElementById(target);
+      if (selected) selected.classList.add("active");
+    });
+  });
+  const goToPayment = document.getElementById("goToPayment");
+  const backToDelivery = document.getElementById("backToDelivery");
+  const deliveryTerms = document.getElementById("deliveryTerms");
+  const paymentTerms = document.getElementById("paymentTerms");
+  const deliveryStep = document.querySelector('[data-checkout-step="delivery"]');
+  const paymentStep = document.querySelector('[data-checkout-step="payment"]');
+  const paymentMethodInput = document.getElementById("paymentMethodInput");
+  const paymentOptions = document.querySelectorAll("[data-payment-method]");
+  const pixPaymentPanel = document.getElementById("pixPaymentPanel");
+  const cardPaymentPanel = document.getElementById("cardPaymentPanel");
+  const walletPaymentPanel = document.getElementById("walletPaymentPanel");
+  const termsModal = document.getElementById("termsModal");
+
+  function setCheckoutStep(step) {
+    if (!deliveryStep || !paymentStep) return;
+    deliveryStep.classList.toggle("active", step === "delivery");
+    paymentStep.classList.toggle("active", step === "payment");
+    const form = document.getElementById("checkoutForm");
+    if (form) form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  if (goToPayment) {
+    goToPayment.addEventListener("click", function () {
+      const form = document.getElementById("checkoutForm");
+      if (!form) return;
+
+      const deliveryInputs = deliveryStep.querySelectorAll("input[required]");
+      for (const input of deliveryInputs) {
+        if (!input.checkValidity()) {
+          input.reportValidity();
+          return;
+        }
+      }
+
+      if (!deliveryTerms || !deliveryTerms.checked) {
+        deliveryTerms.reportValidity();
+        return;
+      }
+
+      setCheckoutStep("payment");
+    });
+  }
+
+  if (backToDelivery) {
+    backToDelivery.addEventListener("click", function () {
+      setCheckoutStep("delivery");
+    });
+  }
+
+  paymentOptions.forEach((button) => {
+    button.addEventListener("click", function () {
+      const method = this.getAttribute("data-payment-method");
+
+      paymentOptions.forEach((item) => item.classList.remove("active"));
+      this.classList.add("active");
+
+      if (paymentMethodInput) paymentMethodInput.value = method || "pix";
+
+      if (walletPaymentPanel) walletPaymentPanel.classList.toggle("active", method === "wallet");
+      if (pixPaymentPanel) pixPaymentPanel.classList.toggle("active", method === "pix");
+      if (cardPaymentPanel) cardPaymentPanel.classList.toggle("active", method === "credit_card");
+    });
+  });
+
+  document.querySelectorAll("[data-open-terms]").forEach((button) => {
+    button.addEventListener("click", function () {
+      if (termsModal) {
+        termsModal.classList.add("active");
+        termsModal.setAttribute("aria-hidden", "false");
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-close-terms]").forEach((button) => {
+    button.addEventListener("click", function () {
+      if (termsModal) {
+        termsModal.classList.remove("active");
+        termsModal.setAttribute("aria-hidden", "true");
+      }
+    });
+  });
+
+  if (termsModal) {
+    termsModal.addEventListener("click", function (event) {
+      if (event.target === termsModal) {
+        termsModal.classList.remove("active");
+        termsModal.setAttribute("aria-hidden", "true");
+      }
+    });
+  }
+
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,779 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="container lc-home">
+
+  <div class="lc-hero">
+    <div class="lc-hero-copy">
+      
+
+      <h1>Leilões online em uma experiência direta, limpa e confiável.</h1>
+      <p>
+        Encontre disputas ao vivo, acompanhe os próximos produtos e consulte leilões encerrados sem excesso de informação.
+      </p>
+
+      
+    </div>
+
+    <aside class="lc-market-card">
+      <div class="market-row">
+        <span>Ao vivo</span>
+        <strong>{{ live_items|length }}</strong>
+      </div>
+      <div class="market-row">
+        <span>Próximos</span>
+        <strong>{{ upcoming_items|length }}</strong>
+      </div>
+      <div class="market-row">
+        <span>Encerrados</span>
+        <strong>{{ ended_items|length }}</strong>
+      </div>
+      <div class="market-row">
+        <span>Indicações</span>
+        <strong>{{ suggestion_products|length if suggestion_products is defined else 0 }}</strong>
+      </div>      
+    </aside>
+  </div>
+
+  <div class="lc-toolbar">
+    <div>
+      <h2>Leilões</h2>
+      <p>Escolha uma disputa ativa, veja os próximos produtos ou consulte resultados.</p>
+    </div>
+
+    <div class="lc-tools">
+      
+      <div class="lc-tabs">
+        <button class="lc-tab active" type="button" data-home-target="home-active-auctions">Ao vivo e próximos</button>
+        <button class="lc-tab" type="button" data-home-target="home-ended-auctions">Encerrados</button>
+        <button class="lc-tab" type="button" data-home-target="home-suggestions">Indicação</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="home-active-auctions" class="home-tab-panel active">
+
+    <section class="auction-lane">
+      <div class="lane-head">
+        <div>
+          <h3>Ao vivo</h3>
+          <p>Leilões abertos agora.</p>
+        </div>
+        <span class="lane-count live">{{ live_items|length }}</span>
+      </div>
+
+      <div class="cards lc-auction-grid">
+        {% for item in live_items %}
+        <article class="card lc-auction-card" data-auction-card data-title="{{ item.title|lower }}">
+          <div class="auction-media">
+            <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image">
+            <span class="status-badge live">AO VIVO</span>
+          </div>
+
+          <div class="card-body">
+            <h3>{{ item.title }}</h3>
+
+            <div class="price-line">
+              <div>
+                <span>Atual</span>
+                <strong>R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}</strong>
+              </div>
+              <div>
+                <span>Original</span>
+                <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong>
+              </div>
+            </div>
+
+            <div class="timer-line">
+              <span>Tempo restante</span>
+              <strong class="countdown" data-seconds="{{ item.remaining_seconds }}">--</strong>
+            </div>
+
+            <a href="/auction/{{ item.id }}" class="btn full">Participar</a>
+          </div>
+        </article>
+        {% else %}
+        <div class="empty-state">
+          <strong>Nenhum leilão ao vivo no momento.</strong>
+          <span>Volte em breve para novas disputas.</span>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="auction-lane">
+      <div class="lane-head">
+        <div>
+          <h3>Próximos</h3>
+          <p>Produtos cadastrados para novas disputas.</p>
+        </div>
+        <span class="lane-count scheduled">{{ upcoming_items|length }}</span>
+      </div>
+
+      <div class="cards lc-auction-grid">
+        {% for item in upcoming_items %}
+        <article class="card lc-auction-card" data-auction-card data-title="{{ item.title|lower }}">
+          <div class="auction-media">
+            <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image">
+            <span class="status-badge scheduled">PRÓXIMO</span>
+          </div>
+
+          <div class="card-body">
+            <h3>{{ item.title }}</h3>
+
+            <div class="price-line">
+              <div>
+                <span>Inicial</span>
+                <strong>R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}</strong>
+              </div>
+              <div>
+                <span>Original</span>
+                <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong>
+              </div>
+            </div>
+
+            <div class="timer-line">
+              {% if item.start_remaining <= 86400 %}
+                <span>Começa em</span>
+                <strong class="countdown" data-seconds="{{ item.start_remaining }}">--</strong>
+              {% else %}
+                <span>Início</span>
+                <strong>{{ item.scheduled_start[:16].replace('T', ' ') }}</strong>
+              {% endif %}
+            </div>
+
+            <a href="/auction/{{ item.id }}" class="btn full ghost">Ver produto</a>
+          </div>
+        </article>
+        {% else %}
+        <div class="empty-state">
+          <strong>Nenhum próximo leilão cadastrado.</strong>
+          <span>Novos produtos aparecerão aqui.</span>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+  </div>
+
+  <div id="home-ended-auctions" class="home-tab-panel">
+
+    <section class="auction-lane">
+      <div class="lane-head">
+        <div>
+          <h3>Encerrados</h3>
+          <p>Histórico de resultados finalizados.</p>
+        </div>
+        <span class="lane-count ended">{{ ended_items|length }}</span>
+      </div>
+
+      <div class="cards lc-auction-grid">
+        {% for item in ended_items %}
+        <article class="card lc-auction-card ended" data-auction-card data-title="{{ item.title|lower }}">
+          <div class="auction-media">
+            <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image">
+            <span class="status-badge ended">ENCERRADO</span>
+          </div>
+
+          <div class="card-body">
+            <h3>{{ item.title }}</h3>
+
+            <div class="price-line">
+              <div>
+                <span>Final</span>
+                <strong>R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}</strong>
+              </div>
+              <div>
+                <span>Vencedor</span>
+                <strong>{{ item.winner_name or 'Sem vencedor' }}</strong>
+              </div>
+            </div>
+
+            <a href="/auction/{{ item.id }}" class="btn full ghost">Ver detalhes</a>
+          </div>
+        </article>
+        {% else %}
+        <div class="empty-state">
+          <strong>Nenhum leilão encerrado ainda.</strong>
+          <span>Os resultados aparecerão nesta área.</span>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+  </div>
+
+
+  <div id="home-suggestions" class="home-tab-panel">
+
+    <section class="auction-lane suggestion-lane">
+      <div class="lane-head">
+        <div>
+          <h3>Indicação de produtos</h3>
+          <p>Vote no produto que você gostaria de ver nos próximos leilões. Cada usuário pode votar uma vez por dia.</p>
+        </div>
+        <span class="lane-count scheduled">{{ suggestion_products|length if suggestion_products is defined else 0 }}</span>
+      </div>
+
+      {% if request.query_params.get('indicacao') == 'ok' %}
+      <div class="empty-state suggestion-message success">
+        <strong>Voto registrado com sucesso.</strong>
+        <span>Obrigado pela indicação. Você poderá votar novamente amanhã.</span>
+      </div>
+      {% elif request.query_params.get('indicacao') == 'ja-votou' %}
+      <div class="empty-state suggestion-message warn">
+        <strong>Você já fez uma indicação hoje.</strong>
+        <span>O limite é de um voto por usuário a cada dia.</span>
+      </div>
+      {% endif %}
+
+      {% if user %}
+        {% if today_suggestion_vote %}
+          <div class="empty-state suggestion-message">
+            <strong>Indicação do dia já registrada.</strong>
+            <span>Você já votou hoje. Volte amanhã para indicar outro produto.</span>
+          </div>
+        {% endif %}
+
+        <div class="cards lc-auction-grid suggestion-grid">
+          {% for product in suggestion_products %}
+          <article class="card lc-auction-card suggestion-card">
+            <div class="card-body">
+              <span class="suggestion-category">{{ product.category }}</span>
+              <h3>{{ product.name }}</h3>
+
+              <div class="price-line">
+                <div>
+                  <span>Faixa</span>
+                  <strong>{{ product.price_level }}</strong>
+                </div>
+                <div>
+                  <span>Votos</span>
+                  {% set stat = (suggestion_vote_stats|selectattr('key', 'equalto', product.key)|list|first) if suggestion_vote_stats is defined else none %}
+                  <strong>{{ stat.votes if stat else 0 }}</strong>
+                </div>
+              </div>
+
+              <form method="post" action="/indicacao/votar">
+                <input type="hidden" name="product_key" value="{{ product.key }}">
+                <button class="btn full" type="submit" {% if today_suggestion_vote %}disabled{% endif %}>
+                  {% if today_suggestion_vote %}Voto diário usado{% else %}Votar neste produto{% endif %}
+                </button>
+              </form>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-state suggestion-message">
+          <strong>Entre na conta para votar.</strong>
+          <span>O voto é limitado a uma indicação por usuário por dia.</span>
+        </div>
+      {% endif %}
+    </section>
+
+  </div>
+
+  <div id="noSearchResults" class="empty-state search-empty" style="display:none;">
+    <strong>Nenhum produto encontrado.</strong>
+    <span>Tente buscar por outro nome.</span>
+  </div>
+
+</section>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const buttons = document.querySelectorAll(".lc-tab");
+  const panels = document.querySelectorAll(".home-tab-panel");
+  const searchInput = document.getElementById("auctionSearch");
+  const noResults = document.getElementById("noSearchResults");
+  
+
+  buttons.forEach((button) => {
+    button.addEventListener("click", function () {
+      const target = this.getAttribute("data-home-target");
+
+      buttons.forEach((item) => item.classList.remove("active"));
+      panels.forEach((panel) => panel.classList.remove("active"));
+
+      this.classList.add("active");
+
+      const selected = document.getElementById(target);
+      if (selected) selected.classList.add("active");
+
+      filterCards();
+    });
+  });
+
+  function filterCards() {
+    const term = (searchInput?.value || "").trim().toLowerCase();
+    const activePanel = document.querySelector(".home-tab-panel.active");
+    const cards = activePanel ? activePanel.querySelectorAll("[data-auction-card]") : [];
+    let visible = 0;
+
+    cards.forEach((card) => {
+      const title = card.getAttribute("data-title") || "";
+      const match = !term || title.includes(term);
+      card.style.display = match ? "" : "none";
+      if (match) visible += 1;
+    });
+
+    if (noResults) {
+      noResults.style.display = term && cards.length && visible === 0 ? "flex" : "none";
+    }
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener("input", filterCards);
+  }
+
+  function formatTime(totalSeconds) {
+    let seconds = Math.max(0, parseInt(totalSeconds || 0, 10));
+    const days = Math.floor(seconds / 86400);
+    seconds %= 86400;
+    const hours = Math.floor(seconds / 3600);
+    seconds %= 3600;
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+
+    if (days > 0) return `${days}d ${String(hours).padStart(2, "0")}h`;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }
+
+  function tickCountdowns() {
+    document.querySelectorAll(".countdown[data-seconds]").forEach((el) => {
+      const current = parseInt(el.getAttribute("data-seconds") || "0", 10);
+      el.textContent = formatTime(current);
+      el.setAttribute("data-seconds", Math.max(0, current - 1));
+    });
+  }
+
+  tickCountdowns();
+  setInterval(tickCountdowns, 1000);
+});
+</script>
+
+<style>
+.lc-home {
+  padding-top: 34px;
+  padding-bottom: 54px;
+}
+
+.lc-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 22px;
+  align-items: stretch;
+  margin-bottom: 30px;
+}
+
+.lc-hero-copy,
+.lc-market-card,
+.auction-lane {
+  border: 1px solid rgba(255,255,255,.10);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.060), rgba(255,255,255,.035));
+  border-radius: 26px;
+  box-shadow: 0 18px 46px rgba(0,0,0,.18);
+}
+
+.lc-hero-copy {
+  padding: 30px;
+}
+
+.lc-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.lc-brand-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255,255,255,.25), transparent 34%),
+    linear-gradient(135deg, #2563eb, #22c55e);
+  color: #fff;
+  font-weight: 950;
+  letter-spacing: -.06em;
+  box-shadow: 0 14px 34px rgba(37,99,235,.28);
+}
+
+.lc-brand-name {
+  color: #fff;
+  font-size: 23px;
+  font-weight: 950;
+  letter-spacing: -.03em;
+}
+
+.lc-brand-name strong {
+  color: #3b82f6;
+}
+
+.lc-hero h1 {
+  max-width: 780px;
+  margin: 0 0 14px;
+  font-size: clamp(34px, 4.6vw, 56px);
+  line-height: 1.02;
+  letter-spacing: -1.5px;
+}
+
+.lc-hero p {
+  max-width: 690px;
+  margin: 0;
+  color: rgba(255,255,255,.74);
+  font-size: 17px;
+  line-height: 1.58;
+}
+
+.lc-hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.lc-market-card {
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.market-row,
+.market-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255,255,255,.050);
+  border: 1px solid rgba(255,255,255,.075);
+}
+
+.market-row span,
+.market-note span {
+  color: rgba(255,255,255,.68);
+  font-weight: 750;
+}
+
+.market-row strong {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.market-note strong {
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #4ade80;
+  background: rgba(74,222,128,.11);
+  border: 1px solid rgba(74,222,128,.28);
+}
+
+.lc-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.lc-toolbar h2 {
+  margin: 0 0 4px;
+  font-size: 30px;
+}
+
+.lc-toolbar p {
+  margin: 0;
+  color: rgba(255,255,255,.68);
+}
+
+.lc-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+#auctionSearch {
+  width: min(280px, 100%);
+  border: 1px solid rgba(255,255,255,.13);
+  background: rgba(255,255,255,.060);
+  color: #fff;
+  border-radius: 999px;
+  padding: 11px 14px;
+  outline: none;
+}
+
+#auctionSearch::placeholder {
+  color: rgba(255,255,255,.48);
+}
+
+.lc-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.lc-tab {
+  border: 1px solid rgba(255,255,255,.13);
+  background: rgba(255,255,255,.055);
+  color: #fff;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.lc-tab.active {
+  background: rgba(59,130,246,.24);
+  border-color: rgba(59,130,246,.46);
+}
+
+.home-tab-panel {
+  display: none;
+}
+
+.home-tab-panel.active {
+  display: block;
+}
+
+.auction-lane {
+  padding: 20px;
+  margin-bottom: 22px;
+}
+
+.lane-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.lane-head h3 {
+  margin: 0 0 4px;
+  font-size: 21px;
+}
+
+.lane-head p {
+  margin: 0;
+  color: rgba(255,255,255,.66);
+}
+
+.lane-count {
+  min-width: 42px;
+  height: 34px;
+  padding: 0 12px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-weight: 950;
+  background: rgba(59,130,246,.16);
+}
+
+.lane-count.live {
+  background: rgba(34,197,94,.14);
+}
+
+.lane-count.scheduled {
+  background: rgba(250,204,21,.13);
+}
+
+.lane-count.ended {
+  background: rgba(148,163,184,.14);
+}
+
+.lc-auction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+  gap: 16px;
+}
+
+.lc-auction-card {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.040);
+  border-radius: 22px;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.lc-auction-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(59,130,246,.32);
+  background: rgba(255,255,255,.055);
+}
+
+.auction-media {
+  position: relative;
+  overflow: hidden;
+}
+
+.auction-media .card-image {
+  width: 100%;
+  height: 210px;
+  object-fit: cover;
+  display: block;
+}
+
+.status-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 950;
+  background: rgba(15,23,42,.82);
+  backdrop-filter: blur(10px);
+}
+
+.status-badge.live {
+  color: #86efac;
+}
+
+.status-badge.scheduled {
+  color: #fde68a;
+}
+
+.status-badge.ended {
+  color: #cbd5e1;
+}
+
+.card-body {
+  padding: 16px;
+}
+
+.card-body h3 {
+  min-height: 44px;
+  margin: 0 0 14px;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.price-line {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.price-line div,
+.timer-line,
+.empty-state {
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255,255,255,.055);
+  border: 1px solid rgba(255,255,255,.055);
+}
+
+.price-line span,
+.timer-line span {
+  display: block;
+  color: rgba(255,255,255,.62);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.price-line strong,
+.timer-line strong {
+  display: block;
+  color: #fff;
+}
+
+.timer-line {
+  margin: 10px 0 14px;
+}
+
+.empty-state {
+  grid-column: 1 / -1;
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  color: #b9d5ff;
+}
+
+.empty-state strong,
+.empty-state span {
+  display: block;
+}
+
+.empty-state span {
+  margin-top: 4px;
+  color: rgba(255,255,255,.62);
+}
+
+.search-empty {
+  margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .lc-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .lc-toolbar,
+  .lane-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lc-tools,
+  #auctionSearch {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .price-line {
+    grid-template-columns: 1fr;
+  }
+}
+
+.suggestion-card .card-body h3 {
+  min-height: 54px;
+}
+.suggestion-category {
+  display: inline-flex;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(59,130,246,.16);
+  color: #bfdbfe;
+  font-size: 12px;
+  font-weight: 900;
+}
+.suggestion-card form {
+  margin-top: 14px;
+}
+.suggestion-card button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  filter: grayscale(.25);
+}
+.suggestion-message {
+  margin-bottom: 16px;
+}
+.suggestion-message.success {
+  border-color: rgba(74,222,128,.28);
+  color: #bbf7d0;
+}
+.suggestion-message.warn {
+  border-color: rgba(251,191,36,.28);
+  color: #fde68a;
+}
+
+.lc-auction-grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))!important;gap:14px!important}
+.lc-auction-card{border-radius:16px!important}
+.lc-auction-card .card-image{height:145px!important;object-fit:cover}
+.lc-auction-card .card-body{padding:12px!important}
+.lc-auction-card h3{font-size:16px!important;line-height:1.2;min-height:38px;margin:0 0 8px}
+.price-line{gap:8px!important}
+.price-line span,.timer-line span{font-size:12px!important}
+.price-line strong,.timer-line strong{font-size:14px!important}
+</style>
+{% endblock %}

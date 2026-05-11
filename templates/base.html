@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lancei o Certo</title>
+  <link rel="stylesheet" href="/static/style.css" />
+
+  <style>
+    .topbar {
+      background: rgba(2, 6, 23, 0.75);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .topbar .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .topbar .brand .logo-mark {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      background: linear-gradient(135deg, #2563eb, #22c55e);
+      box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
+      flex: 0 0 auto;
+    }
+
+    /* força o LC branco mesmo se o style.css tiver .brand span azul */
+    .topbar .brand .logo-mark .logo-letters {
+      color: #ffffff !important;
+      font-weight: 900;
+      font-size: 17px;
+      letter-spacing: -0.5px;
+      line-height: 1;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+    }
+
+    .topbar .brand .logo-text {
+      font-size: 21px;
+      font-weight: 900;
+      color: #ffffff !important;
+      letter-spacing: -0.6px;
+      white-space: nowrap;
+    }
+
+    .topbar .brand .logo-text strong {
+      color: #60a5fa !important;
+    }
+
+    .topbar .brand:hover .logo-mark {
+      transform: scale(1.05);
+      transition: 0.2s ease;
+    }
+  </style>
+</head>
+
+<body>
+
+<header class="topbar">
+  <div class="container topbar-inner">
+
+    <a href="/" class="brand" aria-label="Lancei o Certo">
+      <span class="logo-mark">
+        <span class="logo-letters">LC</span>
+      </span>
+      <span class="logo-text">Lancei o <strong>Certo</strong></span>
+    </a>
+
+    <nav class="nav">
+      <a href="/">Início</a>
+
+      {% if user %}
+        <a href="/minha-conta">Minha Conta</a>
+
+        {% if user.is_admin %}
+          <a href="/admin">Painel Admin</a>
+        {% endif %}
+
+        <div class="user-box">
+          <span class="user-name">{{ display_user_name(user) }}</span>
+          <span class="user-balance">
+            Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}
+          </span>
+        </div>
+
+        <a href="/logout">Sair</a>
+      {% else %}
+        <a href="/login">Entrar</a>
+        <a href="/register" class="btn small">Criar conta</a>
+      {% endif %}
+    </nav>
+
+  </div>
+</header>
+
+<main>
+  {% block content %}{% endblock %}
+</main>
+
+<script src="/static/app.js"></script>
+
+</body>
+</html>
