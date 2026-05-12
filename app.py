@@ -968,9 +968,9 @@ def ensure_columns() -> None:
                 "document_number": "VARCHAR(40) DEFAULT ''",
                 "document_file_url": "VARCHAR(600) DEFAULT ''",
                 "selfie_file_url": "VARCHAR(600) DEFAULT ''",
-                "verified_at": "DATETIME",
-                "terms_accepted_at": "DATETIME",
-                "privacy_accepted_at": "DATETIME",
+                "verified_at": "TIMESTAMP NULL",
+                "terms_accepted_at": "TIMESTAMP NULL",
+                "privacy_accepted_at": "TIMESTAMP NULL",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
