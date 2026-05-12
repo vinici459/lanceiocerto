@@ -55,6 +55,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     full_name: Mapped[str] = mapped_column(String(120))
     public_name: Mapped[str] = mapped_column(String(40), default="", index=True)
+    # Mantém compatibilidade com bancos criados em versões anteriores, que tinham a coluna nickname como obrigatória.
+    nickname: Mapped[str] = mapped_column(String(40), default="", index=True)
     email: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     password: Mapped[str] = mapped_column(String(120))
     cpf: Mapped[str] = mapped_column(String(20), default="")
@@ -366,7 +368,7 @@ TURBO_2_SECONDS = {
     1.00: 7,
 }
 
-BID_BUTTON_COOLDOWN_SECONDS = {bid: (10 if bid == 0.10 else 30) for bid in ALLOWED_BIDS}
+BID_BUTTON_COOLDOWN_SECONDS = {bid: (8 if bid <= 0.30 else 15 if bid <= 0.60 else 22) for bid in ALLOWED_BIDS}
 MAX_INITIAL_DURATION_SECONDS = 60 * 60
 DEFAULT_INITIAL_DURATION_SECONDS = 30 * 60
 PAYMENT_DEADLINE_MINUTES = 10
@@ -422,6 +424,22 @@ def normalize_public_name(value: str) -> str:
     value = (value or "").strip().lower()
     value = re.sub(r"[^a-z0-9._-]", "", value)
     return value[:24]
+
+
+def user_is_verified(user: Optional["User"]) -> bool:
+    return bool(user and getattr(user, "identity_status", "pending") == "verified")
+
+
+def user_has_identity_files(user: Optional["User"]) -> bool:
+    return bool(user and (getattr(user, "document_file_url", "") or "").strip() and (getattr(user, "selfie_file_url", "") or "").strip())
+
+
+def account_status_label(user: Optional["User"]) -> str:
+    if user_is_verified(user):
+        return "Conta confirmada"
+    if user_has_identity_files(user):
+        return "Documentos em análise"
+    return "Documentos pendentes"
 
 
 def fmt_deadline(dt: Optional[datetime]) -> str:
@@ -897,6 +915,7 @@ def ensure_columns() -> None:
             cols = {c["name"] for c in inspector.get_columns("users")}
             for name, ddl in {
                 "public_name": "VARCHAR(40) DEFAULT ''",
+                "nickname": "VARCHAR(40) DEFAULT ''",
                 "identity_status": "VARCHAR(30) DEFAULT 'pending'",
                 "identity_note": "TEXT DEFAULT ''",
                 "document_type": "VARCHAR(40) DEFAULT 'CPF'",
@@ -907,6 +926,9 @@ def ensure_columns() -> None:
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
+            # Garante que bancos antigos com nickname obrigatório não quebrem o cadastro.
+            if "nickname" in cols:
+                conn.execute(text("UPDATE users SET nickname = COALESCE(NULLIF(nickname, ''), public_name, email, 'usuario') WHERE nickname IS NULL OR nickname = ''"))
 
         if inspector.has_table("auction_items"):
             cols = {c["name"] for c in inspector.get_columns("auction_items")}
@@ -992,6 +1014,7 @@ def seed() -> None:
                 admin = User(
                     full_name=admin_name,
                     public_name=normalize_public_name(os.getenv("ADMIN_PUBLIC_NAME") or "admin"),
+                    nickname=normalize_public_name(os.getenv("ADMIN_PUBLIC_NAME") or "admin"),
                     email=admin_email,
                     password=admin_password or secrets.token_urlsafe(12),
                     cpf="",
@@ -1009,6 +1032,8 @@ def seed() -> None:
                 admin.identity_status = "verified"
                 if not admin.public_name:
                     admin.public_name = normalize_public_name(os.getenv("ADMIN_PUBLIC_NAME") or "admin")
+                if not getattr(admin, "nickname", ""):
+                    admin.nickname = admin.public_name
                 if admin_password:
                     admin.password = admin_password
             default_admin = db.query(User).filter(User.email == "admin@lanceiocerto.local").first()
@@ -1024,6 +1049,7 @@ def seed() -> None:
                 admin = User(
                     full_name="Administrador Principal",
                     public_name="admin",
+                    nickname="admin",
                     email="admin@lanceiocerto.local",
                     password="123456",
                     cpf="000.000.000-00",
@@ -1222,20 +1248,22 @@ def register_page(request: Request):
 
 
 @app.post("/register")
-def register(
+async def register(
     request: Request,
     full_name: str = Form(...),
     public_name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
-    cpf: str = Form(""),
-    phone: str = Form(""),
-    cep: str = Form(""),
-    street: str = Form(""),
-    number: str = Form(""),
-    district: str = Form(""),
-    city: str = Form(""),
-    state: str = Form(""),
+    cpf: str = Form(...),
+    phone: str = Form(...),
+    cep: str = Form(...),
+    street: str = Form(...),
+    number: str = Form(...),
+    district: str = Form(...),
+    city: str = Form(...),
+    state: str = Form(...),
+    document_file: UploadFile = File(...),
+    selfie_file: UploadFile = File(...),
 ):
     db = SessionLocal()
     try:
@@ -1247,12 +1275,24 @@ def register(
             return templates.TemplateResponse("register.html", {"request": request, "error": "E-mail já cadastrado."})
         if db.query(User).filter(User.public_name == clean_public_name).first():
             return templates.TemplateResponse("register.html", {"request": request, "error": "Este apelido público já está em uso."})
+        required_values = {
+            "CPF": cpf, "telefone": phone, "CEP": cep, "rua": street, "número": number,
+            "bairro": district, "cidade": city, "estado": state,
+        }
+        missing = [label for label, value in required_values.items() if not (value or "").strip()]
+        if missing:
+            return templates.TemplateResponse("register.html", {"request": request, "error": "Preencha todos os campos obrigatórios: " + ", ".join(missing) + "."})
+        if not document_file or not document_file.filename or not selfie_file or not selfie_file.filename:
+            return templates.TemplateResponse("register.html", {"request": request, "error": "Envie o documento e a selfie de verificação para concluir o cadastro."})
         clean_cpf = cpf.strip()
         if clean_cpf and db.query(User).filter(User.cpf == clean_cpf).first():
             return templates.TemplateResponse("register.html", {"request": request, "error": "CPF já cadastrado."})
+        document_url = save_uploaded_image(document_file)
+        selfie_url = save_uploaded_image(selfie_file)
         user = User(
             full_name=full_name.strip(),
             public_name=clean_public_name,
+            nickname=clean_public_name,
             email=email.strip().lower(),
             password=password.strip(),
             cpf=cpf.strip(),
@@ -1263,7 +1303,13 @@ def register(
             district=district.strip(),
             city=city.strip(),
             state=state.strip(),
-            wallet_balance=20.0,
+            document_type="CPF",
+            document_number=cpf.strip(),
+            document_file_url=document_url,
+            selfie_file_url=selfie_url,
+            identity_status="pending",
+            identity_note="Cadastro enviado. Documentos aguardando análise do administrador.",
+            wallet_balance=0.0,
         )
         db.add(user)
         db.commit()
@@ -1348,8 +1394,7 @@ def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
         bid_value = BR(bid_value)
         if bid_value not in ALLOWED_BIDS:
             raise HTTPException(status_code=400, detail="Valor de lance inválido.")
-        if user.wallet_balance < bid_value:
-            raise HTTPException(status_code=400, detail="Saldo insuficiente.")
+        # Lance não debita saldo. O dinheiro real só circula no pagamento do pedido vencedor.
 
         now = datetime.utcnow()
         previous_user_bid_count = db.query(Bid).filter(Bid.auction_id == item.id, Bid.user_id == user.id).count()
@@ -1370,15 +1415,12 @@ def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
                 remaining_cd = math.ceil(cooldown - elapsed)
                 raise HTTPException(status_code=429, detail=f"Aguarde {remaining_cd}s para usar esse botão novamente.")
 
-        bid_fee_percent = float(getattr(item, "bid_fee_percent", DEFAULT_BID_FEE_PERCENT) or DEFAULT_BID_FEE_PERCENT)
-
-        fee_value = BR(bid_value * (bid_fee_percent / 100.0))
-        increment = BR(bid_value - fee_value)
-        user.wallet_balance = BR(user.wallet_balance - bid_value)
+        fee_value = 0.0
+        increment = BR(bid_value)
 
         item.current_price = BR(item.current_price + increment)
-        item.total_bid_fees = BR(item.total_bid_fees + fee_value)
-        item.total_bid_spent = BR(item.total_bid_spent + bid_value)
+        item.total_bid_fees = BR(getattr(item, "total_bid_fees", 0.0) or 0.0)
+        item.total_bid_spent = BR(getattr(item, "total_bid_spent", 0.0) or 0.0)
 
         turbo = compute_turbo_level(item)
         item.turbo_level = turbo
@@ -1401,14 +1443,17 @@ def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
             fee_value=fee_value,
             price_increment=increment,
         )
-        txn = WalletTransaction(user_id=user.id, amount=-bid_value, kind="bid", note=f"Lance no leilão #{item.id}")
-        db.add_all([bid, txn])
+        db.add(bid)
         db.commit()
         payload = public_auction_payload(item, db)
     finally:
         db.close()
 
-    asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
+    except RuntimeError:
+        pass
     return JSONResponse({"ok": True, "auction": payload})
 
 
@@ -1501,6 +1546,7 @@ def my_account(request: Request):
                 "withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id == user.id).order_by(desc(WithdrawalRequest.created_at)).limit(20).all(),
                 "tickets": db.query(SupportTicket).filter(SupportTicket.user_id == user.id).order_by(desc(SupportTicket.created_at)).limit(20).all(),
                 "orders_raw": won_orders,
+                "account_status_label": account_status_label(user),
             },
         )
     finally:
@@ -1508,6 +1554,8 @@ def my_account(request: Request):
 
 
 @app.post("/minha-conta/saldo")
+@app.post("/minha-conta/saldo/pix")
+@app.post("/minha-conta/saldo/cartao")
 def account_add_balance(request: Request, amount: float = Form(...)):
     db = SessionLocal()
     try:
@@ -1515,10 +1563,10 @@ def account_add_balance(request: Request, amount: float = Form(...)):
         amount = BR(amount)
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Valor inválido.")
-        user.wallet_balance = BR(user.wallet_balance + amount)
-        db.add(WalletTransaction(user_id=user.id, amount=amount, kind="deposit", note="Recarga manual de teste"))
+        # Em produção, o saldo só deve ser creditado por webhook confirmado do gateway de pagamento.
+        db.add(WalletTransaction(user_id=user.id, amount=0.0, kind="deposit_pending", note=f"Depósito solicitado: R$ {fmt_money(amount)}. Aguardando integração/webhook do gateway."))
         db.commit()
-        return RedirectResponse("/minha-conta", status_code=303)
+        return RedirectResponse("/minha-conta?saldo=1", status_code=303)
     finally:
         db.close()
 
@@ -1638,6 +1686,8 @@ def confirm_payment_flow(
 
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        if not user_is_verified(user):
+            raise HTTPException(status_code=403, detail="Para liberar pagamento/envio do produto, sua conta precisa estar confirmada pelo administrador.")
 
         # 📦 Atualiza endereço
         order.delivery_name = delivery_name.strip()
@@ -2205,6 +2255,8 @@ def account_request_withdrawal(request: Request, amount: float = Form(...), pix_
     db = SessionLocal()
     try:
         user = require_user(request, db)
+        if not user_is_verified(user):
+            raise HTTPException(status_code=403, detail="Para solicitar saque, envie seus documentos e aguarde a confirmação da conta.")
         amount = BR(amount)
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Valor inválido.")

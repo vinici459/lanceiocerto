@@ -10,18 +10,6 @@
       <p>
         Acompanhe leilões ao vivo, veja os próximos produtos e participe usando seu apelido público, sem expor seu nome completo na página principal.
       </p>
-      <div class="hero-actions">
-        <a href="/register" class="btn">Criar conta</a>
-        <a href="#home-active-auctions" class="btn ghost">Ver leilões</a>
-      </div>
-    </div>
-
-    <div class="hero-visual-card" aria-label="Destaque visual do Lancei o Certo">
-      <div class="hero-orbit one"></div>
-      <div class="hero-orbit two"></div>
-      <img src="https://images.unsplash.com/photo-1516321497487-e288fb19713f?q=80&w=1400&auto=format&fit=crop" alt="Pessoa acompanhando leilões online pelo notebook">
-      <div class="hero-floating-badge top">AO VIVO</div>
-      <div class="hero-floating-badge bottom">Lances em tempo real</div>
     </div>
 
     <aside class="lc-market-card">
@@ -784,5 +772,80 @@ document.addEventListener("DOMContentLoaded", function () {
 .price-line{gap:8px!important}
 .price-line span,.timer-line span{font-size:12px!important}
 .price-line strong,.timer-line strong{font-size:14px!important}
+
+/* Home profissional */
+.lc-hero-showcase{
+  position:relative;
+  display:grid;
+  grid-template-columns:minmax(0,1.1fr) 360px;
+  gap:26px;
+  align-items:center;
+  overflow:hidden;
+}
+.lc-hero-showcase::before{
+  content:"";
+  position:absolute;
+  inset:-40% -20% auto auto;
+  width:420px;
+  height:420px;
+  background:radial-gradient(circle, rgba(34,197,94,.22), transparent 62%);
+  filter:blur(4px);
+  pointer-events:none;
+}
+.hero-security-pill{
+  display:inline-flex;
+  width:max-content;
+  max-width:100%;
+  margin-bottom:16px;
+  padding:8px 12px;
+  border-radius:999px;
+  border:1px solid rgba(96,165,250,.28);
+  background:linear-gradient(135deg, rgba(37,99,235,.20), rgba(34,197,94,.12));
+  color:#dbeafe;
+  font-size:13px;
+  font-weight:900;
+}
+.hero-site-preview{
+  position:relative;
+  min-height:286px;
+  display:grid;
+  place-items:center;
+}
+.preview-glow{
+  position:absolute;
+  width:260px;
+  height:260px;
+  border-radius:50%;
+  background:conic-gradient(from 90deg, rgba(59,130,246,.55), rgba(34,197,94,.45), rgba(59,130,246,.55));
+  filter:blur(30px);
+  opacity:.38;
+  animation:previewFloat 5.8s ease-in-out infinite;
+}
+.preview-window{
+  position:relative;
+  width:min(100%, 330px);
+  padding:16px;
+  border-radius:24px;
+  border:1px solid rgba(255,255,255,.16);
+  background:linear-gradient(180deg, rgba(15,23,42,.92), rgba(15,23,42,.68));
+  box-shadow:0 24px 60px rgba(0,0,0,.34);
+  animation:previewLift 4.6s ease-in-out infinite;
+}
+.preview-top{display:flex;align-items:center;gap:7px;margin-bottom:16px;color:#fff}
+.preview-top span{width:8px;height:8px;border-radius:50%;background:rgba(148,163,184,.55)}
+.preview-top strong{margin-left:auto;font-size:12px;color:#bfdbfe}
+.preview-product{display:grid;grid-template-columns:82px 1fr;gap:13px;align-items:center}
+.preview-image{height:82px;border-radius:18px;display:grid;place-items:center;font-weight:950;color:white;background:linear-gradient(135deg,#2563eb,#22c55e);box-shadow:0 12px 28px rgba(37,99,235,.25)}
+.preview-lines b{display:block;height:11px;margin:9px 0;border-radius:999px;background:rgba(255,255,255,.15)}
+.preview-lines b:nth-child(1){width:86%}.preview-lines b:nth-child(2){width:62%}.preview-lines b:nth-child(3){width:74%}
+.preview-bid-row{margin-top:15px;padding:12px;border-radius:16px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.22);display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.preview-bid-row span{color:#93c5fd;font-weight:900}.preview-bid-row strong{color:#fff}
+.preview-shield{margin-top:10px;padding:10px 12px;border-radius:999px;width:max-content;color:#bbf7d0;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.28);font-weight:900;font-size:12px}
+.market-row{background:linear-gradient(135deg, rgba(37,99,235,.10), rgba(34,197,94,.07)), rgba(255,255,255,.050)!important}
+.market-row strong{background:linear-gradient(135deg,#60a5fa,#4ade80);-webkit-background-clip:text;background-clip:text;color:transparent}
+@keyframes previewFloat{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-10px) rotate(10deg)}}
+@keyframes previewLift{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@media(max-width:1000px){.lc-hero-showcase{grid-template-columns:1fr}.hero-site-preview{min-height:240px}.preview-window{max-width:360px}}
+
 </style>
 {% endblock %}

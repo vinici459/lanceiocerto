@@ -895,6 +895,16 @@
 .direct-user-message.closed{opacity:.65}
 .direct-user-message span{display:block;color:var(--muted);font-size:12px;margin-top:4px}
 .direct-user-message p{margin:8px 0 0}
+
+.account-verification-card{margin:0 0 14px;padding:14px;border-radius:16px;border:1px solid rgba(251,191,36,.28);background:rgba(251,191,36,.08)}
+.account-verification-card.verified{border-color:rgba(74,222,128,.32);background:rgba(74,222,128,.08)}
+.account-verification-card span,.account-verification-card strong,.account-verification-card small{display:block}
+.account-verification-card span{font-weight:950;color:#fff}.account-verification-card strong{margin-top:6px;color:#fbbf24}.account-verification-card.verified strong{color:#4ade80}.account-verification-card small{margin-top:5px;color:var(--muted);line-height:1.35}
+.account-status-panel{display:flex;align-items:center;justify-content:space-between;gap:18px;border-color:rgba(251,191,36,.30)!important;background:linear-gradient(135deg,rgba(251,191,36,.09),rgba(255,255,255,.03))!important}
+.account-status-panel.verified{border-color:rgba(74,222,128,.30)!important;background:linear-gradient(135deg,rgba(74,222,128,.09),rgba(255,255,255,.03))!important}
+.account-status-panel h2{margin:0 0 6px}.account-status-panel p{margin:0;color:var(--muted);line-height:1.45}.status-dot{display:inline-block;width:11px;height:11px;border-radius:50%;background:#fbbf24;margin-right:8px;box-shadow:0 0 18px rgba(251,191,36,.5)}.account-status-panel.verified .status-dot{background:#4ade80;box-shadow:0 0 18px rgba(74,222,128,.5)}
+button:disabled{opacity:.58;cursor:not-allowed}
+
 </style>
 </head>
 <body>
@@ -932,7 +942,7 @@
     </a>
 
     <a href="/minha-conta/cadastro" class="account-side-link {% if section == 'profile' %}active{% endif %}">
-      Meu Cadastro
+      Status da Conta
     </a>
 
     <a href="/minha-conta/participacoes" class="account-side-link {% if section == 'participations' %}active{% endif %}">
@@ -970,11 +980,26 @@
   <div class="stat"><span>Expirados</span><strong>{{ stats.expired }}</strong></div>
 </div>
 
+<div class="panel-card account-status-panel {{ 'verified' if user.identity_status == 'verified' else 'pending' }}">
+  <div>
+    <span class="status-dot"></span>
+    <h2>{{ 'Conta confirmada' if user.identity_status == 'verified' else 'Conta com pendências de documentos' }}</h2>
+    <p>
+      {% if user.identity_status == 'verified' %}
+        Seu apelido aparece em verde e sua conta está liberada para pagamento, envio e solicitação de saque.
+      {% else %}
+        Você pode participar dos leilões, mas o envio de produtos e saques só serão liberados após a análise dos documentos pelo administrador.
+      {% endif %}
+    </p>
+  </div>
+  <a href="/minha-conta/cadastro" class="btn small {{ 'ghost' if user.identity_status == 'verified' else '' }}">Ver cadastro</a>
+</div>
+
 <div id="account-balance-panel" class="panel-card account-wallet-panel">
   <div class="section-head compact-head">
     <div>
       <h2>Saldo</h2>
-      <p>Escolha entre depositar saldo ou solicitar saque do valor disponível.</p>
+      <p>Depósitos reais devem ser confirmados pelo gateway de pagamento antes de liberar saldo. Saques exigem conta confirmada.</p>
     </div>
     <span class="wallet-badge">Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
   </div>
@@ -995,7 +1020,7 @@
         <span class="wallet-icon">◆</span>
         <div>
           <h3>Depositar via PIX</h3>
-          <p>Informe o valor para gerar o pagamento.</p>
+          <p>Informe o valor para iniciar a solicitação. O crédito só entra após confirmação do pagamento.</p>
         </div>
       </div>
       <label>Valor do depósito
@@ -1009,7 +1034,7 @@
         <span class="wallet-icon">▣</span>
         <div>
           <h3>Depositar via cartão</h3>
-          <p>Use esta opção para testar pagamento por cartão de crédito.</p>
+          <p>Pagamento por cartão será liberado pela integração do gateway, com as taxas informadas antes da confirmação.</p>
         </div>
       </div>
       <label>Valor do depósito
@@ -1038,13 +1063,17 @@
       <label>Chave PIX para recebimento
         <input name="pix_key" placeholder="CPF, e-mail, telefone ou chave aleatória" required>
       </label>
-      <button class="btn full" type="submit">Solicitar saque</button>
+      {% if user.identity_status == 'verified' %}
+        <button class="btn full" type="submit">Solicitar saque</button>
+      {% else %}
+        <button class="btn full ghost" type="button" disabled>Conta precisa ser confirmada</button>
+      {% endif %}
     </form>
   </div>
 
   <div class="wallet-notes">
-    <div><strong>Depósito</strong><span>Escolha PIX ou cartão para adicionar saldo.</span></div>
-    <div><strong>Saque</strong><span>Valor mínimo de R$ 1,00 com taxa de 1%.</span></div>
+    <div><strong>Depósito</strong><span>PIX/cartão ficam registrados e dependem de confirmação automática do gateway.</span></div>
+    <div><strong>Saque</strong><span>Conta verificada obrigatória. Solicitações ficam registradas para auditoria.</span></div>
   </div>
 </div>
 

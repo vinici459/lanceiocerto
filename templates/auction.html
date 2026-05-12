@@ -23,7 +23,7 @@
       <div class="meta-grid">
         <div><span>Lances</span><strong id="bids-count">{{ item.bids_count }}</strong></div>
         <div><span>Último lance</span><strong id="last-bidder">{{ item.last_bidder or '—' }}</strong></div>
-        <div><span>Taxa interna</span><strong>{{ item.bid_fee_percent }}%</strong></div>
+        <div><span>Modelo</span><strong>Lance sem débito</strong></div>
       </div>
 
       {% if user and user.is_admin %}
@@ -65,7 +65,7 @@
           <button type="button" class="bid-btn" data-bid="{{ '%.2f'|format(v) }}">R$ {{ '%.2f'|format(v)|replace('.', ',') }}</button>
           {% endfor %}
         </form>
-        <p class="muted">Escolha o botão com estratégia: no normal existe força progressiva; no turbo cada valor define uma janela curta até o próximo lance.</p>
+        <p class="muted">Os lances aumentam o preço atual e não debitam saldo. O pagamento acontece somente se você vencer o produto.</p>
         <div id="bid-feedback" class="bid-feedback" aria-live="polite"></div>
         {% elif item.status in ['scheduled', 'relisted'] %}
         <div class="alert scheduled-alert">Este leilão ainda não começou. A contagem regressiva está acima.</div>
@@ -253,7 +253,12 @@ window.__AUCTION__ = {{ item | tojson }};
   let turboAlreadyAnnounced = false;
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
-  function cooldownForBid(value){ return bidKey(value) === "0.10" ? 10 : 30; }
+  function cooldownForBid(value){
+    const n = Number(value || 0);
+    if(n <= 0.30) return 8;
+    if(n <= 0.60) return 15;
+    return 22;
+  }
   function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
 
   function timeLabel(total){
@@ -365,7 +370,7 @@ window.__AUCTION__ = {{ item | tojson }};
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
         renderAuction(json.auction);
         startButtonCooldown(value);
-        if(feedback) feedback.textContent = `Lance registrado. Esse botão libera em ${cooldownForBid(value)}s.`;
+        if(feedback) feedback.textContent = `Lance registrado. Botão liberado novamente em ${cooldownForBid(value)}s.`;
       } catch(err) {
         cooldowns[value] = 0;
         renderBidButton(btn);
