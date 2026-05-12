@@ -21,9 +21,38 @@
       </div>
 
       <div class="meta-grid">
-        <div><span>Lances</span><strong id="bids-count">{{ item.bids_count }}</strong></div>
-        <div><span>Último lance</span><strong id="last-bidder">{{ item.last_bidder or '—' }}</strong></div>
-        <div><span>Modelo</span><strong>Lance sem débito</strong></div>
+        <div>
+          <span>Lances</span>
+          <strong id="bids-count">{{ item.bids_count }}</strong>
+        </div>
+
+        {% if item.status == 'ended' %}
+          <div>
+            <span>Vencedor</span>
+            <strong>{{ item.winner_name or item.last_bidder or 'Sem vencedor' }}</strong>
+          </div>
+
+          <div>
+            <span>Status</span>
+            <strong>
+              {% if item.payment_status %}
+                {{ item.payment_status }}
+              {% else %}
+                Aguardando pagamento
+              {% endif %}
+            </strong>
+          </div>
+        {% else %}
+          <div>
+            <span>Último lance</span>
+            <strong id="last-bidder">{{ item.last_bidder or '—' }}</strong>
+          </div>
+
+          <div>
+            <span>Modelo</span>
+            <strong>Lance sem débito</strong>
+          </div>
+        {% endif %}
       </div>
 
       {% if user and user.is_admin %}
@@ -44,9 +73,7 @@
           <span>Turbo 4.0: {{ item.turbo_level_4_percent }}% ≈ R$ {{ '%.2f'|format(item.turbo_level_4_amount)|replace('.', ',') }}</span>
         </div>
 
-        <p id="strategy-help">
-          Visível somente para admin. O turbo considera preço atual + taxas acumuladas. O vencedor paga apenas o preço final.
-        </p>
+        
         <p class="admin-fee-note">
           Taxas acumuladas: <strong>R$ {{ '%.2f'|format(item.total_bid_fees)|replace('.', ',') }}</strong> •
           Caixa antes do pagamento: <strong>R$ {{ '%.2f'|format(item.cash_reserved_before_payment)|replace('.', ',') }}</strong> •
