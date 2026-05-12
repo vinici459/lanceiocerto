@@ -412,22 +412,15 @@ window.__AUCTION__ = {{ item | tojson }};
     const rawStatus = String(auction.status || "").toLowerCase();
     const isScheduled = ["scheduled", "relisted"].includes(rawStatus);
     const isLive = rawStatus === "live";
-    const isEnded = ["ended", "finished", "closed", "expired"].includes(rawStatus);
-    const isPendingPayment = rawStatus === "pending_payment";
 
     remaining = Number(
       isScheduled ? auction.start_remaining :
       isLive ? (auction.remaining_seconds || 0) : 0
     );
 
-    if (countdownLabel) {
-      countdownLabel.textContent = isScheduled ? "Começa em" :
-        (isEnded || isPendingPayment) ? "Status" : "Tempo restante";
-    }
-
-    if (countdown) {
-      countdown.textContent = isEnded ? "Encerrado" :
-        isPendingPayment ? "Aguardando" : timeLabel(remaining);
+    if (countdownLabel && countdown) {
+      countdownLabel.textContent = isScheduled ? "Começa em" : "Tempo restante";
+      countdown.textContent = timeLabel(remaining);
     }
 
     if(currentPrice) currentPrice.textContent = moneyBR(auction.current_price);
@@ -466,25 +459,11 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   setInterval(() => {
-    const rawStatus = String(auction.status || "").toLowerCase();
-    const isEnded = ["ended", "finished", "closed", "expired"].includes(rawStatus);
-    const isPendingPayment = rawStatus === "pending_payment";
-
-    if (isEnded) {
-      if (countdownLabel) countdownLabel.textContent = "Status";
-      if (countdown) countdown.textContent = "Encerrado";
-      return;
-    }
-
-    if (isPendingPayment) {
-      if (countdownLabel) countdownLabel.textContent = "Status";
-      if (countdown) countdown.textContent = "Aguardando";
-      return;
-    }
+    if (!countdown) return;
 
     if (remaining > 0) remaining -= 1;
 
-    if (countdown) countdown.textContent = timeLabel(remaining);
+    countdown.textContent = timeLabel(remaining);
 
     Object.keys(cooldowns).forEach((key) => {
       if(cooldowns[key] > 0) cooldowns[key] -= 1;
