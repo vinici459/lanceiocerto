@@ -414,39 +414,87 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function renderAuction(data){
     auction = data || auction;
-    const isScheduled = auction.status === "scheduled" || auction.status === "relisted";
-    remaining = Number(isScheduled ? auction.start_remaining : auction.remaining_seconds || 0);
 
-    if(countdownLabel) countdownLabel.textContent = isScheduled ? "Começa em" : "Tempo restante";
+    const rawStatus = String(auction.status || "").toLowerCase();
+    const isScheduled = ["scheduled", "relisted"].includes(rawStatus);
+    const isLive = rawStatus === "live";
+    const isEnded = ["ended", "finished", "closed", "expired"].includes(rawStatus);
+    const isPendingPayment = rawStatus === "pending_payment";
+
+    remaining = Number(
+      isScheduled ? auction.start_remaining :
+      isLive ? (auction.remaining_seconds || 0) : 0
+    );
+
+    if (countdownLabel) {
+      countdownLabel.textContent = isScheduled ? "Começa em" :
+        (isEnded || isPendingPayment) ? "Status" : "Tempo restante";
+    }
+
+    if (countdown) {
+      countdown.textContent = isEnded ? "Encerrado" :
+        isPendingPayment ? "Aguardando" : timeLabel(remaining);
+    }
+
     if(currentPrice) currentPrice.textContent = moneyBR(auction.current_price);
     if(bidsCount) bidsCount.textContent = auction.bids_count ?? "0";
     if(lastBidder) lastBidder.textContent = auction.last_bidder || "—";
+
     if(statusEl) {
-      statusEl.textContent = String(auction.status || "").toUpperCase();
-      statusEl.className = "status " + (auction.status || "");
+      statusEl.textContent = rawStatus.toUpperCase();
+      statusEl.className = "status " + rawStatus;
     }
 
-    if(progressLabel) progressLabel.textContent = `${Number(auction.progress_percent || 0).toFixed(2).replace(".", ",")}% arrecadado`;
-    if(progressBar) progressBar.style.width = `${Math.min(100, Number(auction.progress_percent || 0))}%`;
+    if(progressLabel) {
+      progressLabel.textContent =
+        `${Number(auction.progress_percent || 0).toFixed(2).replace(".", ",")}% arrecadado`;
+    }
+
+    if(progressBar) {
+      progressBar.style.width =
+        `${Math.min(100, Number(auction.progress_percent || 0))}%`;
+    }
 
     const level = Number(auction.turbo_level || 0);
+
     if(turboBadge) {
-      turboBadge.textContent = auction.turbo_label || (level ? `Turbo ${level}.0` : "Modo Normal");
+      turboBadge.textContent =
+        auction.turbo_label || (level ? `Turbo ${level}.0` : "Modo Normal");
       turboBadge.className = `turbo-badge turbo-${level}`;
     }
+
     if(level >= 2 && (level !== lastTurbo || !turboAlreadyAnnounced)) {
       showTurboAnimation(level);
       turboAlreadyAnnounced = true;
     }
+
     lastTurbo = level;
   }
 
   setInterval(() => {
-    if(remaining > 0) remaining -= 1;
-    if(countdown) countdown.textContent = timeLabel(remaining);
+    const rawStatus = String(auction.status || "").toLowerCase();
+    const isEnded = ["ended", "finished", "closed", "expired"].includes(rawStatus);
+    const isPendingPayment = rawStatus === "pending_payment";
+
+    if (isEnded) {
+      if (countdownLabel) countdownLabel.textContent = "Status";
+      if (countdown) countdown.textContent = "Encerrado";
+      return;
+    }
+
+    if (isPendingPayment) {
+      if (countdownLabel) countdownLabel.textContent = "Status";
+      if (countdown) countdown.textContent = "Aguardando";
+      return;
+    }
+
+    if (remaining > 0) remaining -= 1;
+
+    if (countdown) countdown.textContent = timeLabel(remaining);
 
     Object.keys(cooldowns).forEach((key) => {
       if(cooldowns[key] > 0) cooldowns[key] -= 1;
+
       const btn = document.querySelector(`.bid-btn[data-bid="${key}"]`);
       if(btn) renderBidButton(btn);
     });
