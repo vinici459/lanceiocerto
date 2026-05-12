@@ -361,31 +361,80 @@ ALLOWED_BIDS = {0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00}
 
 NORMAL_TIME_EFFECT_SECONDS = {
     0.10: 15,
-    0.20: 22,
-    0.30: 28,
-    0.40: 34,
-    0.50: 40,
-    0.60: -25,
-    0.70: -35,
-    0.80: -50,
-    0.90: -70,
-    1.00: -90,
+    0.20: 20,
+    0.30: 25,
+    0.40: 30,
+    0.50: 35,
+    0.60: -5,
+    0.70: -10,
+    0.80: -15,
+    0.90: -20,
+    1.00: -25,
+}
+
+NORMAL_BID_BUTTON_COOLDOWN_SECONDS = {
+    0.10: 10,
+    0.20: 20,
+    0.30: 20,
+    0.40: 20,
+    0.50: 20,
+    0.60: 30,
+    0.70: 30,
+    0.80: 30,
+    0.90: 30,
+    1.00: 30,
 }
 
 TURBO_2_SECONDS = {
-    0.10: 40,
-    0.20: 35,
-    0.30: 30,
-    0.40: 25,
-    0.50: 20,
-    0.60: 15,
-    0.70: 13,
-    0.80: 11,
-    0.90: 9,
-    1.00: 7,
+    1.00: 8,
+    0.90: 10,
+    0.80: 12,
+    0.70: 14,
+    0.60: 16,
+    0.50: 18,
+    0.40: 20,
+    0.30: 22,
+    0.20: 24,
+    0.10: 26,
 }
 
-BID_BUTTON_COOLDOWN_SECONDS = {bid: (8 if bid <= 0.30 else 15 if bid <= 0.60 else 22) for bid in ALLOWED_BIDS}
+TURBO_3_SECONDS = {
+    1.00: 4,
+    0.90: 5,
+    0.80: 6,
+    0.70: 7,
+    0.60: 8,
+    0.50: 9,
+    0.40: 10,
+    0.30: 11,
+    0.20: 12,
+    0.10: 13,
+}
+
+TURBO_4_SECONDS = {
+    1.00: 2,
+    0.90: 3,
+    0.80: 4,
+    0.70: 5,
+    0.60: 6,
+    0.50: 7,
+    0.40: 8,
+    0.30: 9,
+    0.20: 10,
+    0.10: 11,
+}
+
+TURBO_GLOBAL_COOLDOWN_SECONDS = {
+    2: 30,
+    3: 40,
+    4: 50,
+}
+TURBO_AUCTION_COOLDOWN_UNTIL: dict[int, datetime] = {}
+
+CHAT_PRE_START_SECONDS = 5 * 60
+
+# Compatibilidade com código antigo que ainda consulte este nome.
+BID_BUTTON_COOLDOWN_SECONDS = NORMAL_BID_BUTTON_COOLDOWN_SECONDS
 MAX_INITIAL_DURATION_SECONDS = 60 * 60
 DEFAULT_INITIAL_DURATION_SECONDS = 30 * 60
 PAYMENT_DEADLINE_MINUTES = 10
@@ -613,20 +662,66 @@ def normal_force_multiplier(item: AuctionItem) -> float:
 
 
 def normal_time_delta_seconds(item: AuctionItem, bid_value: float) -> int:
-    base = NORMAL_TIME_EFFECT_SECONDS[bid_value]
-    multiplier = normal_force_multiplier(item)
-    if base >= 0:
-        return max(1, math.ceil(base * multiplier))
-    return min(-1, -math.ceil(abs(base) * multiplier))
+    """Modo normal: botões até R$ 0,50 aumentam tempo; R$ 0,60 até R$ 1,00 reduzem tempo."""
+    return int(NORMAL_TIME_EFFECT_SECONDS[bid_value])
 
 
 def turbo_bid_seconds(bid_value: float, turbo_level: int) -> float:
-    seconds = float(TURBO_2_SECONDS[bid_value])
+    """No turbo, cada lance redefine o relógio para uma janela curta de disputa."""
+    if turbo_level == 4:
+        return float(TURBO_4_SECONDS[bid_value])
     if turbo_level == 3:
-        seconds = seconds / 2
-    elif turbo_level == 4:
-        seconds = seconds / 4
-    return max(1.5, round(seconds, 2))
+        return float(TURBO_3_SECONDS[bid_value])
+    return float(TURBO_2_SECONDS[bid_value])
+
+
+def bid_button_cooldown_seconds(bid_value: float, turbo_level: int = 0) -> int:
+    # No turbo o ritmo do leilão já é controlado pelo relógio curto e pelo bloqueio global de ativação.
+    if turbo_level >= 2:
+        return 0
+    return int(NORMAL_BID_BUTTON_COOLDOWN_SECONDS[bid_value])
+
+
+def turbo_activation_cooldown_seconds(turbo_level: int) -> int:
+    return int(TURBO_GLOBAL_COOLDOWN_SECONDS.get(int(turbo_level or 0), 0))
+
+
+def auction_chat_is_open(item: AuctionItem, now: Optional[datetime] = None) -> bool:
+    if not item or getattr(item, "chat_paused", False):
+        return False
+    now = now or datetime.utcnow()
+    if item.status == "live":
+        return True
+    if item.status in {"scheduled", "relisted"} and item.scheduled_start:
+        return 0 <= (item.scheduled_start - now).total_seconds() <= CHAT_PRE_START_SECONDS
+    return False
+
+
+
+def reset_relisted_public_history(db: Session, item: AuctionItem) -> None:
+    """Relançamento deve começar limpo para o público: sem lances, último lance ou chat antigo."""
+    if not item:
+        return
+    db.query(Bid).filter(Bid.auction_id == item.id).delete(synchronize_session=False)
+    db.query(ChatMessage).filter(ChatMessage.auction_id == item.id).delete(synchronize_session=False)
+    item.current_price = 0.0
+    item.start_price = 0.0
+    item.total_bid_fees = 0.0
+    item.total_bid_spent = 0.0
+    item.turbo_level = 0
+    item.winner_user_id = None
+    item.winner_deadline = None
+    item.ends_at = None
+
+def start_auction_if_due(item: AuctionItem, now: Optional[datetime] = None) -> bool:
+    now = now or datetime.utcnow()
+    if item and item.status in {"scheduled", "relisted"} and item.scheduled_start and item.scheduled_start <= now:
+        item.status = "live"
+        duration = getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS) or DEFAULT_INITIAL_DURATION_SECONDS
+        item.ends_at = now + timedelta(seconds=min(MAX_INITIAL_DURATION_SECONDS, duration))
+        item.chat_paused = False
+        return True
+    return False
 
 
 def clamp_initial_duration(minutes: int | float | None) -> int:
@@ -639,9 +734,16 @@ def clamp_initial_duration(minutes: int | float | None) -> int:
 
 
 def public_auction_payload(item: AuctionItem, db: Session) -> dict:
-    bids_count = db.query(Bid).filter(Bid.auction_id == item.id).count()
-    last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
-    last_bidder = public_user_name(last_bid.user) if last_bid else None
+    # Em produtos agendados/relançados, a vitrine deve parecer uma nova disputa.
+    # Lances antigos ficam fora da visualização pública e o relançamento limpa o histórico.
+    if item.status in {"scheduled", "relisted"}:
+        bids_count = 0
+        last_bid = None
+        last_bidder = None
+    else:
+        bids_count = db.query(Bid).filter(Bid.auction_id == item.id).count()
+        last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
+        last_bidder = public_user_name(last_bid.user) if last_bid else None
     remaining = 0
     if item.status == "live" and item.ends_at:
         remaining = max(0, int((item.ends_at - datetime.utcnow()).total_seconds()))
@@ -686,6 +788,7 @@ def public_auction_payload(item: AuctionItem, db: Session) -> dict:
         "last_bidder": last_bidder,
         "image_url": item.image_url,
         "chat_paused": item.chat_paused,
+        "chat_open": auction_chat_is_open(item),
         "cashback": cashback_payload(item, db),
     }
 
@@ -1174,11 +1277,8 @@ async def auction_watcher():
                 .all()
             )
             for item in to_start:
-                item.status = "live"
-                duration = getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS) or DEFAULT_INITIAL_DURATION_SECONDS
-                item.ends_at = now + timedelta(seconds=min(MAX_INITIAL_DURATION_SECONDS, duration))
-                item.chat_paused = False
-                changed_ids.append(item.id)
+                if start_auction_if_due(item, now):
+                    changed_ids.append(item.id)
 
             live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").all()
             for item in live_items:
@@ -1442,6 +1542,11 @@ def auction_page(request: Request, auction_id: int):
         item = db.get(AuctionItem, auction_id)
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+
+        changed = start_auction_if_due(item)
+        if changed:
+            db.commit()
+
         messages = (
             db.query(ChatMessage)
             .filter(ChatMessage.auction_id == auction_id)
@@ -1467,38 +1572,52 @@ def auction_page(request: Request, auction_id: int):
 
 
 @app.post("/api/auction/{auction_id}/bid")
-def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
+async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
     db = SessionLocal()
+    payload = None
     try:
         user = require_user(request, db)
         item = db.get(AuctionItem, auction_id)
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+
+        now = datetime.utcnow()
+        if start_auction_if_due(item, now):
+            db.commit()
+            item = db.get(AuctionItem, auction_id)
+
         if item.status != "live":
             raise HTTPException(status_code=400, detail="Leilão não está ao vivo.")
+        if item.ends_at and item.ends_at <= now:
+            raise HTTPException(status_code=400, detail="Este leilão já está encerrando. Aguarde a atualização.")
+
         bid_value = BR(bid_value)
         if bid_value not in ALLOWED_BIDS:
             raise HTTPException(status_code=400, detail="Valor de lance inválido.")
-        # Lance não debita saldo. O dinheiro real só circula no pagamento do pedido vencedor.
 
-        now = datetime.utcnow()
         previous_user_bid_count = db.query(Bid).filter(Bid.auction_id == item.id, Bid.user_id == user.id).count()
         active_turbo = compute_turbo_level(item)
         if active_turbo >= 2 and previous_user_bid_count <= 0:
             raise HTTPException(status_code=403, detail="O modo turbo é exclusivo para quem já participou deste leilão antes da ativação.")
 
-        last_same_button = (
-            db.query(Bid)
-            .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
-            .order_by(desc(Bid.created_at))
-            .first()
-        )
-        cooldown = BID_BUTTON_COOLDOWN_SECONDS[bid_value]
-        if last_same_button:
-            elapsed = (now - last_same_button.created_at).total_seconds()
-            if elapsed < cooldown:
-                remaining_cd = math.ceil(cooldown - elapsed)
-                raise HTTPException(status_code=429, detail=f"Aguarde {remaining_cd}s para usar esse botão novamente.")
+        global_until = TURBO_AUCTION_COOLDOWN_UNTIL.get(item.id)
+        if active_turbo >= 2 and global_until and global_until > now:
+            remaining_cd = math.ceil((global_until - now).total_seconds())
+            raise HTTPException(status_code=429, detail=f"Turbo em estabilização. Aguarde {remaining_cd}s para dar novo lance.")
+
+        cooldown = bid_button_cooldown_seconds(bid_value, active_turbo)
+        if cooldown > 0:
+            last_same_button = (
+                db.query(Bid)
+                .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
+                .order_by(desc(Bid.created_at))
+                .first()
+            )
+            if last_same_button:
+                elapsed = (now - last_same_button.created_at).total_seconds()
+                if elapsed < cooldown:
+                    remaining_cd = math.ceil(cooldown - elapsed)
+                    raise HTTPException(status_code=429, detail=f"Aguarde {remaining_cd}s para usar esse botão novamente.")
 
         fee_value = 0.0
         increment = BR(bid_value)
@@ -1507,6 +1626,7 @@ def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
         item.total_bid_fees = BR(getattr(item, "total_bid_fees", 0.0) or 0.0)
         item.total_bid_spent = BR(getattr(item, "total_bid_spent", 0.0) or 0.0)
 
+        previous_turbo = int(getattr(item, "turbo_level", 0) or 0)
         turbo = compute_turbo_level(item)
         item.turbo_level = turbo
 
@@ -1531,17 +1651,32 @@ def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
         db.add(bid)
         db.commit()
         payload = public_auction_payload(item, db)
+        global_cd = turbo_activation_cooldown_seconds(turbo) if turbo >= 2 and previous_turbo < turbo else 0
+        if global_cd > 0:
+            TURBO_AUCTION_COOLDOWN_UNTIL[item.id] = now + timedelta(seconds=global_cd)
+        payload["turbo_global_cooldown"] = global_cd
     finally:
         db.close()
 
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
-    except RuntimeError:
-        pass
+    if payload:
+        await manager.broadcast(auction_id, {"type": "auction_update", "auction": payload})
     return JSONResponse({"ok": True, "auction": payload})
 
 
+@app.get("/api/auction/{auction_id}/state")
+async def auction_state(request: Request, auction_id: int):
+    db = SessionLocal()
+    try:
+        item = db.get(AuctionItem, auction_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+        changed = start_auction_if_due(item)
+        if changed:
+            db.commit()
+            await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_payload(item, db)})
+        return JSONResponse({"ok": True, "auction": public_auction_payload(item, db)})
+    finally:
+        db.close()
 
 
 @app.post("/api/auction/{auction_id}/cashback/join")
@@ -1570,15 +1705,15 @@ def join_cashback(request: Request, auction_id: int):
         db.close()
 
 @app.post("/api/auction/{auction_id}/chat")
-def send_chat(request: Request, auction_id: int, message: str = Form(...)):
+async def send_chat(request: Request, auction_id: int, message: str = Form(...)):
     db = SessionLocal()
     try:
         user = require_user(request, db)
         item = db.get(AuctionItem, auction_id)
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
-        if item.status != "live":
-            raise HTTPException(status_code=403, detail="O chat foi encerrado porque este leilão não está em andamento.")
+        if not auction_chat_is_open(item):
+            raise HTTPException(status_code=403, detail="O chat está disponível apenas próximo ao início ou durante o leilão.")
         if item.chat_paused:
             raise HTTPException(status_code=403, detail="O chat está pausado pelo administrador.")
         if user.chat_muted:
@@ -1601,7 +1736,7 @@ def send_chat(request: Request, auction_id: int, message: str = Form(...)):
     finally:
         db.close()
 
-    asyncio.create_task(manager.broadcast(auction_id, payload))
+    await manager.broadcast(auction_id, payload)
     return JSONResponse({"ok": True})
 
 
@@ -2088,12 +2223,8 @@ async def admin_returned_update_relist(
         item.image_url = final_image
         item.bid_fee_percent = BR(bid_fee_percent)
 
-        item.start_price = 0.0
-        item.current_price = 0.0
+        reset_relisted_public_history(db, item)
         item.status = "relisted"
-        item.winner_user_id = None
-        item.winner_deadline = None
-        item.ends_at = None
         item.chat_paused = False
         item.initial_duration_seconds = clamp_initial_duration(initial_duration_minutes)
         item.scheduled_start = datetime.utcnow() + timedelta(minutes=int(start_in_minutes))
@@ -2355,12 +2486,8 @@ def admin_relist(request: Request, item_id: int, start_in_minutes: int = Form(..
         item = db.get(AuctionItem, item_id)
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
-        item.start_price = 0.0
-        item.current_price = 0.0
+        reset_relisted_public_history(db, item)
         item.status = "relisted"
-        item.winner_user_id = None
-        item.winner_deadline = None
-        item.ends_at = None
         item.chat_paused = False
         item.initial_duration_seconds = clamp_initial_duration(initial_duration_minutes)
         item.scheduled_start = datetime.utcnow() + timedelta(minutes=int(start_in_minutes))
@@ -2544,6 +2671,9 @@ async def auction_socket(websocket: WebSocket, auction_id: int):
     try:
         item = db.get(AuctionItem, auction_id)
         if item:
+            if start_auction_if_due(item):
+                db.commit()
+                item = db.get(AuctionItem, auction_id)
             await websocket.send_json({"type": "auction_update", "auction": public_auction_payload(item, db)})
     finally:
         db.close()

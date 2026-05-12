@@ -5,7 +5,7 @@
     <img class="auction-image" src="{{ entity.image_url }}" alt="{{ entity.title }}">
     <div class="auction-panel">
       <div class="status-row">
-        <span class="status {{ item.status }}" id="auction-status">{{ item.status|upper }}</span>
+        <span class="status {{ item.status }}" id="auction-status">{% if item.status in ['scheduled', 'relisted'] %}PRÓXIMO{% elif item.status == 'live' %}AO VIVO{% elif item.status == 'pending_payment' %}AGUARDANDO PAGAMENTO{% elif item.status == 'ended' %}ENCERRADO{% else %}{{ item.status|upper }}{% endif %}</span>
         {% if user and user.is_admin %}<span class="admin-chip">ADMIN</span>{% endif %}
       </div>
 
@@ -52,39 +52,40 @@
         </div>
       </div>
 
-      <div class="meta-grid">
+      <div class="meta-grid" id="auction-meta-grid">
         <div>
-          <span>Lances</span>
-          <strong id="bids-count">{{ item.bids_count }}</strong>
+          <span id="bids-label">Lances</span>
+          <strong id="bids-count">{{ item.bids_count if item.status not in ['scheduled', 'relisted'] else 0 }}</strong>
         </div>
 
-        {% if item.status == 'ended' %}
-          <div>
-            <span>Vencedor</span>
-            <strong>{{ item.winner_name or item.last_bidder or 'Sem vencedor' }}</strong>
-          </div>
-
-          <div>
-            <span>Status</span>
-            <strong>
-              {% if item.payment_status %}
-                {{ item.payment_status }}
-              {% else %}
-                Aguardando pagamento
-              {% endif %}
-            </strong>
-          </div>
-        {% else %}
-          <div>
-            <span>Último lance</span>
+        <div>
+          {% if item.status == 'ended' %}
+            <span id="last-bidder-label">Vencedor</span>
+            <strong id="last-bidder">{{ item.winner_name or item.last_bidder or 'Sem vencedor' }}</strong>
+          {% elif item.status == 'pending_payment' %}
+            <span id="last-bidder-label">Vencedor</span>
+            <strong id="last-bidder">{{ item.winner_name or item.last_bidder or '—' }}</strong>
+          {% elif item.status in ['scheduled', 'relisted'] %}
+            <span id="last-bidder-label">Status</span>
+            <strong id="last-bidder">Próximo leilão</strong>
+          {% else %}
+            <span id="last-bidder-label">Último lance</span>
             <strong id="last-bidder">{{ item.last_bidder or '—' }}</strong>
-          </div>
+          {% endif %}
+        </div>
 
-          <div>
-            <span>Modelo</span>
-            <strong>Lance sem débito</strong>
-          </div>
-        {% endif %}
+        <div>
+          {% if item.status == 'ended' %}
+            <span id="model-label">Status</span>
+            <strong id="model-value">{{ item.payment_status if item.payment_status else 'Encerrado' }}</strong>
+          {% elif item.status == 'pending_payment' %}
+            <span id="model-label">Status</span>
+            <strong id="model-value">Aguardando pagamento</strong>
+          {% else %}
+            <span id="model-label">Modelo</span>
+            <strong id="model-value">Lance sem débito</strong>
+          {% endif %}
+        </div>
       </div>
 
       {% if user and user.is_admin %}
@@ -100,9 +101,9 @@
 
         <div class="strategy-marks">
           <span>Normal</span>
-          <span>Turbo 2.0: {{ item.turbo_trigger_percent }}% ≈ R$ {{ '%.2f'|format(item.turbo_start_amount)|replace('.', ',') }}</span>
-          <span>Turbo 3.0: {{ item.turbo_level_3_percent }}% ≈ R$ {{ '%.2f'|format(item.turbo_level_3_amount)|replace('.', ',') }}</span>
-          <span>Turbo 4.0: {{ item.turbo_level_4_percent }}% ≈ R$ {{ '%.2f'|format(item.turbo_level_4_amount)|replace('.', ',') }}</span>
+          <span>Turbo 2.0: {{ '%.0f'|format(item.turbo_trigger_percent) }}% ≈ R$ {{ '%.2f'|format(item.turbo_start_amount)|replace('.', ',') }}</span>
+          <span>Turbo 3.0: {{ '%.0f'|format(item.turbo_level_3_percent) }}% ≈ R$ {{ '%.2f'|format(item.turbo_level_3_amount)|replace('.', ',') }}</span>
+          <span>Turbo 4.0: {{ '%.0f'|format(item.turbo_level_4_percent) }}% ≈ R$ {{ '%.2f'|format(item.turbo_level_4_amount)|replace('.', ',') }}</span>
         </div>
 
         
@@ -118,19 +119,29 @@
       <div id="turbo-announcement" class="turbo-announcement" aria-live="polite"></div>
 
       {% if user %}
-        {% if item.status == 'live' %}
-        <form id="bid-form" class="bid-grid">
+        <form id="bid-form" class="bid-grid" {% if item.status != 'live' %}style="display:none"{% endif %}>
           {% for v in allowed_bids %}
           <button type="button" class="bid-btn" data-bid="{{ '%.2f'|format(v) }}">R$ {{ '%.2f'|format(v)|replace('.', ',') }}</button>
           {% endfor %}
         </form>
-        <p class="muted">Os lances aumentam o preço atual e não debitam saldo. O pagamento acontece somente se você vencer o produto.</p>
+
+        <p id="bid-note" class="muted" {% if item.status != 'live' %}style="display:none"{% endif %}>
+          Os lances aumentam o preço atual e não debitam saldo. O pagamento acontece somente se você vencer o produto.
+        </p>
+
         <div id="bid-feedback" class="bid-feedback" aria-live="polite"></div>
-        {% elif item.status in ['scheduled', 'relisted'] %}
-        <div class="alert scheduled-alert">Este leilão ainda não começou. A contagem regressiva está acima.</div>
-        {% else %}
-        <div class="alert">Este leilão não está em andamento neste momento.</div>
-        {% endif %}
+
+        <div id="auction-state-alert" class="alert {% if item.status in ['scheduled', 'relisted'] %}scheduled-alert{% endif %}" {% if item.status == 'live' %}style="display:none"{% endif %}>
+          {% if item.status in ['scheduled', 'relisted'] %}
+            Este leilão ainda não começou. A contagem regressiva está acima.
+          {% elif item.status == 'pending_payment' %}
+            Este leilão está aguardando pagamento do vencedor.
+          {% elif item.status == 'ended' %}
+            Este leilão foi encerrado.
+          {% else %}
+            Este leilão não está em andamento neste momento.
+          {% endif %}
+        </div>
       {% else %}
         <div class="alert">Faça login para participar do leilão.</div>
       {% endif %}
@@ -193,15 +204,27 @@
     </div>
   </div>
 
-  <aside class="chat-card {% if entity.status != 'live' %}chat-card-closed{% endif %}">
-    <h2>Chat deste produto</h2>
+  <aside class="chat-card {% if not item.chat_open %}chat-card-closed{% endif %}" id="chat-card">
+    <h2>Chat</h2>
     <p class="chat-note">Cada produto possui seu próprio chat.</p>
 
-    {% if entity.status != 'live' %}
-      <div class="alert chat-closed-alert">O chat foi encerrado porque este leilão não está em andamento.</div>
-    {% elif entity.chat_paused %}
-      <div class="alert">O chat está pausado pelo administrador.</div>
-    {% else %}
+    <div id="chat-closed-alert" class="alert chat-closed-alert" {% if item.chat_open %}style="display:none"{% endif %}>
+      {% if entity.status in ['scheduled', 'relisted'] %}
+        O chat será liberado próximo ao início do leilão.
+      {% elif entity.status == 'pending_payment' %}
+        O chat foi encerrado porque este leilão está aguardando pagamento.
+      {% elif entity.status == 'ended' %}
+        O chat foi encerrado porque este leilão terminou.
+      {% else %}
+        O chat está indisponível neste momento.
+      {% endif %}
+    </div>
+
+    <div id="chat-paused-alert" class="alert" {% if not entity.chat_paused or not item.chat_open %}style="display:none"{% endif %}>
+      O chat está pausado pelo administrador.
+    </div>
+
+    <div id="chat-live-area" {% if not item.chat_open or entity.chat_paused %}style="display:none"{% endif %}>
       <div id="chat-messages" class="chat-messages">
         {% for msg in chat_messages %}
         <div class="chat-line"><strong>{{ msg.user.full_name }}</strong> <span>{{ msg.created_at.strftime('%H:%M:%S') }}</span><p>{{ msg.message }}</p></div>
@@ -216,7 +239,7 @@
       {% else %}
       <div class="muted">Entre na conta para participar do chat.</div>
       {% endif %}
-    {% endif %}
+    </div>
   </aside>
 </section>
 
@@ -313,7 +336,7 @@
 .price-box strong,.meta-grid strong{
   display:block;
   color:#fff;
-  font-size:clamp(16px,1.6vw,20px);
+  font-size:clamp(14px,1.4vw,18px);
   line-height:1.15;
   word-break:break-word;
 }
@@ -340,6 +363,9 @@ window.__AUCTION__ = {{ item | tojson }};
   const currentPrice = document.getElementById("current-price");
   const bidsCount = document.getElementById("bids-count");
   const lastBidder = document.getElementById("last-bidder");
+  const lastBidderLabel = document.getElementById("last-bidder-label");
+  const modelLabel = document.getElementById("model-label");
+  const modelValue = document.getElementById("model-value");
   const statusEl = document.getElementById("auction-status");
   const progressLabel = document.getElementById("progress-label");
   const progressBar = document.getElementById("progress-bar");
@@ -347,37 +373,86 @@ window.__AUCTION__ = {{ item | tojson }};
   const strategyCard = document.getElementById("strategy-card");
   const turboAnnouncement = document.getElementById("turbo-announcement");
   const feedback = document.getElementById("bid-feedback");
+  const bidForm = document.getElementById("bid-form");
+  const bidNote = document.getElementById("bid-note");
+  const auctionStateAlert = document.getElementById("auction-state-alert");
+  const chatCard = document.getElementById("chat-card");
+  const chatClosedAlert = document.getElementById("chat-closed-alert");
+  const chatPausedAlert = document.getElementById("chat-paused-alert");
+  const chatLiveArea = document.getElementById("chat-live-area");
+
   const cooldowns = {};
+  const pendingBids = {};
   let auction = window.__AUCTION__ || {};
   let remaining = countdown ? Number(countdown.dataset.seconds || 0) : 0;
-  let lastTurbo = 0;
+  let lastTurbo = Number(auction.turbo_level || 0);
   let turboAlreadyAnnounced = false;
+  let globalCooldownUntil = 0;
+  let stateFetchInFlight = false;
+  let zeroFetchRequested = false;
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
-  function cooldownForBid(value){
-    const n = Number(value || 0);
-    if(n <= 0.30) return 8;
-    if(n <= 0.60) return 15;
-    return 22;
-  }
   function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
+
+  function rawStatus(){
+    return String(auction.status || "").toLowerCase();
+  }
+
+  function isScheduledStatus(status){
+    return status === "scheduled" || status === "relisted";
+  }
+
+  function isLiveStatus(status){
+    return status === "live";
+  }
+
+  function isClosedStatus(status){
+    return ["ended", "finished", "closed", "expired", "pending_payment"].includes(status);
+  }
+
+  function statusLabel(status){
+    if(status === "scheduled" || status === "relisted") return "PRÓXIMO";
+    if(status === "live") return "AO VIVO";
+    if(status === "pending_payment") return "AGUARDANDO PAGAMENTO";
+    if(status === "ended") return "ENCERRADO";
+    return String(status || "").toUpperCase();
+  }
+
+  function normalCooldownForBid(value){
+    const n = Number(value || 0);
+    if(n <= 0.10) return 10;
+    if(n <= 0.50) return 20;
+    return 30;
+  }
 
   function timeLabel(total){
     total = Math.max(0, Math.ceil(Number(total || 0)));
     const h = Math.floor(total / 3600);
     const m = Math.floor((total % 3600) / 60);
     const s = total % 60;
-    if(h > 0) return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
-    return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    if(h > 0) return `${h}h ${String(m).padStart(2,"0")}m ${String(s).padStart(2,"0")}s`;
+    return `${m}m ${String(s).padStart(2,"0")}s`;
+  }
+
+  function setDisplay(el, show, mode="block"){
+    if(!el) return;
+    el.style.display = show ? mode : "none";
   }
 
   function renderBidButton(btn){
+    const status = rawStatus();
     const key = bidKey(btn.dataset.bid);
-    const seconds = Number(cooldowns[key] || 0);
-    if(seconds > 0) {
+    const nowMs = Date.now();
+    const globalSeconds = Math.max(0, Math.ceil((globalCooldownUntil - nowMs) / 1000));
+    const localSeconds = Number(cooldowns[key] || 0);
+    const seconds = Math.max(globalSeconds, localSeconds);
+    const pending = Boolean(pendingBids[key]);
+    const canBid = isLiveStatus(status);
+
+    if(!canBid || pending || seconds > 0) {
       btn.disabled = true;
       btn.classList.add("cooling");
-      btn.textContent = `${moneyBR(key)} • ${seconds}s`;
+      btn.textContent = seconds > 0 ? `${moneyBR(key)} • ${seconds}s` : moneyBR(key);
     } else {
       btn.disabled = false;
       btn.classList.remove("cooling");
@@ -385,11 +460,22 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
-  function startButtonCooldown(value){
-    const key = bidKey(value);
-    cooldowns[key] = cooldownForBid(key);
-    const btn = document.querySelector(`.bid-btn[data-bid="${key}"]`);
-    if(btn) renderBidButton(btn);
+  function renderAllBidButtons(){
+    document.querySelectorAll(".bid-btn").forEach(renderBidButton);
+  }
+
+  function startNormalButtonCooldown(value){
+    const level = Number(auction.turbo_level || 0);
+    if(level >= 2) return;
+    cooldowns[bidKey(value)] = normalCooldownForBid(value);
+    renderAllBidButtons();
+  }
+
+  function startGlobalTurboCooldown(seconds){
+    seconds = Number(seconds || 0);
+    if(seconds <= 0) return;
+    globalCooldownUntil = Math.max(globalCooldownUntil, Date.now() + seconds * 1000);
+    renderAllBidButtons();
   }
 
   function showTurboAnimation(level){
@@ -412,30 +498,89 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
+  function updateChatVisibility(){
+    const open = Boolean(auction.chat_open);
+    const paused = Boolean(auction.chat_paused);
+    if(chatCard) chatCard.classList.toggle("chat-card-closed", !open);
+    setDisplay(chatClosedAlert, !open);
+    setDisplay(chatPausedAlert, open && paused);
+    setDisplay(chatLiveArea, open && !paused);
+  }
+
+  function updateAuctionControls(){
+    const status = rawStatus();
+    const live = isLiveStatus(status);
+    const scheduled = isScheduledStatus(status);
+
+    setDisplay(bidForm, live, "grid");
+    setDisplay(bidNote, live);
+    if(auctionStateAlert) {
+      if(live) {
+        auctionStateAlert.style.display = "none";
+      } else {
+        auctionStateAlert.style.display = "block";
+        auctionStateAlert.classList.toggle("scheduled-alert", scheduled);
+        if(scheduled) auctionStateAlert.textContent = "Este leilão ainda não começou. A contagem regressiva está acima.";
+        else if(status === "pending_payment") auctionStateAlert.textContent = "Este leilão está aguardando pagamento do vencedor.";
+        else if(status === "ended") auctionStateAlert.textContent = "Este leilão foi encerrado.";
+        else auctionStateAlert.textContent = "Este leilão não está em andamento neste momento.";
+      }
+    }
+
+    renderAllBidButtons();
+  }
+
   function renderAuction(data){
     auction = data || auction;
+    const status = rawStatus();
+    const scheduled = isScheduledStatus(status);
+    const live = isLiveStatus(status);
 
-    const rawStatus = String(auction.status || "").toLowerCase();
-    const isScheduled = ["scheduled", "relisted"].includes(rawStatus);
-    const isLive = rawStatus === "live";
+    remaining = Number(scheduled ? (auction.start_remaining || 0) : live ? (auction.remaining_seconds || 0) : 0);
+    zeroFetchRequested = false;
 
-    remaining = Number(
-      isScheduled ? auction.start_remaining :
-      isLive ? (auction.remaining_seconds || 0) : 0
-    );
-
-    if (countdownLabel && countdown) {
-      countdownLabel.textContent = isScheduled ? "Começa em" : "Tempo restante";
-      countdown.textContent = timeLabel(remaining);
+    if(countdownLabel && countdown) {
+      countdownLabel.textContent = scheduled ? "Começa em" : live ? "Tempo restante" : "Status";
+      countdown.textContent = isClosedStatus(status)
+        ? (status === "pending_payment" ? "Aguardando" : "Encerrado")
+        : timeLabel(remaining);
     }
 
     if(currentPrice) currentPrice.textContent = moneyBR(auction.current_price);
-    if(bidsCount) bidsCount.textContent = auction.bids_count ?? "0";
-    if(lastBidder) lastBidder.textContent = auction.last_bidder || "—";
+    if(bidsCount) bidsCount.textContent = scheduled ? "0" : (auction.bids_count ?? "0");
+
+    if(lastBidderLabel && lastBidder) {
+      if(status === "ended") {
+        lastBidderLabel.textContent = "Vencedor";
+        lastBidder.textContent = auction.winner_name || auction.last_bidder || "Sem vencedor";
+      } else if(status === "pending_payment") {
+        lastBidderLabel.textContent = "Vencedor";
+        lastBidder.textContent = auction.winner_name || auction.last_bidder || "—";
+      } else if(scheduled) {
+        lastBidderLabel.textContent = "Status";
+        lastBidder.textContent = "Próximo leilão";
+      } else {
+        lastBidderLabel.textContent = "Último lance";
+        lastBidder.textContent = auction.last_bidder || "—";
+      }
+    }
+
+    if(modelLabel && modelValue) {
+      if(status === "ended") {
+        modelLabel.textContent = "Status";
+        modelValue.textContent = auction.payment_status || "Encerrado";
+      } else if(status === "pending_payment") {
+        modelLabel.textContent = "Status";
+        modelValue.textContent = "Aguardando pagamento";
+      } else {
+        modelLabel.textContent = "Modelo";
+        modelValue.textContent = "Lance sem débito";
+      }
+    }
 
     if(statusEl) {
-      statusEl.textContent = rawStatus.toUpperCase();
-      statusEl.className = "status " + rawStatus;
+      statusEl.textContent = statusLabel(status);
+      statusEl.className = "status " + status;
     }
 
     if(progressLabel) {
@@ -456,27 +601,60 @@ window.__AUCTION__ = {{ item | tojson }};
       turboBadge.className = `turbo-badge turbo-${level}`;
     }
 
-    if(level >= 2 && (level !== lastTurbo || !turboAlreadyAnnounced)) {
+    if(level >= 2 && level > lastTurbo) {
       showTurboAnimation(level);
+      startGlobalTurboCooldown(Number(auction.turbo_global_cooldown || (level === 2 ? 30 : level === 3 ? 40 : 50)));
       turboAlreadyAnnounced = true;
     }
 
     lastTurbo = level;
+    updateAuctionControls();
+    updateChatVisibility();
+  }
+
+  async function fetchState(){
+    if(!auctionId || stateFetchInFlight) return;
+    stateFetchInFlight = true;
+    try {
+      const res = await fetch(`/api/auction/${auctionId}/state`, {cache:"no-store"});
+      const json = await res.json().catch(() => ({}));
+      if(res.ok && json.ok && json.auction) renderAuction(json.auction);
+    } catch(e) {
+    } finally {
+      stateFetchInFlight = false;
+    }
   }
 
   setInterval(() => {
-    if (!countdown) return;
+    const status = rawStatus();
+    const fast = isLiveStatus(status) || (isScheduledStatus(status) && remaining <= 15);
+    if(fast) fetchState();
+  }, 1000);
 
-    if (remaining > 0) remaining -= 1;
+  setInterval(() => {
+    const status = rawStatus();
+    if(!isLiveStatus(status) && !(isScheduledStatus(status) && remaining <= 15)) fetchState();
+  }, 3000);
 
-    countdown.textContent = timeLabel(remaining);
+  setInterval(() => {
+    const status = rawStatus();
+
+    if(isScheduledStatus(status) || isLiveStatus(status)) {
+      if(remaining > 0) remaining -= 1;
+      if(countdown) countdown.textContent = timeLabel(remaining);
+      if(remaining <= 0 && !zeroFetchRequested) {
+        zeroFetchRequested = true;
+        fetchState();
+        setTimeout(fetchState, 700);
+        setTimeout(fetchState, 1600);
+      }
+    }
 
     Object.keys(cooldowns).forEach((key) => {
       if(cooldowns[key] > 0) cooldowns[key] -= 1;
-
-      const btn = document.querySelector(`.bid-btn[data-bid="${key}"]`);
-      if(btn) renderBidButton(btn);
     });
+
+    renderAllBidButtons();
   }, 1000);
 
   document.querySelectorAll(".bid-btn").forEach((btn) => {
@@ -485,24 +663,28 @@ window.__AUCTION__ = {{ item | tojson }};
 
     btn.addEventListener("click", async () => {
       const value = bidKey(btn.dataset.bid);
-      if(Number(cooldowns[value] || 0) > 0) return;
+      if(btn.disabled || pendingBids[value]) return;
 
       const form = new FormData();
       form.append("bid_value", value);
-      btn.disabled = true;
-      btn.classList.add("cooling");
-      if(feedback) feedback.textContent = "Enviando lance...";
+
+      pendingBids[value] = true;
+      renderBidButton(btn);
+
       try {
-        const res = await fetch(`/api/auction/${auctionId}/bid`, {method:"POST", body:form});
+        const res = await fetch(`/api/auction/${auctionId}/bid`, {method:"POST", body:form, cache:"no-store"});
         const json = await res.json().catch(() => ({}));
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
+
+        if(feedback) feedback.textContent = "";
         renderAuction(json.auction);
-        startButtonCooldown(value);
-        if(feedback) feedback.textContent = `Lance registrado. Botão liberado novamente em ${cooldownForBid(value)}s.`;
+        startNormalButtonCooldown(value);
       } catch(err) {
-        cooldowns[value] = 0;
-        renderBidButton(btn);
         if(feedback) feedback.textContent = err.message || "Erro ao enviar lance.";
+        fetchState();
+      } finally {
+        delete pendingBids[value];
+        renderAllBidButtons();
       }
     });
   });
@@ -565,10 +747,12 @@ window.__AUCTION__ = {{ item | tojson }};
       form.append("message", text);
       const res = await fetch(`/api/auction/${auctionId}/chat`, {method:"POST", body:form});
       if(res.ok && input) input.value = "";
+      else fetchState();
     });
   }
 
   renderAuction(auction);
+  if(isScheduledStatus(rawStatus()) && remaining <= 2) fetchState();
 })();
 </script>
 {% endblock %}
