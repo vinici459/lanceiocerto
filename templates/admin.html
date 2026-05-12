@@ -22,6 +22,7 @@
       <button class="side-link admin-link" data-target="admin-tickets" type="button">Chamados/Disputas</button>
       <button class="side-link admin-link" data-target="admin-suggestions" type="button">Indicações</button>
       <button class="side-link admin-link" data-target="admin-search-orders" type="button">Consulta</button>
+      <button class="side-link admin-link" data-target="admin-audit" type="button">Auditoria Geral</button>
       <button class="side-link admin-link" data-target="admin-moderation" type="button">Moderação</button>
     </aside>
 
@@ -737,6 +738,21 @@
           </div>
         </div>
       </section>
+
+
+<section id="admin-audit" class="admin-panel">
+  <div class="section-head admin-section-head-pro">
+    <div><h1>Auditoria Geral</h1><p>Registro cronológico de ações sensíveis da plataforma: cadastro, KYC, depósitos pendentes, saques, pagamentos e decisões administrativas.</p></div>
+  </div>
+  <div class="panel-card admin-card-pro">
+    <div class="card-title-row"><h2>Eventos recentes</h2><span class="pill-soft">Rastreabilidade</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Entidade</th><th>IP</th><th>Detalhes</th></tr></thead><tbody>
+      {% for a in audit_logs if audit_logs is defined %}
+      <tr><td>{{ a.created_at.strftime('%d/%m/%Y %H:%M') if a.created_at else '—' }}</td><td>{{ a.user.public_name if a.user and a.user.public_name else (a.user.email if a.user else 'Sistema') }}</td><td>{{ a.action }}</td><td>{{ a.entity_type }} #{{ a.entity_id }}</td><td>{{ a.ip_address }}</td><td>{{ a.details }}</td></tr>
+      {% else %}<tr><td colspan="6">Nenhum evento de auditoria registrado ainda.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+</section>
 
 <section id="admin-moderation" class="admin-panel">
         <div class="section-head admin-section-head-pro">

@@ -78,6 +78,8 @@ class User(Base):
     document_file_url: Mapped[str] = mapped_column(String(600), default="")
     selfie_file_url: Mapped[str] = mapped_column(String(600), default="")
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    privacy_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     wallet_balance: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -293,6 +295,21 @@ class CashbackEntry(Base):
     user: Mapped[User] = relationship(foreign_keys=[user_id])
     auction: Mapped[AuctionItem] = relationship(foreign_keys=[auction_id])
 
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String(80), default="")
+    entity_type: Mapped[str] = mapped_column(String(80), default="")
+    entity_id: Mapped[str] = mapped_column(String(80), default="")
+    ip_address: Mapped[str] = mapped_column(String(80), default="")
+    details: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped[Optional[User]] = relationship(foreign_keys=[user_id])
+
 class ProductSuggestionVote(Base):
     __tablename__ = "product_suggestion_votes"
 
@@ -441,6 +458,35 @@ def account_status_label(user: Optional["User"]) -> str:
         return "Documentos em análise"
     return "Documentos pendentes"
 
+
+
+
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:80]
+    return (request.client.host if request.client else "")[:80]
+
+
+def audit_event(db: Session, request: Request, action: str, user: Optional[User] = None, entity_type: str = "", entity_id: str | int = "", details: str = "") -> None:
+    try:
+        db.add(AuditLog(
+            user_id=getattr(user, "id", None),
+            action=action[:80],
+            entity_type=entity_type[:80],
+            entity_id=str(entity_id)[:80],
+            ip_address=client_ip(request),
+            details=(details or "")[:2000],
+        ))
+    except Exception:
+        pass
+
+
+def validate_cpf_digits(value: str) -> bool:
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) != 11 or digits == digits[0] * 11:
+        return False
+    return True
 
 def fmt_deadline(dt: Optional[datetime]) -> str:
     if not dt:
@@ -923,6 +969,8 @@ def ensure_columns() -> None:
                 "document_file_url": "VARCHAR(600) DEFAULT ''",
                 "selfie_file_url": "VARCHAR(600) DEFAULT ''",
                 "verified_at": "DATETIME",
+                "terms_accepted_at": "DATETIME",
+                "privacy_accepted_at": "DATETIME",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
@@ -1242,6 +1290,33 @@ def vote_product_suggestion(request: Request, product_key: str = Form(...)):
     finally:
         db.close()
 
+
+@app.get("/termos-de-uso", response_class=HTMLResponse)
+def terms_page(request: Request):
+    db = SessionLocal()
+    try:
+        return templates.TemplateResponse("legal_terms.html", {"request": request, "user": current_user(request, db)})
+    finally:
+        db.close()
+
+
+@app.get("/politica-de-privacidade", response_class=HTMLResponse)
+def privacy_page(request: Request):
+    db = SessionLocal()
+    try:
+        return templates.TemplateResponse("legal_privacy.html", {"request": request, "user": current_user(request, db)})
+    finally:
+        db.close()
+
+
+@app.get("/regras-do-leilao", response_class=HTMLResponse)
+def auction_rules_page(request: Request):
+    db = SessionLocal()
+    try:
+        return templates.TemplateResponse("legal_rules.html", {"request": request, "user": current_user(request, db)})
+    finally:
+        db.close()
+
 @app.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request, "error": None})
@@ -1264,10 +1339,16 @@ async def register(
     state: str = Form(...),
     document_file: UploadFile = File(...),
     selfie_file: UploadFile = File(...),
+    accept_terms: str = Form(""),
+    accept_privacy: str = Form(""),
 ):
     db = SessionLocal()
     try:
         clean_public_name = normalize_public_name(public_name)
+        if accept_terms != "on" or accept_privacy != "on":
+            return templates.TemplateResponse("register.html", {"request": request, "error": "Para criar a conta, é obrigatório aceitar os Termos de Uso e a Política de Privacidade."})
+        if not validate_cpf_digits(cpf):
+            return templates.TemplateResponse("register.html", {"request": request, "error": "Informe um CPF válido com 11 dígitos."})
         if len(clean_public_name) < 3:
             return templates.TemplateResponse("register.html", {"request": request, "error": "Escolha um apelido público com pelo menos 3 caracteres."})
         exists = db.query(User).filter(User.email == email.strip().lower()).first()
@@ -1309,9 +1390,13 @@ async def register(
             selfie_file_url=selfie_url,
             identity_status="pending",
             identity_note="Cadastro enviado. Documentos aguardando análise do administrador.",
+            terms_accepted_at=datetime.utcnow(),
+            privacy_accepted_at=datetime.utcnow(),
             wallet_balance=0.0,
         )
         db.add(user)
+        db.flush()
+        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado com documentos pendentes e aceite dos termos.")
         db.commit()
         return RedirectResponse("/login?created=1", status_code=303)
     finally:
@@ -1564,12 +1649,27 @@ def account_add_balance(request: Request, amount: float = Form(...)):
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Valor inválido.")
         # Em produção, o saldo só deve ser creditado por webhook confirmado do gateway de pagamento.
-        db.add(WalletTransaction(user_id=user.id, amount=0.0, kind="deposit_pending", note=f"Depósito solicitado: R$ {fmt_money(amount)}. Aguardando integração/webhook do gateway."))
+        tx = WalletTransaction(user_id=user.id, amount=0.0, kind="deposit_pending", note=f"Depósito solicitado: R$ {fmt_money(amount)}. Aguardando integração/webhook do gateway.")
+        db.add(tx)
+        audit_event(db, request, "wallet.deposit_requested", user, "wallet_transaction", "pending", f"Valor solicitado: R$ {fmt_money(amount)}")
         db.commit()
         return RedirectResponse("/minha-conta?saldo=1", status_code=303)
     finally:
         db.close()
 
+
+
+@app.get("/minha-conta/comprovantes", response_class=HTMLResponse)
+def my_receipts(request: Request):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(100).all()
+        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
+        audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(100).all()
+        return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", "wallet_transactions": transactions, "orders_raw": orders, "audit_logs": audits})
+    finally:
+        db.close()
 
 @app.get("/minha-conta/cadastro", response_class=HTMLResponse)
 def my_profile(request: Request):
@@ -1712,14 +1812,19 @@ def confirm_payment_flow(
                 note=f"Pagamento do leilão #{order.auction_id}"
             ))
 
-        # ⚠️ PIX/CARTÃO (simulação por enquanto)
+        # PIX/CARTÃO: em homologação, não marca como pago sem webhook real do gateway.
         elif payment_method in ["pix", "card"]:
-            pass  # depois você integra Mercado Pago
+            order.status = "pending_gateway"
+            order.admin_note = "Pagamento iniciado. Aguardando confirmação oficial do gateway/webhook."
+            audit_event(db, request, "order.payment_gateway_pending", user, "order", order.id, f"Método: {payment_method}")
+            db.commit()
+            return RedirectResponse("/minha-conta/ganhos", status_code=303)
 
-        # ✅ Finaliza pagamento
+        # Pagamento com saldo interno confirmado.
         order.status = "paid"
         order.paid_at = datetime.utcnow()
-        order.admin_note = "Pagamento confirmado pelo sistema."
+        order.admin_note = "Pagamento confirmado com saldo interno."
+        audit_event(db, request, "order.payment_wallet_confirmed", user, "order", order.id, f"Valor: R$ {fmt_money(order.final_price)}")
 
         db.commit()
 
@@ -1842,6 +1947,7 @@ def admin_dashboard(request: Request):
                 "withdrawal_requests": withdrawal_requests,
                 "support_tickets": support_tickets,
                 "user_audit": user_audit_map(db, users),
+                "audit_logs": db.query(AuditLog).order_by(desc(AuditLog.created_at)).limit(300).all(),
                 "search": search,
                 "finished_auctions": build_finished_auctions(db),
                 "returned_items": returned_items,
@@ -2266,6 +2372,7 @@ def account_request_withdrawal(request: Request, amount: float = Form(...), pix_
         req = WithdrawalRequest(user_id=user.id, amount=amount, pix_key=pix_key.strip(), status="pending")
         db.add(req)
         db.add(WalletTransaction(user_id=user.id, amount=-amount, kind="withdrawal_request", note=f"Solicitação de saque via Pix: {pix_key.strip()}"))
+        audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Valor: R$ {fmt_money(amount)}")
         db.commit()
         return RedirectResponse("/minha-conta", status_code=303)
     finally:
@@ -2304,6 +2411,7 @@ def admin_verify_user(request: Request, user_id: int, note: str = Form("")):
         user.identity_status = "verified"
         user.identity_note = note.strip()
         user.verified_at = datetime.utcnow()
+        audit_event(db, request, "kyc.verified", user, "user", user.id, note.strip())
         db.commit()
         return RedirectResponse("/admin#admin-users", status_code=303)
     finally:

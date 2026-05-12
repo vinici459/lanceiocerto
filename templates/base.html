@@ -91,6 +91,7 @@
 
         <a href="/logout">Sair</a>
       {% else %}
+        <a href="/termos-de-uso">Termos</a>
         <a href="/login">Entrar</a>
         <a href="/register" class="btn small">Criar conta</a>
       {% endif %}
@@ -105,5 +106,14 @@
 
 <script src="/static/app.js"></script>
 
+<footer class="site-footer-legal">
+  <div class="container">
+    <a href="/termos-de-uso">Termos de Uso</a>
+    <a href="/politica-de-privacidade">Privacidade</a>
+    <a href="/regras-do-leilao">Regras do Leilão</a>
+    <span>Operação com auditoria, verificação documental e confirmação de pagamentos por gateway.</span>
+  </div>
+</footer>
+<style>.site-footer-legal{border-top:1px solid rgba(255,255,255,.08);background:rgba(2,6,23,.88);padding:18px 0;color:#b7c6e6}.site-footer-legal .container{display:flex;gap:16px;flex-wrap:wrap;align-items:center}.site-footer-legal a{color:#bfdbfe;text-decoration:none;font-weight:800}</style>
 </body>
 </html>
