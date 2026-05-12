@@ -89,3 +89,72 @@
   .account-layout{grid-template-columns:1fr}
   .notice-grid,.profile-grid{grid-template-columns:1fr}
 }
+
+.admin-production-page .account-layout{
+  display:grid !important;
+  grid-template-columns:280px minmax(0,1fr) !important;
+  gap:20px !important;
+  align-items:start !important;
+}
+
+.admin-production-sidebar{
+  position:sticky !important;
+  top:86px !important;
+  align-self:flex-start !important;
+}
+
+.admin-production-sidebar .side-link,
+.admin-production-sidebar .admin-link{
+  display:block !important;
+  width:100% !important;
+  padding:12px 14px !important;
+  margin-bottom:10px !important;
+  border:0 !important;
+  border-radius:13px !important;
+  background:rgba(255,255,255,.045) !important;
+  color:#fff !important;
+  text-align:left !important;
+  font-weight:800 !important;
+  cursor:pointer !important;
+  appearance:none !important;
+}
+
+.admin-production-sidebar .side-link.active,
+.admin-production-sidebar .admin-link.active,
+.admin-production-sidebar .side-link:hover,
+.admin-production-sidebar .admin-link:hover{
+  background:rgba(59,130,246,.22) !important;
+}
+
+.admin-production-page .stat span,
+.admin-production-page .stat strong,
+.admin-production-page .stat small{
+  display:block !important;
+}
+
+.admin-production-page .stat span{
+  color:var(--muted) !important;
+  font-size:13px !important;
+  margin-bottom:8px !important;
+}
+
+.admin-production-page .stat strong{
+  font-size:24px !important;
+  color:#fff !important;
+}
+
+.admin-production-page .stat small{
+  margin-top:6px !important;
+  color:var(--muted) !important;
+  font-size:12px !important;
+}
+
+@media(max-width:980px){
+  .admin-production-page .account-layout{
+    grid-template-columns:1fr !important;
+  }
+
+  .admin-production-sidebar{
+    position:static !important;
+  }
+}

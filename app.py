@@ -1888,10 +1888,21 @@ def user_audit_map(db: Session, users: list[User]) -> dict[int, dict]:
 
 
 @app.get("/admin", response_class=HTMLResponse)
+@app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
     db = SessionLocal()
     try:
-        admin = require_admin(request, db)
+        admin = current_user(request, db)
+
+        if not admin:
+            return RedirectResponse("/login", status_code=303)
+
+        if admin.is_banned:
+            return RedirectResponse("/login", status_code=303)
+
+        if not admin.is_admin:
+            return RedirectResponse("/", status_code=303)
+
         search = (request.query_params.get("q") or "").strip()
         users_query = db.query(User)
         if search:
