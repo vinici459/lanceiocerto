@@ -83,7 +83,7 @@
         {% endif %}
 
         <div class="user-box">
-          <span class="user-name">{{ "@" ~ user.public_name if user.public_name else user.full_name }}</span>
+          <span class="user-name">@{{ user.public_name or user.nickname }}</span>
           <span class="user-balance">
             Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}
           </span>
@@ -91,7 +91,6 @@
 
         <a href="/logout">Sair</a>
       {% else %}
-        <a href="/termos-de-uso">Termos</a>
         <a href="/login">Entrar</a>
         <a href="/register" class="btn small">Criar conta</a>
       {% endif %}

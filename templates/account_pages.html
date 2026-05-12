@@ -1126,7 +1126,7 @@ button:disabled{opacity:.58;cursor:not-allowed}
 <div class="panel-card">
   <div class="section-head"><div><h1>Meu Cadastro</h1><p>Dados básicos, acesso e endereço principal.</p></div></div>
   <div class="profile-grid">
-    <div><span>Nome completo</span><strong>{{ user.full_name }}</strong></div>
+    <div><span>Apelido público</span><strong>@{{ user.public_name or user.nickname }}</strong></div>
     <div><span>Apelido público</span><strong class="account-public-name {{ 'verified-name' if user.identity_status == 'verified' else 'pending-name' }}">{{ '@' ~ user.public_name if user.public_name else (user.username or user.nickname or user.user or '—') }}</strong></div>
     <div><span>Status documental</span><strong class="{{ 'verified-name' if user.identity_status == 'verified' else 'pending-name' }}">{{ 'Conta verificada' if user.identity_status == 'verified' else ('Documentos recusados' if user.identity_status == 'rejected' else 'Documentos pendentes/em análise') }}</strong></div>
     <div><span>E-mail</span><strong>{{ user.email }}</strong></div>
