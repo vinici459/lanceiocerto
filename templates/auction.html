@@ -12,11 +12,49 @@
       <h1>{{ entity.title }}</h1>
 
       <div class="price-box">
-        <div><span>Preço atual</span><strong id="current-price">R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}</strong></div>
-        <div><span>Preço original</span><strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></div>
         <div>
-          <span id="countdown-label">{% if item.status in ['scheduled', 'relisted'] %}Começa em{% else %}Tempo restante{% endif %}</span>
-          <strong id="countdown" data-seconds="{% if item.status in ['scheduled', 'relisted'] %}{{ item.start_remaining }}{% else %}{{ item.remaining_seconds }}{% endif %}">--</strong>
+          <span>Preço atual</span>
+          <strong id="current-price">
+            R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}
+          </strong>
+        </div>
+
+        <div>
+          <span>Preço original</span>
+          <strong>
+            R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}
+          </strong>
+        </div>
+
+        <div>
+          <span id="countdown-label">
+            {% if item.status in ['scheduled', 'relisted'] %}
+              Começa em
+            {% elif item.status == 'ended' %}
+              Status
+            {% else %}
+              Tempo restante
+            {% endif %}
+          </span>
+
+          <strong
+            id="countdown"
+            data-seconds="
+              {% if item.status in ['scheduled', 'relisted'] %}
+                {{ item.start_remaining }}
+              {% elif item.status == 'live' %}
+                {{ item.remaining_seconds }}
+              {% else %}
+                0
+              {% endif %}
+            "
+          >
+            {% if item.status == 'ended' %}
+              Encerrado
+            {% else %}
+              --
+            {% endif %}
+          </strong>
         </div>
       </div>
 
