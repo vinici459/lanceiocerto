@@ -27,34 +27,28 @@
         </div>
 
         <div>
-          <span id="countdown-label">
-            {% if item.status in ['scheduled', 'relisted'] %}
-              Começa em
-            {% elif item.status == 'ended' %}
-              Status
-            {% else %}
-              Tempo restante
-            {% endif %}
-          </span>
+          {% if item.status == 'ended' %}
+            <span>Status</span>
+            <strong>Encerrado</strong>
 
-          <strong
-            id="countdown"
-            data-seconds="
+          {% elif item.status == 'pending_payment' %}
+            <span>Status</span>
+            <strong>Aguardando</strong>
+
+          {% else %}
+            <span id="countdown-label">
               {% if item.status in ['scheduled', 'relisted'] %}
-                {{ item.start_remaining }}
-              {% elif item.status == 'live' %}
-                {{ item.remaining_seconds }}
+                Começa em
               {% else %}
-                0
+                Tempo restante
               {% endif %}
-            "
-          >
-            {% if item.status == 'ended' %}
-              Encerrado
-            {% else %}
-              --
-            {% endif %}
-          </strong>
+            </span>
+
+            <strong
+              id="countdown"
+              data-seconds="{% if item.status in ['scheduled', 'relisted'] %}{{ item.start_remaining }}{% else %}{{ item.remaining_seconds }}{% endif %}"
+            >--</strong>
+          {% endif %}
         </div>
       </div>
 
@@ -349,7 +343,7 @@ window.__AUCTION__ = {{ item | tojson }};
   const feedback = document.getElementById("bid-feedback");
   const cooldowns = {};
   let auction = window.__AUCTION__ || {};
-  let remaining = Number((auction.status === "scheduled" || auction.status === "relisted") ? auction.start_remaining : auction.remaining_seconds || 0);
+  let remaining = countdown ? Number(countdown.dataset.seconds || 0) : 0;
   let lastTurbo = 0;
   let turboAlreadyAnnounced = false;
 
