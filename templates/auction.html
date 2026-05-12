@@ -109,37 +109,54 @@
       <div class="panel-card admin-actions-card">
         <h2>Ações do admin</h2>
         <div class="inline-form">
-          {% if entity.status != 'live' %}
+          {% if entity.status in ['scheduled', 'relisted'] %}
           <form method="post" action="/admin/item/{{ entity.id }}/start-now"><button class="btn small">Começar agora</button></form>
           {% endif %}
+
+          {% if entity.status == 'live' %}
           <form method="post" action="/admin/item/{{ entity.id }}/toggle-chat">
             <button class="btn small ghost">{% if entity.chat_paused %}Iniciar chat{% else %}Pausar chat{% endif %}</button>
           </form>
+          {% endif %}
+
           {% if entity.status != 'live' %}
           <form method="post" action="/admin/item/{{ entity.id }}/delete"><button class="btn small danger">Excluir leilão</button></form>
           {% endif %}
         </div>
+
+        {% if entity.status == 'ended' %}
+        <p class="muted admin-ended-note">Leilão encerrado. O chat fica bloqueado automaticamente.</p>
+        {% elif entity.status == 'pending_payment' %}
+        <p class="muted admin-ended-note">Leilão aguardando pagamento. O chat do produto fica bloqueado automaticamente.</p>
+        {% endif %}
       </div>
       {% endif %}
     </div>
   </div>
 
-  <aside class="chat-card">
+  <aside class="chat-card {% if entity.status != 'live' %}chat-card-closed{% endif %}">
     <h2>Chat deste produto</h2>
     <p class="chat-note">Cada produto possui seu próprio chat.</p>
-    {% if entity.chat_paused %}<div class="alert">O chat está pausado pelo administrador.</div>{% endif %}
-    <div id="chat-messages" class="chat-messages">
-      {% for msg in chat_messages %}
-      <div class="chat-line"><strong>{{ msg.user.full_name }}</strong> <span>{{ msg.created_at.strftime('%H:%M:%S') }}</span><p>{{ msg.message }}</p></div>
-      {% endfor %}
-    </div>
-    {% if user %}
-    <form id="chat-form" class="chat-form">
-      <input type="text" name="message" maxlength="250" placeholder="Digite sua mensagem..." />
-      <button class="btn small" type="submit">Enviar</button>
-    </form>
+
+    {% if entity.status != 'live' %}
+      <div class="alert chat-closed-alert">O chat foi encerrado porque este leilão não está em andamento.</div>
+    {% elif entity.chat_paused %}
+      <div class="alert">O chat está pausado pelo administrador.</div>
     {% else %}
-    <div class="muted">Entre na conta para participar do chat.</div>
+      <div id="chat-messages" class="chat-messages">
+        {% for msg in chat_messages %}
+        <div class="chat-line"><strong>{{ msg.user.full_name }}</strong> <span>{{ msg.created_at.strftime('%H:%M:%S') }}</span><p>{{ msg.message }}</p></div>
+        {% endfor %}
+      </div>
+
+      {% if user %}
+      <form id="chat-form" class="chat-form">
+        <input type="text" name="message" maxlength="250" placeholder="Digite sua mensagem..." />
+        <button class="btn small" type="submit">Enviar</button>
+      </form>
+      {% else %}
+      <div class="muted">Entre na conta para participar do chat.</div>
+      {% endif %}
     {% endif %}
   </aside>
 </section>
@@ -227,6 +244,25 @@
   .product-reference-grid{grid-template-columns:1fr}
   .reference-link-box{grid-column:auto}
 }
+
+/* Ajustes da tela do leilão: leitura, status encerrado e cards de métricas */
+.status-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.auction-panel h1{margin:0 0 16px;font-size:clamp(28px,3vw,38px);line-height:1.1}
+.price-box,.meta-grid{align-items:stretch}
+.price-box > div,.meta-grid > div{display:flex;flex-direction:column;gap:7px;padding:12px 13px;border:1px solid rgba(148,163,184,.14);border-radius:16px;background:rgba(255,255,255,.035);min-width:0}
+.price-box span,.meta-grid span{display:block;color:#b7c6e6;font-size:13px;line-height:1.15}
+.price-box strong,.meta-grid strong{display:block;color:#fff;font-size:clamp(18px,2vw,24px);line-height:1.18;word-break:break-word}
+.meta-grid strong{font-size:16px}
+.admin-actions-card{margin-top:16px}
+.admin-actions-card .inline-form{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.admin-ended-note{margin:12px 0 0;line-height:1.45}
+.chat-card-closed{opacity:.92}
+.chat-closed-alert{margin-top:14px}
+.chat-form{display:flex;gap:8px;align-items:center;margin-top:12px}
+.chat-form input{margin-top:0}
+.chat-form .btn{flex:0 0 auto}
+@media(max-width:520px){.price-box,.meta-grid{grid-template-columns:1fr}.chat-form{flex-direction:column;align-items:stretch}}
+
 </style>
 
 <script>

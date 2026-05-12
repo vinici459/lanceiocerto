@@ -1577,7 +1577,9 @@ def send_chat(request: Request, auction_id: int, message: str = Form(...)):
         item = db.get(AuctionItem, auction_id)
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
-        if item.chat_paused and (not user.is_admin):
+        if item.status != "live":
+            raise HTTPException(status_code=403, detail="O chat foi encerrado porque este leilão não está em andamento.")
+        if item.chat_paused:
             raise HTTPException(status_code=403, detail="O chat está pausado pelo administrador.")
         if user.chat_muted:
             raise HTTPException(status_code=403, detail="Seu chat está bloqueado por um administrador.")
@@ -2242,6 +2244,8 @@ def admin_toggle_chat(request: Request, item_id: int):
         item = db.get(AuctionItem, item_id)
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+        if item.status != "live":
+            raise HTTPException(status_code=400, detail="O chat só pode ser pausado ou iniciado enquanto o leilão estiver ao vivo.")
         item.chat_paused = not item.chat_paused
         db.commit()
         return RedirectResponse(f"/auction/{item_id}", status_code=303)
