@@ -3,46 +3,53 @@
 
 <section class="container lc-home">
 
-  <div class="lc-hero">
-    <div class="lc-hero-copy">
-      
+  <div class="lc-hero lc-hero-pro">
+    <div class="lc-hero-copy hero-banner">
+      <div class="hero-overlay-content">
+        <span class="eyebrow">Leilões online com acompanhamento em tempo real</span>
 
-      <h1>Leilões online em uma experiência direta, limpa e confiável.</h1>
-      <p>
-        Encontre disputas ao vivo, acompanhe os próximos produtos e consulte leilões encerrados sem excesso de informação.
-      </p>
+        <h1>Dispute produtos selecionados em uma plataforma segura, moderna e transparente.</h1>
 
-      
+        <p>
+          Acompanhe leilões ao vivo, veja os próximos produtos e participe usando seu apelido público,
+          sem expor seu nome completo na página principal.
+        </p>
+
+        <div class="hero-trust-row">
+          <span>🔒 Cadastro seguro</span>
+          <span>⚡ Lances em tempo real</span>
+          <span>✅ Conta verificada</span>
+        </div>
+      </div>
     </div>
 
     <aside class="lc-market-card">
-      <div class="market-row">
+      <div class="market-row market-live">
         <span>Ao vivo</span>
         <strong>{{ live_items|length }}</strong>
       </div>
-      <div class="market-row">
+      <div class="market-row market-next">
         <span>Próximos</span>
         <strong>{{ upcoming_items|length }}</strong>
       </div>
-      <div class="market-row">
+      <div class="market-row market-ended">
         <span>Encerrados</span>
         <strong>{{ ended_items|length }}</strong>
       </div>
-      <div class="market-row">
+      <div class="market-row market-suggestion">
         <span>Indicações</span>
         <strong>{{ suggestion_products|length if suggestion_products is defined else 0 }}</strong>
-      </div>      
+      </div>
     </aside>
   </div>
 
   <div class="lc-toolbar">
     <div>
-      <h2>Leilões</h2>
-      <p>Escolha uma disputa ativa, veja os próximos produtos ou consulte resultados.</p>
+      <h2>Leilões disponíveis</h2>
+      <p>Escolha uma disputa ativa, acompanhe os próximos produtos ou consulte resultados encerrados.</p>
     </div>
 
     <div class="lc-tools">
-      
       <div class="lc-tabs">
         <button class="lc-tab active" type="button" data-home-target="home-active-auctions">Ao vivo e próximos</button>
         <button class="lc-tab" type="button" data-home-target="home-ended-auctions">Encerrados</button>
@@ -157,7 +164,6 @@
   </div>
 
   <div id="home-ended-auctions" class="home-tab-panel">
-
     <section class="auction-lane">
       <div class="lane-head">
         <div>
@@ -200,12 +206,9 @@
         {% endfor %}
       </div>
     </section>
-
   </div>
 
-
   <div id="home-suggestions" class="home-tab-panel">
-
     <section class="auction-lane suggestion-lane">
       <div class="lane-head">
         <div>
@@ -271,7 +274,6 @@
         </div>
       {% endif %}
     </section>
-
   </div>
 
   <div id="noSearchResults" class="empty-state search-empty" style="display:none;">
@@ -287,7 +289,6 @@ document.addEventListener("DOMContentLoaded", function () {
   const panels = document.querySelectorAll(".home-tab-panel");
   const searchInput = document.getElementById("auctionSearch");
   const noResults = document.getElementById("noSearchResults");
-  
 
   buttons.forEach((button) => {
     button.addEventListener("click", function () {
@@ -371,70 +372,121 @@ document.addEventListener("DOMContentLoaded", function () {
 .lc-market-card,
 .auction-lane {
   border: 1px solid rgba(255,255,255,.10);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.060), rgba(255,255,255,.035));
+  background: linear-gradient(180deg, rgba(255,255,255,.060), rgba(255,255,255,.035));
   border-radius: 26px;
   box-shadow: 0 18px 46px rgba(0,0,0,.18);
 }
 
-.lc-hero-copy {
-  padding: 30px;
+.hero-banner {
+  position: relative;
+  overflow: hidden;
+  min-height: 410px;
+  padding: 36px;
+  display: flex;
+  align-items: center;
+  isolation: isolate;
+  background:
+    linear-gradient(90deg, rgba(3, 7, 18, .92) 0%, rgba(7, 20, 45, .78) 44%, rgba(7, 20, 45, .38) 100%),
+    url("/static/hero-auction.jpg") center right / cover no-repeat;
 }
 
-.lc-brand {
+.hero-banner::before {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(34,197,94,.22), transparent 28%),
+    radial-gradient(circle at 72% 34%, rgba(59,130,246,.24), transparent 30%),
+    url("/static/hero-auction.jpg") center right / cover no-repeat;
+  opacity: .72;
+  transform: scale(1);
+  animation: heroPhotoMove 18s ease-in-out infinite alternate;
+  z-index: -3;
+}
+
+.hero-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(2,6,23,.94) 0%, rgba(2,6,23,.78) 48%, rgba(2,6,23,.36) 100%),
+    radial-gradient(circle at 12% 12%, rgba(34,197,94,.20), transparent 34%),
+    radial-gradient(circle at 76% 78%, rgba(59,130,246,.22), transparent 30%);
+  z-index: -2;
+}
+
+.hero-overlay-content {
+  max-width: 780px;
+}
+
+.eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.lc-brand-mark {
-  width: 48px;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at 30% 20%, rgba(255,255,255,.25), transparent 34%),
-    linear-gradient(135deg, #2563eb, #22c55e);
-  color: #fff;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(96,165,250,.42);
+  background: rgba(37,99,235,.16);
+  color: #bfdbfe;
+  font-size: 13px;
   font-weight: 950;
-  letter-spacing: -.06em;
-  box-shadow: 0 14px 34px rgba(37,99,235,.28);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  box-shadow: 0 10px 28px rgba(37,99,235,.16);
 }
 
-.lc-brand-name {
-  color: #fff;
-  font-size: 23px;
-  font-weight: 950;
-  letter-spacing: -.03em;
-}
-
-.lc-brand-name strong {
-  color: #3b82f6;
+.eyebrow::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22c55e, #3b82f6);
+  box-shadow: 0 0 18px rgba(34,197,94,.55);
 }
 
 .lc-hero h1 {
-  max-width: 780px;
-  margin: 0 0 14px;
-  font-size: clamp(34px, 4.6vw, 56px);
+  max-width: 850px;
+  margin: 0 0 18px;
+  font-size: clamp(36px, 4.7vw, 60px);
   line-height: 1.02;
-  letter-spacing: -1.5px;
+  letter-spacing: -1.7px;
+  color: #fff;
 }
 
 .lc-hero p {
-  max-width: 690px;
+  max-width: 720px;
   margin: 0;
-  color: rgba(255,255,255,.74);
+  color: rgba(255,255,255,.80);
   font-size: 17px;
-  line-height: 1.58;
+  line-height: 1.62;
 }
 
-.lc-hero-actions {
+.hero-trust-row {
   display: flex;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 10px;
   margin-top: 24px;
+}
+
+.hero-trust-row span {
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.11);
+  background: rgba(255,255,255,.07);
+  color: rgba(255,255,255,.86);
+  font-size: 13px;
+  font-weight: 850;
+  backdrop-filter: blur(10px);
+}
+
+@keyframes heroPhotoMove {
+  from {
+    transform: scale(1.02) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.10) translate3d(-18px, -8px, 0);
+  }
 }
 
 .lc-market-card {
@@ -443,35 +495,50 @@ document.addEventListener("DOMContentLoaded", function () {
   gap: 12px;
 }
 
-.market-row,
-.market-note {
+.market-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 16px;
   border-radius: 18px;
-  background: rgba(255,255,255,.050);
+  background:
+    radial-gradient(circle at top left, rgba(59,130,246,.18), transparent 38%),
+    rgba(255,255,255,.050);
   border: 1px solid rgba(255,255,255,.075);
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
 }
 
-.market-row span,
-.market-note span {
-  color: rgba(255,255,255,.68);
-  font-weight: 750;
+.market-row:hover {
+  transform: translateY(-2px);
+  border-color: rgba(59,130,246,.36);
+}
+
+.market-row span {
+  color: rgba(255,255,255,.72);
+  font-weight: 800;
 }
 
 .market-row strong {
   font-size: 32px;
   line-height: 1;
+  color: #fff;
 }
 
-.market-note strong {
-  padding: 6px 10px;
-  border-radius: 999px;
-  color: #4ade80;
-  background: rgba(74,222,128,.11);
-  border: 1px solid rgba(74,222,128,.28);
+.market-live strong {
+  color: #86efac;
+}
+
+.market-next strong {
+  color: #bfdbfe;
+}
+
+.market-ended strong {
+  color: #cbd5e1;
+}
+
+.market-suggestion strong {
+  color: #67e8f9;
 }
 
 .lc-toolbar {
@@ -498,20 +565,6 @@ document.addEventListener("DOMContentLoaded", function () {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
-}
-
-#auctionSearch {
-  width: min(280px, 100%);
-  border: 1px solid rgba(255,255,255,.13);
-  background: rgba(255,255,255,.060);
-  color: #fff;
-  border-radius: 999px;
-  padding: 11px 14px;
-  outline: none;
-}
-
-#auctionSearch::placeholder {
-  color: rgba(255,255,255,.48);
 }
 
 .lc-tabs {
@@ -591,15 +644,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
 .lc-auction-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)) !important;
+  gap: 14px !important;
 }
 
 .lc-auction-card {
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.10);
   background: rgba(255,255,255,.040);
-  border-radius: 22px;
+  border-radius: 16px !important;
   transition: transform .18s ease, border-color .18s ease, background .18s ease;
 }
 
@@ -614,9 +667,10 @@ document.addEventListener("DOMContentLoaded", function () {
   overflow: hidden;
 }
 
-.auction-media .card-image {
+.auction-media .card-image,
+.lc-auction-card .card-image {
   width: 100%;
-  height: 210px;
+  height: 145px !important;
   object-fit: cover;
   display: block;
 }
@@ -645,21 +699,23 @@ document.addEventListener("DOMContentLoaded", function () {
   color: #cbd5e1;
 }
 
-.card-body {
-  padding: 16px;
+.card-body,
+.lc-auction-card .card-body {
+  padding: 12px !important;
 }
 
-.card-body h3 {
-  min-height: 44px;
-  margin: 0 0 14px;
-  font-size: 18px;
-  line-height: 1.25;
+.card-body h3,
+.lc-auction-card h3 {
+  font-size: 16px !important;
+  line-height: 1.2;
+  min-height: 38px;
+  margin: 0 0 8px;
 }
 
 .price-line {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px !important;
 }
 
 .price-line div,
@@ -675,7 +731,7 @@ document.addEventListener("DOMContentLoaded", function () {
 .timer-line span {
   display: block;
   color: rgba(255,255,255,.62);
-  font-size: 12px;
+  font-size: 12px !important;
   margin-bottom: 5px;
 }
 
@@ -683,6 +739,7 @@ document.addEventListener("DOMContentLoaded", function () {
 .timer-line strong {
   display: block;
   color: #fff;
+  font-size: 14px !important;
 }
 
 .timer-line {
@@ -712,31 +769,10 @@ document.addEventListener("DOMContentLoaded", function () {
   margin-top: 12px;
 }
 
-@media (max-width: 900px) {
-  .lc-hero {
-    grid-template-columns: 1fr;
-  }
-
-  .lc-toolbar,
-  .lane-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .lc-tools,
-  #auctionSearch {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .price-line {
-    grid-template-columns: 1fr;
-  }
-}
-
 .suggestion-card .card-body h3 {
   min-height: 54px;
 }
+
 .suggestion-category {
   display: inline-flex;
   margin-bottom: 10px;
@@ -747,33 +783,56 @@ document.addEventListener("DOMContentLoaded", function () {
   font-size: 12px;
   font-weight: 900;
 }
+
 .suggestion-card form {
   margin-top: 14px;
 }
+
 .suggestion-card button:disabled {
   opacity: .55;
   cursor: not-allowed;
   filter: grayscale(.25);
 }
+
 .suggestion-message {
   margin-bottom: 16px;
 }
+
 .suggestion-message.success {
   border-color: rgba(74,222,128,.28);
   color: #bbf7d0;
 }
+
 .suggestion-message.warn {
   border-color: rgba(251,191,36,.28);
   color: #fde68a;
 }
 
-.lc-auction-grid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))!important;gap:14px!important}
-.lc-auction-card{border-radius:16px!important}
-.lc-auction-card .card-image{height:145px!important;object-fit:cover}
-.lc-auction-card .card-body{padding:12px!important}
-.lc-auction-card h3{font-size:16px!important;line-height:1.2;min-height:38px;margin:0 0 8px}
-.price-line{gap:8px!important}
-.price-line span,.timer-line span{font-size:12px!important}
-.price-line strong,.timer-line strong{font-size:14px!important}
+@media (max-width: 900px) {
+  .lc-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-banner {
+    min-height: 430px;
+    padding: 28px;
+    background-position: center;
+  }
+
+  .lc-toolbar,
+  .lane-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lc-tools {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .price-line {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
 {% endblock %}

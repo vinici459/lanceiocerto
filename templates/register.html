@@ -18,7 +18,7 @@
       {% if error %}<div class="alert">{{ error }}</div>{% endif %}
       <div class="grid-2">
         <label>Nome completo<input name="full_name" placeholder="Seu nome completo" required></label>
-        <label>Apelido público<input name="public_name" placeholder="ex: vinici459" minlength="3" maxlength="24" required><small>Aparecerá como @apelido nos leilões.</small></label>
+        <label>Apelido público<input name="public_name" placeholder="ex: lancecerto24" minlength="3" maxlength="24" required><small>Aparecerá como @apelido nos leilões.</small></label>
         <label>E-mail<input type="email" name="email" placeholder="voce@email.com" required></label>
         <label>Senha<input type="password" name="password" placeholder="Crie uma senha segura" minlength="6" required></label>
       </div>
@@ -46,9 +46,17 @@
         <label>Selfie de confirmação<input type="file" name="selfie_file" accept="image/*" required></label>
       </div>
 
+      <div class="legal-accept-box">
+        <label class="check-line"><input type="checkbox" name="accept_terms" required> Li e aceito os <a href="/termos-de-uso" target="_blank">Termos de Uso</a> e as <a href="/regras-do-leilao" target="_blank">Regras do Leilão</a>.</label>
+        <label class="check-line"><input type="checkbox" name="accept_privacy" required> Li e aceito a <a href="/politica-de-privacidade" target="_blank">Política de Privacidade</a> e autorizo a análise dos documentos enviados.</label>
+      </div>
       <button class="btn full" type="submit">Criar conta para análise</button>
       <p class="form-footer">Ao criar a conta, você confirma que os dados enviados são verdadeiros. Saques e envio de produtos dependem da aprovação da identidade.</p>
     </form>
   </div>
+
+<style>
+.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:16px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}
+</style>
 </section>
 {% endblock %}

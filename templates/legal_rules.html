@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="container legal-page"><div class="legal-card">
+  <span class="eyebrow">Regras operacionais</span>
+  <h1>Regras do Leilão</h1>
+  <p class="muted">Regulamento-base para operação transparente e auditável.</p>
+  <h2>1. Participação</h2><p>Para participar, o usuário precisa estar logado, com cadastro preenchido e sem bloqueio administrativo. Documentos pendentes permitem participar, mas impedem saque e entrega até aprovação.</p>
+  <h2>2. Lances</h2><p>Cada botão de lance possui valor e tempo de bloqueio/cooldown exibido no próprio botão. O sistema registra data, usuário, leilão, valor e IP quando aplicável.</p>
+  <h2>3. Vencedor</h2><p>Ao encerrar o tempo, o último participante válido é considerado vencedor, salvo falha técnica, fraude, inconsistência cadastral ou intervenção administrativa fundamentada.</p>
+  <h2>4. Pagamento do arremate</h2><p>O pagamento deve ocorrer no prazo indicado. Pagamentos por Pix/cartão só são considerados confirmados após retorno oficial do gateway. Enquanto isso, o pedido fica pendente.</p>
+  <h2>5. Entrega</h2><p>O produto só é enviado após pagamento confirmado, documentos aprovados e endereço válido. O rastreio deve ficar disponível na área do usuário quando informado.</p>
+  <h2>6. Cancelamento, disputa e suporte</h2><p>O usuário pode abrir chamado em sua conta. A administração deve registrar motivo, comprovantes e histórico de decisão para auditoria.</p>
+  <h2>7. Transparência</h2><p>Resultados, vencedores por apelido público, status de pagamento, solicitações financeiras e ações administrativas devem permanecer rastreáveis dentro do painel.</p>
+</div></section>
+<style>.legal-page{padding:34px 20px}.legal-card{max-width:980px;margin:0 auto;border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.88);border-radius:24px;padding:28px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,.25)}.legal-card h1{font-size:36px;margin:8px 0 12px}.legal-card h2{margin-top:24px;color:#bfdbfe}.legal-card p{line-height:1.65;color:#dbeafe}.muted{color:#b7c6e6!important}.eyebrow{color:#60a5fa;font-weight:900;text-transform:uppercase;letter-spacing:.08em}</style>
+{% endblock %}
