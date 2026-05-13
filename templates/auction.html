@@ -2,7 +2,7 @@
 {% block content %}
 <section class="container auction-layout" data-auction-id="{{ item.id }}" id="auction-layout">
   <div class="auction-main">
-    <img class="auction-image" src="{{ entity.image_url }}" alt="{{ entity.title }}">
+    <img class="auction-image" src="{{ item.image_url }}" alt="{{ entity.title }}" loading="eager" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
     <div class="auction-panel">
       <div class="status-row">
         <span class="status {{ item.status }}" id="auction-status">{% if item.status in ['scheduled', 'relisted'] %}PRÓXIMO{% elif item.status == 'live' %}AO VIVO{% elif item.status == 'pending_payment' %}AGUARDANDO PAGAMENTO{% elif item.status == 'ended' %}ENCERRADO{% else %}{{ item.status|upper }}{% endif %}</span>
@@ -358,73 +358,62 @@
 window.__AUCTION__ = {{ item | tojson }};
 (function(){
   const auctionId = document.querySelector("[data-auction-id]")?.dataset.auctionId;
-  const layout = document.getElementById("auction-layout");
-  const countdown = document.getElementById("countdown");
-  const countdownLabel = document.getElementById("countdown-label");
-  const currentPrice = document.getElementById("current-price");
-  const bidsCount = document.getElementById("bids-count");
-  const lastBidder = document.getElementById("last-bidder");
-  const lastBidderLabel = document.getElementById("last-bidder-label");
-  const modelLabel = document.getElementById("model-label");
-  const modelValue = document.getElementById("model-value");
-  const statusEl = document.getElementById("auction-status");
-  const progressLabel = document.getElementById("progress-label");
-  const progressBar = document.getElementById("progress-bar");
-  const turboBadge = document.getElementById("turbo-badge");
-  const strategyCard = document.getElementById("strategy-card");
-  const turboAnnouncement = document.getElementById("turbo-announcement");
-  const feedback = document.getElementById("bid-feedback");
-  const bidForm = document.getElementById("bid-form");
-  const bidNote = document.getElementById("bid-note");
-  const auctionStateAlert = document.getElementById("auction-state-alert");
-  const chatCard = document.getElementById("chat-card");
-  const chatClosedAlert = document.getElementById("chat-closed-alert");
-  const chatPausedAlert = document.getElementById("chat-paused-alert");
-  const chatLiveArea = document.getElementById("chat-live-area");
+  const $ = (id) => document.getElementById(id);
 
-  const cooldowns = {};
-  const pendingBids = {};
+  const els = {
+    layout: $("auction-layout"),
+    countdown: $("countdown"),
+    countdownLabel: $("countdown-label"),
+    currentPrice: $("current-price"),
+    bidsCount: $("bids-count"),
+    lastBidder: $("last-bidder"),
+    lastBidderLabel: $("last-bidder-label"),
+    modelLabel: $("model-label"),
+    modelValue: $("model-value"),
+    status: $("auction-status"),
+    progressLabel: $("progress-label"),
+    progressBar: $("progress-bar"),
+    turboBadge: $("turbo-badge"),
+    strategyCard: $("strategy-card"),
+    turboAnnouncement: $("turbo-announcement"),
+    feedback: $("bid-feedback"),
+    bidForm: $("bid-form"),
+    bidNote: $("bid-note"),
+    stateAlert: $("auction-state-alert"),
+    chatCard: $("chat-card"),
+    chatClosedAlert: $("chat-closed-alert"),
+    chatPausedAlert: $("chat-paused-alert"),
+    chatLiveArea: $("chat-live-area"),
+    cashbackCountdown: $("cashback-countdown"),
+    joinCashbackBtn: $("join-cashback-btn"),
+    chatForm: $("chat-form"),
+  };
+
   let auction = window.__AUCTION__ || {};
-  let remaining = countdown ? Number(countdown.dataset.seconds || 0) : 0;
+  let remaining = Number(auction.start_remaining || auction.remaining_seconds || 0);
+  let cashbackRemaining = Number(els.cashbackCountdown?.dataset.seconds || 0);
   let lastTurbo = Number(auction.turbo_level || 0);
-  let turboAlreadyAnnounced = false;
+  let wsConnected = false;
+  let wsReconnectTimer = null;
   let stateFetchInFlight = false;
-  let zeroFetchRequested = false;
+  let zeroSyncLocked = false;
+  const cooldowns = Object.create(null);
+  const pendingBids = Object.create(null);
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
   function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
-
-  function rawStatus(){
-    return String(auction.status || "").toLowerCase();
+  function status(){ return String(auction.status || "").toLowerCase(); }
+  function isScheduled(s){ return s === "scheduled" || s === "relisted"; }
+  function isLive(s){ return s === "live"; }
+  function isClosed(s){ return ["ended", "finished", "closed", "expired", "pending_payment"].includes(s); }
+  function show(el, visible, mode="block"){ if(el) el.style.display = visible ? mode : "none"; }
+  function labelStatus(s){
+    if(isScheduled(s)) return "PRÓXIMO";
+    if(s === "live") return "AO VIVO";
+    if(s === "pending_payment") return "AGUARDANDO PAGAMENTO";
+    if(s === "ended") return "ENCERRADO";
+    return String(s || "").toUpperCase();
   }
-
-  function isScheduledStatus(status){
-    return status === "scheduled" || status === "relisted";
-  }
-
-  function isLiveStatus(status){
-    return status === "live";
-  }
-
-  function isClosedStatus(status){
-    return ["ended", "finished", "closed", "expired", "pending_payment"].includes(status);
-  }
-
-  function statusLabel(status){
-    if(status === "scheduled" || status === "relisted") return "PRÓXIMO";
-    if(status === "live") return "AO VIVO";
-    if(status === "pending_payment") return "AGUARDANDO PAGAMENTO";
-    if(status === "ended") return "ENCERRADO";
-    return String(status || "").toUpperCase();
-  }
-
-  function normalCooldownForBid(value){
-    const n = Number(value || 0);
-    if(n <= 0.10) return 10;
-    if(n <= 0.50) return 20;
-    return 30;
-  }
-
   function timeLabel(total){
     total = Math.max(0, Math.ceil(Number(total || 0)));
     const h = Math.floor(total / 3600);
@@ -433,186 +422,145 @@ window.__AUCTION__ = {{ item | tojson }};
     if(h > 0) return `${h}h ${String(m).padStart(2,"0")}m ${String(s).padStart(2,"0")}s`;
     return `${m}m ${String(s).padStart(2,"0")}s`;
   }
-
-  function setDisplay(el, show, mode="block"){
-    if(!el) return;
-    el.style.display = show ? mode : "none";
+  function normalCooldown(value){
+    const n = Number(value || 0);
+    if(n <= 0.10) return 10;
+    if(n <= 0.50) return 20;
+    return 30;
+  }
+  function setFeedback(text){
+    if(els.feedback) els.feedback.textContent = text || "";
   }
 
-  function renderBidButton(btn){
-    const status = rawStatus();
+  function renderButton(btn){
     const key = bidKey(btn.dataset.bid);
-    const nowMs = Date.now();
-    const seconds = Number(cooldowns[key] || 0);
-    const pending = Boolean(pendingBids[key]);
-    const canBid = isLiveStatus(status);
+    const cd = Number(cooldowns[key] || 0);
+    const busy = Boolean(pendingBids[key]);
+    const canBid = isLive(status());
 
-    if(!canBid || pending || seconds > 0) {
-      btn.disabled = true;
-      btn.classList.add("cooling");
-      btn.textContent = seconds > 0 ? `${moneyBR(key)} • ${seconds}s` : moneyBR(key);
-    } else {
-      btn.disabled = false;
-      btn.classList.remove("cooling");
-      btn.textContent = moneyBR(key);
-    }
+    btn.disabled = !canBid || busy || cd > 0;
+    btn.classList.toggle("cooling", btn.disabled);
+    btn.textContent = cd > 0 ? `${moneyBR(key)} • ${cd}s` : moneyBR(key);
+  }
+  function renderButtons(){
+    document.querySelectorAll(".bid-btn").forEach(renderButton);
   }
 
-  function renderAllBidButtons(){
-    document.querySelectorAll(".bid-btn").forEach(renderBidButton);
-  }
-
-  function startNormalButtonCooldown(value){
-    const level = Number(auction.turbo_level || 0);
-    if(level >= 2) return;
-    cooldowns[bidKey(value)] = normalCooldownForBid(value);
-    renderAllBidButtons();
-  }
-
-  function startGlobalTurboCooldown(seconds){
-    // Sem bloqueio global visual: o turbo já controla o ritmo pelo relógio curto.
-    // Mantido como função vazia para compatibilidade com payloads antigos.
-    return;
-  }
-
-  function showTurboAnimation(level){
+  function turboFlash(level){
+    if(level < 2 || level <= lastTurbo) return;
     const label = level === 4 ? "🔥 TURBO 4.0 ATIVADO" : level === 3 ? "⚡ TURBO 3.0 ATIVADO" : "🚀 TURBO 2.0 ATIVADO";
-    if(turboAnnouncement) {
-      turboAnnouncement.textContent = label;
-      turboAnnouncement.classList.remove("active");
-      void turboAnnouncement.offsetWidth;
-      turboAnnouncement.classList.add("active");
+    if(els.turboAnnouncement){
+      els.turboAnnouncement.textContent = label;
+      els.turboAnnouncement.classList.remove("active");
+      void els.turboAnnouncement.offsetWidth;
+      els.turboAnnouncement.classList.add("active");
+      setTimeout(() => els.turboAnnouncement?.classList.remove("active"), 2200);
     }
-    if(layout) {
-      layout.classList.remove("turbo-screen-flash");
-      void layout.offsetWidth;
-      layout.classList.add("turbo-screen-flash");
-    }
-    if(strategyCard) {
-      strategyCard.classList.remove("turbo-flash");
-      void strategyCard.offsetWidth;
-      strategyCard.classList.add("turbo-flash");
+    if(els.layout){
+      els.layout.classList.remove("turbo-screen-flash");
+      void els.layout.offsetWidth;
+      els.layout.classList.add("turbo-screen-flash");
     }
   }
 
-  function updateChatVisibility(){
+  function renderMeta(s){
+    if(els.bidsCount) els.bidsCount.textContent = isScheduled(s) ? "0" : (auction.bids_count ?? "0");
+
+    if(els.lastBidderLabel && els.lastBidder){
+      if(s === "ended"){
+        els.lastBidderLabel.textContent = "Vencedor";
+        els.lastBidder.textContent = auction.winner_name || auction.last_bidder || "Sem vencedor";
+      } else if(s === "pending_payment"){
+        els.lastBidderLabel.textContent = "Vencedor";
+        els.lastBidder.textContent = auction.winner_name || auction.last_bidder || "—";
+      } else if(isScheduled(s)){
+        els.lastBidderLabel.textContent = "Status";
+        els.lastBidder.textContent = "Próximo leilão";
+      } else {
+        els.lastBidderLabel.textContent = "Último lance";
+        els.lastBidder.textContent = auction.last_bidder || "—";
+      }
+    }
+
+    if(els.modelLabel && els.modelValue){
+      if(s === "ended"){
+        els.modelLabel.textContent = "Status";
+        els.modelValue.textContent = auction.payment_status || "Encerrado";
+      } else if(s === "pending_payment"){
+        els.modelLabel.textContent = "Status";
+        els.modelValue.textContent = "Aguardando pagamento";
+      } else {
+        els.modelLabel.textContent = "Modelo";
+        els.modelValue.textContent = "Lance sem débito";
+      }
+    }
+  }
+
+  function renderControls(s){
+    const live = isLive(s);
+    const scheduled = isScheduled(s);
+
+    show(els.bidForm, live, "grid");
+    show(els.bidNote, live);
+
+    if(els.stateAlert){
+      show(els.stateAlert, !live);
+      els.stateAlert.classList.toggle("scheduled-alert", scheduled);
+      if(scheduled) els.stateAlert.textContent = "Este leilão ainda não começou. A contagem regressiva está acima.";
+      else if(s === "pending_payment") els.stateAlert.textContent = "Este leilão está aguardando pagamento do vencedor.";
+      else if(s === "ended") els.stateAlert.textContent = "Este leilão foi encerrado.";
+      else els.stateAlert.textContent = "Este leilão não está em andamento neste momento.";
+    }
+  }
+
+  function renderChat(){
     const open = Boolean(auction.chat_open);
     const paused = Boolean(auction.chat_paused);
-    if(chatCard) chatCard.classList.toggle("chat-card-closed", !open);
-    setDisplay(chatClosedAlert, !open);
-    setDisplay(chatPausedAlert, open && paused);
-    setDisplay(chatLiveArea, open && !paused);
+    els.chatCard?.classList.toggle("chat-card-closed", !open);
+    show(els.chatClosedAlert, !open);
+    show(els.chatPausedAlert, open && paused);
+    show(els.chatLiveArea, open && !paused);
   }
 
-  function updateAuctionControls(){
-    const status = rawStatus();
-    const live = isLiveStatus(status);
-    const scheduled = isScheduledStatus(status);
+  function applyAuctionState(data, source="unknown"){
+    if(!data) return;
+    auction = data;
+    const s = status();
 
-    setDisplay(bidForm, live, "grid");
-    setDisplay(bidNote, live);
-    if(auctionStateAlert) {
-      if(live) {
-        auctionStateAlert.style.display = "none";
-      } else {
-        auctionStateAlert.style.display = "block";
-        auctionStateAlert.classList.toggle("scheduled-alert", scheduled);
-        if(scheduled) auctionStateAlert.textContent = "Este leilão ainda não começou. A contagem regressiva está acima.";
-        else if(status === "pending_payment") auctionStateAlert.textContent = "Este leilão está aguardando pagamento do vencedor.";
-        else if(status === "ended") auctionStateAlert.textContent = "Este leilão foi encerrado.";
-        else auctionStateAlert.textContent = "Este leilão não está em andamento neste momento.";
-      }
+    remaining = Number(isScheduled(s) ? auction.start_remaining : isLive(s) ? auction.remaining_seconds : 0);
+    zeroSyncLocked = false;
+
+    if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
+    if(els.countdown) els.countdown.textContent = isClosed(s) ? (s === "pending_payment" ? "Aguardando" : "Encerrado") : timeLabel(remaining);
+    if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
+
+    if(els.status){
+      els.status.textContent = labelStatus(s);
+      els.status.className = "status " + s;
     }
 
-    renderAllBidButtons();
-  }
-
-  function renderAuction(data){
-    auction = data || auction;
-    const status = rawStatus();
-    const scheduled = isScheduledStatus(status);
-    const live = isLiveStatus(status);
-
-    remaining = Number(scheduled ? (auction.start_remaining || 0) : live ? (auction.remaining_seconds || 0) : 0);
-    zeroFetchRequested = false;
-
-    if(countdownLabel && countdown) {
-      countdownLabel.textContent = scheduled ? "Começa em" : live ? "Tempo restante" : "Status";
-      countdown.textContent = isClosedStatus(status)
-        ? (status === "pending_payment" ? "Aguardando" : "Encerrado")
-        : timeLabel(remaining);
-    }
-
-    if(currentPrice) currentPrice.textContent = moneyBR(auction.current_price);
-    if(bidsCount) bidsCount.textContent = scheduled ? "0" : (auction.bids_count ?? "0");
-
-    if(lastBidderLabel && lastBidder) {
-      if(status === "ended") {
-        lastBidderLabel.textContent = "Vencedor";
-        lastBidder.textContent = auction.winner_name || auction.last_bidder || "Sem vencedor";
-      } else if(status === "pending_payment") {
-        lastBidderLabel.textContent = "Vencedor";
-        lastBidder.textContent = auction.winner_name || auction.last_bidder || "—";
-      } else if(scheduled) {
-        lastBidderLabel.textContent = "Status";
-        lastBidder.textContent = "Próximo leilão";
-      } else {
-        lastBidderLabel.textContent = "Último lance";
-        lastBidder.textContent = auction.last_bidder || "—";
-      }
-    }
-
-    if(modelLabel && modelValue) {
-      if(status === "ended") {
-        modelLabel.textContent = "Status";
-        modelValue.textContent = auction.payment_status || "Encerrado";
-      } else if(status === "pending_payment") {
-        modelLabel.textContent = "Status";
-        modelValue.textContent = "Aguardando pagamento";
-      } else {
-        modelLabel.textContent = "Modelo";
-        modelValue.textContent = "Lance sem débito";
-      }
-    }
-
-    if(statusEl) {
-      statusEl.textContent = statusLabel(status);
-      statusEl.className = "status " + status;
-    }
-
-    if(progressLabel) {
-      progressLabel.textContent =
-        `${Number(auction.progress_percent || 0).toFixed(2).replace(".", ",")}% arrecadado`;
-    }
-
-    if(progressBar) {
-      progressBar.style.width =
-        `${Math.min(100, Number(auction.progress_percent || 0))}%`;
-    }
+    renderMeta(s);
 
     const level = Number(auction.turbo_level || 0);
-
-    if(turboBadge) {
-      turboBadge.textContent =
-        auction.turbo_label || (level ? `Turbo ${level}.0` : "Modo Normal");
-      turboBadge.className = `turbo-badge turbo-${level}`;
+    if(els.progressLabel) els.progressLabel.textContent = `${Number(auction.progress_percent || 0).toFixed(2).replace(".", ",")}% arrecadado`;
+    if(els.progressBar) els.progressBar.style.width = `${Math.min(100, Number(auction.progress_percent || 0))}%`;
+    if(els.turboBadge){
+      els.turboBadge.textContent = auction.turbo_label || (level ? `Turbo ${level}.0` : "Modo Normal");
+      els.turboBadge.className = `turbo-badge turbo-${level}`;
     }
-
-    if(level >= 2 && level > lastTurbo) {
-      showTurboAnimation(level);
-      turboAlreadyAnnounced = true;
-    }
-
+    turboFlash(level);
     lastTurbo = level;
-    updateAuctionControls();
-    updateChatVisibility();
+
+    renderControls(s);
+    renderChat();
+    renderButtons();
   }
 
-  async function safeJsonFetch(url, options = {}, timeoutMs = 5000){
+  async function fetchJson(url, options={}, timeoutMs=4500){
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, {...options, signal: controller.signal});
+    try{
+      const res = await fetch(url, {...options, signal:controller.signal, cache:"no-store"});
       const json = await res.json().catch(() => ({}));
       return {res, json};
     } finally {
@@ -620,150 +568,167 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
-  async function fetchState(){
+  async function fetchState(reason="fallback"){
     if(!auctionId || stateFetchInFlight) return;
     stateFetchInFlight = true;
-    try {
-      const {res, json} = await safeJsonFetch(`/api/auction/${auctionId}/state`, {cache:"no-store"}, 4000);
-      if(res.ok && json.ok && json.auction) renderAuction(json.auction);
-    } catch(e) {
+    try{
+      const {res, json} = await fetchJson(`/api/auction/${auctionId}/state`, {}, 4000);
+      if(res.ok && json.ok && json.auction) applyAuctionState(json.auction, reason);
+    } catch(e){
+      // silencioso: o relógio local continua; websocket/polling recupera depois.
     } finally {
       stateFetchInFlight = false;
     }
   }
 
-  setInterval(() => {
-    const status = rawStatus();
-    const fast = isLiveStatus(status) || (isScheduledStatus(status) && remaining <= 15);
-    if(fast) fetchState();
-  }, 2000);
+  function tick(){
+    const s = status();
 
-  setInterval(() => {
-    const status = rawStatus();
-    if(!isLiveStatus(status) && !(isScheduledStatus(status) && remaining <= 15)) fetchState();
-  }, 6000);
+    if(isScheduled(s) || isLive(s)){
+      remaining = Math.max(0, remaining - 1);
+      if(els.countdown) els.countdown.textContent = timeLabel(remaining);
 
-  setInterval(() => {
-    const status = rawStatus();
-
-    if(isScheduledStatus(status) || isLiveStatus(status)) {
-      if(remaining > 0) remaining -= 1;
-      if(countdown) countdown.textContent = timeLabel(remaining);
-      if(remaining <= 0 && !zeroFetchRequested) {
-        zeroFetchRequested = true;
-        fetchState();
-        setTimeout(fetchState, 700);
-        setTimeout(fetchState, 1600);
+      if(remaining <= 0 && !zeroSyncLocked){
+        zeroSyncLocked = true;
+        fetchState("zero");
+        setTimeout(() => fetchState("zero-confirm"), 900);
       }
     }
 
     Object.keys(cooldowns).forEach((key) => {
-      if(cooldowns[key] > 0) cooldowns[key] -= 1;
+      cooldowns[key] = Math.max(0, Number(cooldowns[key] || 0) - 1);
+      if(cooldowns[key] <= 0) delete cooldowns[key];
     });
 
-    renderAllBidButtons();
-  }, 1000);
+    if(els.cashbackCountdown){
+      cashbackRemaining = Math.max(0, cashbackRemaining - 1);
+      els.cashbackCountdown.textContent = timeLabel(cashbackRemaining);
+    }
+
+    renderButtons();
+  }
+
+  setInterval(tick, 1000);
+
+  // Polling só como fallback. Com websocket ativo, não fica batendo no backend o tempo todo.
+  setInterval(() => {
+    if(!wsConnected) fetchState("ws-offline");
+  }, 7000);
+
+  // Uma sincronização leve a cada 30s evita drift sem inundar o Railway.
+  setInterval(() => fetchState("slow-sync"), 30000);
 
   document.querySelectorAll(".bid-btn").forEach((btn) => {
     btn.dataset.bid = bidKey(btn.dataset.bid);
-    renderBidButton(btn);
-
     btn.addEventListener("click", async () => {
       const value = bidKey(btn.dataset.bid);
       if(btn.disabled || pendingBids[value]) return;
 
+      pendingBids[value] = true;
+      renderButtons();
+
       const form = new FormData();
       form.append("bid_value", value);
 
-      pendingBids[value] = true;
-      renderBidButton(btn);
-
-      try {
-        const {res, json} = await safeJsonFetch(`/api/auction/${auctionId}/bid`, {method:"POST", body:form, cache:"no-store"}, 6000);
+      try{
+        const {res, json} = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 5000);
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
-
-        if(feedback) feedback.textContent = "";
-        renderAuction(json.auction);
-        startNormalButtonCooldown(value);
-      } catch(err) {
-        if(feedback) feedback.textContent = (err.name === "AbortError") ? "Conexão instável. Atualizando o leilão..." : (err.message || "Não foi possível confirmar o lance agora.");
-        fetchState();
+        setFeedback("");
+        applyAuctionState(json.auction, "bid");
+        if(Number(auction.turbo_level || 0) < 2) cooldowns[value] = normalCooldown(value);
+      } catch(err){
+        const msg = err?.name === "AbortError"
+          ? "Conexão lenta. Atualizando o leilão..."
+          : (err?.message || "Não foi possível confirmar o lance agora.");
+        setFeedback(msg);
+        fetchState("bid-error");
       } finally {
         delete pendingBids[value];
-        renderAllBidButtons();
+        renderButtons();
       }
     });
   });
 
-  function connectAuctionSocket(){
+  function appendChatMessage(message){
+    const box = document.getElementById("chat-messages");
+    if(!box || !message) return;
+    const line = document.createElement("div");
+    line.className = "chat-line";
+    const author = String(message.author || "Participante").replace(/[<>&"]/g, "");
+    const time = String(message.created_at || "").replace(/[<>&"]/g, "");
+    const text = String(message.text || "").replace(/[<>&"]/g, "");
+    line.innerHTML = `<strong>${author}</strong> <span>${time}</span><p>${text}</p>`;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function connectSocket(){
     if(!auctionId) return;
+    clearTimeout(wsReconnectTimer);
+
     const protocol = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${protocol}://${location.host}/ws/auction/${auctionId}`);
+
+    ws.onopen = () => {
+      wsConnected = true;
+    };
+
     ws.onmessage = (event) => {
-      try {
+      try{
         const payload = JSON.parse(event.data);
-        if(payload.type === "auction_update") renderAuction(payload.auction);
-        if(payload.type === "chat_message") {
-          const box = document.getElementById("chat-messages");
-          if(box) {
-            const line = document.createElement("div");
-            line.className = "chat-line";
-            line.innerHTML = `<strong>${payload.message.author}</strong> <span>${payload.message.created_at}</span><p>${payload.message.text}</p>`;
-            box.appendChild(line);
-            box.scrollTop = box.scrollHeight;
-          }
-        }
+        if(payload.type === "auction_update") applyAuctionState(payload.auction, "ws");
+        if(payload.type === "chat_message") appendChatMessage(payload.message);
       } catch(e){}
     };
-    ws.onclose = () => setTimeout(connectAuctionSocket, 2500);
-    ws.onerror = () => { try { ws.close(); } catch(e){} };
+
+    ws.onclose = () => {
+      wsConnected = false;
+      wsReconnectTimer = setTimeout(connectSocket, 3500);
+    };
+
+    ws.onerror = () => {
+      wsConnected = false;
+      try{ ws.close(); } catch(e){}
+    };
   }
 
-  connectAuctionSocket();
+  connectSocket();
 
-  const cashbackCountdown = document.getElementById("cashback-countdown");
-  let cashbackRemaining = Number(cashbackCountdown?.dataset.seconds || 0);
-  if(cashbackCountdown) {
-    setInterval(() => {
-      if(cashbackRemaining > 0) cashbackRemaining -= 1;
-      cashbackCountdown.textContent = timeLabel(cashbackRemaining);
-    }, 1000);
-  }
-
-  const joinCashbackBtn = document.getElementById("join-cashback-btn");
-  if(joinCashbackBtn) {
-    joinCashbackBtn.addEventListener("click", async () => {
-      joinCashbackBtn.disabled = true;
-      joinCashbackBtn.textContent = "Entrando no sorteio...";
-      try {
-        const res = await fetch(`/api/auction/${auctionId}/cashback/join`, {method:"POST"});
-        const json = await res.json().catch(() => ({}));
+  if(els.joinCashbackBtn){
+    els.joinCashbackBtn.addEventListener("click", async () => {
+      els.joinCashbackBtn.disabled = true;
+      els.joinCashbackBtn.textContent = "Entrando no sorteio...";
+      try{
+        const {res, json} = await fetchJson(`/api/auction/${auctionId}/cashback/join`, {method:"POST"}, 5000);
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível entrar no cashback.");
-        joinCashbackBtn.textContent = "Você já está participando";
-      } catch(err) {
-        joinCashbackBtn.disabled = false;
-        joinCashbackBtn.textContent = err.message || "Tentar novamente";
+        els.joinCashbackBtn.textContent = "Você já está participando";
+      } catch(err){
+        els.joinCashbackBtn.disabled = false;
+        els.joinCashbackBtn.textContent = err?.message || "Tentar novamente";
       }
     });
   }
 
-  const chatForm = document.getElementById("chat-form");
-  if(chatForm) {
-    chatForm.addEventListener("submit", async (event) => {
+  if(els.chatForm){
+    els.chatForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const input = chatForm.querySelector("input[name='message']");
+      const input = els.chatForm.querySelector("input[name='message']");
       const text = (input?.value || "").trim();
       if(!text) return;
       const form = new FormData();
       form.append("message", text);
-      const res = await fetch(`/api/auction/${auctionId}/chat`, {method:"POST", body:form});
-      if(res.ok && input) input.value = "";
-      else fetchState();
+      try{
+        const {res} = await fetchJson(`/api/auction/${auctionId}/chat`, {method:"POST", body:form}, 4500);
+        if(res.ok && input) input.value = "";
+        else fetchState("chat-error");
+      } catch(e){
+        fetchState("chat-error");
+      }
     });
   }
 
-  renderAuction(auction);
-  if(isScheduledStatus(rawStatus()) && remaining <= 2) fetchState();
+  applyAuctionState(auction, "initial");
+  if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero");
 })();
 </script>
 {% endblock %}

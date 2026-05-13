@@ -485,6 +485,21 @@ def fmt_money(v: float) -> str:
     return f"{BR(v):.2f}".replace(".", ",")
 
 
+STATIC_FALLBACK_IMAGE = "/static/lanceio_hero_slide_01.png"
+
+
+def safe_image_url(value: str) -> str:
+    """Evita 404 em imagens de produto removidas após redeploy/cópia local."""
+    url = (value or "").strip()
+    if not url:
+        return STATIC_FALLBACK_IMAGE
+    if url.startswith("/static/uploads/"):
+        local_path = BASE_DIR / url.lstrip("/")
+        if not local_path.exists():
+            return STATIC_FALLBACK_IMAGE
+    return url
+
+
 def public_user_name(user: Optional["User"]) -> str:
     if not user:
         return "—"
@@ -886,7 +901,7 @@ def public_auction_payload(item: AuctionItem, db: Session) -> dict:
         "initial_duration_seconds": getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS),
         "bids_count": bids_count,
         "last_bidder": last_bidder,
-        "image_url": item.image_url,
+        "image_url": safe_image_url(item.image_url),
         "chat_paused": item.chat_paused,
         "chat_open": auction_chat_is_open(item),
         "cashback": cashback_payload(item, db),
@@ -936,7 +951,7 @@ def build_returned_items(db: Session) -> list[dict]:
             "id": item.id,
             "title": item.title,
             "description": item.description,
-            "image_url": item.image_url,
+            "image_url": safe_image_url(item.image_url),
             "source_store": item.source_store,
             "source_url": item.source_url,
             "source_price": source_price,
@@ -1832,7 +1847,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
         db.close()
 
     if payload:
-        await manager.broadcast(auction_id, {"type": "auction_update", "auction": payload})
+        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
     return JSONResponse({"ok": True, "auction": payload})
 
 
@@ -1846,7 +1861,9 @@ async def auction_state(request: Request, auction_id: int):
         changed = start_auction_if_due(item)
         if changed:
             db.commit()
-            await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_payload(item, db)})
+            payload = public_auction_payload(item, db)
+            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
+            return JSONResponse({"ok": True, "auction": payload})
         return JSONResponse({"ok": True, "auction": public_auction_payload(item, db)})
     finally:
         db.close()
@@ -2033,7 +2050,7 @@ def my_participations(request: Request):
                 grouped[aid] = {
                     "auction_id": aid,
                     "title": item.title,
-                    "image_url": item.image_url,
+                    "image_url": safe_image_url(item.image_url),
                     "status": item.status,
                     "total_bids": 0,
                     "total_spent": 0.0,
