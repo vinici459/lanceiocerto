@@ -1678,22 +1678,25 @@ def login_page(request: Request, created: int = 0, email_pending: int = 0, email
 def login(request: Request, login_identifier: str = Form(...), password: str = Form(...)):
     db = SessionLocal()
     try:
-        value = (login_identifier or "").strip()
-        digits = only_digits(value)
-        if "@" in value:
-            user = db.query(User).filter(User.email == normalize_email(value)).first()
+        identifier = (login_identifier or "").strip().lower()
+        cpf_digits = re.sub(r"\D", "", identifier)
+
+        if "@" in identifier:
+            user = db.query(User).filter(User.email == identifier).first()
         else:
-            user = db.query(User).filter(User.cpf == digits).first()
+            user = db.query(User).filter(User.cpf == cpf_digits).first()
+
         if not user or not verify_password(password.strip(), user.password):
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Usuário ou senha inválidos.", "created": 0, "email_pending": 0, "email_verified": 0})
-        if user and not str(user.password or "").startswith("pbkdf2_sha256$"):
-            user.password = hash_password(password.strip())
-            db.commit()
-        if not getattr(user, "email_verified", False) and not user.is_admin:
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Confirme seu e-mail antes de entrar. Você pode reenviar o link abaixo.", "created": 0, "email_pending": 1, "email_verified": 0, "login_identifier": value}, status_code=403)
+            return templates.TemplateResponse("login.html", {
+                "request": request,
+                "error": "E-mail/CPF ou senha inválidos.",
+                "login_identifier": login_identifier,
+            })
+
         token = secrets.token_urlsafe(24)
         SESSIONS[token] = user.id
-        response = RedirectResponse("/", status_code=303)
+
+        response = RedirectResponse("/minha-conta", status_code=303)
         response.set_cookie("session_token", token, httponly=True, samesite="lax")
         return response
     finally:
@@ -1776,11 +1779,6 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
         if active_turbo >= 2 and previous_user_bid_count <= 0:
             raise HTTPException(status_code=403, detail="O modo turbo é exclusivo para quem já participou deste leilão antes da ativação.")
 
-        global_until = TURBO_AUCTION_COOLDOWN_UNTIL.get(item.id)
-        if active_turbo >= 2 and global_until and global_until > now:
-            remaining_cd = math.ceil((global_until - now).total_seconds())
-            raise HTTPException(status_code=429, detail=f"Turbo em estabilização. Aguarde {remaining_cd}s para dar novo lance.")
-
         cooldown = bid_button_cooldown_seconds(bid_value, active_turbo)
         if cooldown > 0:
             last_same_button = (
@@ -1826,11 +1824,10 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
         )
         db.add(bid)
         db.commit()
+        db.refresh(item)
         payload = public_auction_payload(item, db)
-        global_cd = turbo_activation_cooldown_seconds(turbo) if turbo >= 2 and previous_turbo < turbo else 0
-        if global_cd > 0:
-            TURBO_AUCTION_COOLDOWN_UNTIL[item.id] = now + timedelta(seconds=global_cd)
-        payload["turbo_global_cooldown"] = global_cd
+        # Sem bloqueio global de turbo: mantém a regra do relógio curto e cooldown individual.
+        payload["turbo_global_cooldown"] = 0
     finally:
         db.close()
 

@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function tickCountdowns(){
-    document.querySelectorAll('.countdown,[data-seconds]').forEach((el) => {
+    document.querySelectorAll('.countdown:not(.auction-countdown),[data-seconds]:not(.auction-countdown)').forEach((el) => {
       if (!el.dataset.seconds) return;
       let seconds = parseInt(el.dataset.seconds || '0', 10);
       if (Number.isNaN(seconds)) seconds = 0;
