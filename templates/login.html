@@ -4,57 +4,78 @@
   <form class="form-card" method="post" action="/login">
     <h1>Entrar</h1>
 
-    {% if created %}
-      <div class="alert success">Conta criada. Confirme seu e-mail para ativar o acesso.</div>
-    {% endif %}
-
     {% if email_verified %}
-      <div class="alert success">E-mail confirmado com sucesso. Agora você pode entrar.</div>
-    {% endif %}
-
-    {% if email_pending %}
-      <div class="alert">Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada ou spam.</div>
-    {% endif %}
-
-    {% if email_dev %}
-      <div class="alert">SMTP ainda não configurado. O link de confirmação foi enviado para os logs do servidor.</div>
+      <div class="alert success">
+        E-mail confirmado com sucesso. Agora você pode entrar.
+      </div>
     {% endif %}
 
     {% if error %}
-      <div class="alert">{{ error }}</div>
+      <div class="alert">
+        {{ error }}
+      </div>
+    {% endif %}
+
+    {% if email_dev %}
+      <div class="alert">
+        Serviço de e-mail temporariamente indisponível.
+      </div>
     {% endif %}
 
     <label>E-mail ou CPF
-      <input name="login_identifier" value="{{ login_identifier or '' }}" placeholder="voce@email.com ou 000.000.000-00" required>
+      <input
+        name="login_identifier"
+        value="{{ login_identifier or '' }}"
+        placeholder="voce@email.com ou 000.000.000-00"
+        required
+        autocomplete="username"
+      >
     </label>
 
     <label>Senha
-      <input type="password" name="password" required>
+      <input
+        type="password"
+        name="password"
+        required
+        autocomplete="current-password"
+      >
     </label>
 
     <button class="btn full" type="submit">Entrar</button>
 
     <div class="login-links">
       <a href="/register">Criar conta</a>
-      <a href="/verifique-seu-email">Reenviar confirmação</a>
+      <a href="/forgot-password">Esqueci minha senha</a>
     </div>
   </form>
 </section>
 
 <style>
+.form-wrap{
+  display:flex;
+  justify-content:center;
+  align-items:flex-start;
+  padding:40px 20px;
+}
+
 .login-links{
   display:flex;
   justify-content:space-between;
-  gap:12px;
-  margin-top:16px;
+  align-items:center;
+  gap:16px;
+  margin-top:18px;
   font-size:14px;
   font-weight:800;
 }
+
 .login-links a{
   color:#93c5fd;
   text-decoration:none;
+  transition:opacity .2s ease;
 }
+
 .login-links a:hover{
+  opacity:.85;
   text-decoration:underline;
 }
 </style>
