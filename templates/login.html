@@ -3,11 +3,27 @@
 <section class="form-wrap">
   <form class="form-card" method="post" action="/login">
     <h1>Entrar</h1>
-    {% if created %}<div class="alert success">Conta criada. Faça login.</div>{% endif %}
+    {% if created %}<div class="alert success">Conta criada. Confirme seu e-mail para ativar o acesso.</div>{% endif %}
+    {% if email_verified %}<div class="alert success">E-mail confirmado com sucesso. Agora você pode entrar.</div>{% endif %}
+    {% if email_pending %}<div class="alert">Enviamos um link de confirmação para o e-mail cadastrado. Verifique sua caixa de entrada e spam.</div>{% endif %}
+    {% if email_dev %}<div class="alert">SMTP ainda não configurado. O link de confirmação foi enviado para os logs do servidor.</div>{% endif %}
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-    <label>E-mail<input type="email" name="email" required></label>
-    <label>Senha<input type="password" name="password" required></label>
-    <button class="btn full" type="submit">Entrar</button>    
+
+    <label>E-mail ou CPF
+      <input name="login_identifier" value="{{ login_identifier or '' }}" placeholder="voce@email.com ou 000.000.000-00" required>
+    </label>
+    <label>Senha
+      <input type="password" name="password" required>
+    </label>
+    <button class="btn full" type="submit">Entrar</button>
+  </form>
+
+  <form class="form-card resend-card" method="post" action="/reenviar-confirmacao">
+    <h2>Não recebeu o e-mail?</h2>
+    <p class="muted">Informe o e-mail ou CPF cadastrado para reenviar o link de confirmação.</p>
+    <label>E-mail ou CPF<input name="login_identifier" placeholder="voce@email.com ou CPF"></label>
+    <button class="btn full ghost" type="submit">Reenviar confirmação</button>
   </form>
 </section>
+<style>.form-wrap{gap:18px}.resend-card{margin-top:0}.resend-card h2{margin:0 0 6px}.resend-card p{margin:0 0 12px}</style>
 {% endblock %}

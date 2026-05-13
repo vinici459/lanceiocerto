@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="form-wrap identity-wrap">
+  <div class="form-card wide identity-card">
+    <h1>Verificação de identidade</h1>
+    <p class="muted">Sua conta pode participar dos leilões com a identidade pendente, mas saques e recebimento de produtos exigem validação administrativa.</p>
+
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    {% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+
+    <div class="identity-status-grid">
+      <div><span>Status atual</span><strong>{{ user.identity_status or 'pending' }}</strong></div>
+      <div><span>E-mail</span><strong>{% if user.email_verified %}Confirmado{% else %}Pendente{% endif %}</strong></div>
+      <div><span>Apelido público</span><strong>@{{ user.public_name or user.nickname }}</strong></div>
+    </div>
+
+    <form method="post" action="/minha-conta/verificacao" enctype="multipart/form-data">
+      <h2>Enviar documentos para análise</h2>
+      <div class="grid-2">
+        <label>Documento com foto ou CPF/CNH/RG
+          <input type="file" name="document_file" accept="image/*,.pdf" required>
+        </label>
+        <label>Selfie de confirmação
+          <input type="file" name="selfie_file" accept="image/*" required>
+        </label>
+      </div>
+      <button class="btn full" type="submit">Enviar para análise</button>
+    </form>
+
+    <div class="identity-rules-box">
+      <strong>Enquanto a identidade estiver pendente:</strong>
+      <span>Você pode acessar a conta e participar conforme as regras da plataforma.</span>
+      <span>Você não poderá sacar saldo nem receber produtos arrematados até a aprovação.</span>
+    </div>
+  </div>
+</section>
+<style>.identity-wrap{align-items:start}.identity-card h1{margin-top:0}.identity-status-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.identity-status-grid div,.identity-rules-box{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.04);padding:14px}.identity-status-grid span,.identity-rules-box span{display:block;color:#b7c6e6;margin-top:4px}.identity-status-grid strong{display:block;color:#fff;margin-top:6px}.identity-rules-box{margin-top:18px;display:grid;gap:6px}@media(max-width:760px){.identity-status-grid{grid-template-columns:1fr}}</style>
+{% endblock %}

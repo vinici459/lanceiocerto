@@ -6,6 +6,11 @@ import os
 import re
 import secrets
 import shutil
+import base64
+import hashlib
+import hmac
+import smtplib
+from email.message import EmailMessage
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -58,6 +63,10 @@ class User(Base):
     # Mantém compatibilidade com bancos criados em versões anteriores, que tinham a coluna nickname como obrigatória.
     nickname: Mapped[str] = mapped_column(String(40), default="", index=True)
     email: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    email_verification_token: Mapped[str] = mapped_column(String(120), default="")
+    email_verification_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     password: Mapped[str] = mapped_column(String(120))
     cpf: Mapped[str] = mapped_column(String(20), default="")
     phone: Mapped[str] = mapped_column(String(30), default="")
@@ -531,11 +540,102 @@ def audit_event(db: Session, request: Request, action: str, user: Optional[User]
         pass
 
 
+def only_digits(value: str) -> str:
+    return re.sub(r"\D", "", value or "")
+
+
 def validate_cpf_digits(value: str) -> bool:
-    digits = re.sub(r"\D", "", value or "")
+    digits = only_digits(value)
     if len(digits) != 11 or digits == digits[0] * 11:
         return False
-    return True
+    total = sum(int(digits[i]) * (10 - i) for i in range(9))
+    check1 = (total * 10) % 11
+    check1 = 0 if check1 == 10 else check1
+    total = sum(int(digits[i]) * (11 - i) for i in range(10))
+    check2 = (total * 10) % 11
+    check2 = 0 if check2 == 10 else check2
+    return check1 == int(digits[9]) and check2 == int(digits[10])
+
+
+def validate_phone_digits(value: str) -> bool:
+    digits = only_digits(value)
+    return len(digits) in {10, 11} and len(set(digits)) > 1
+
+
+def normalize_email(value: str) -> str:
+    return (value or "").strip().lower()
+
+
+def hash_password(raw_password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", (raw_password or "").encode("utf-8"), salt, 120_000)
+    return "pbkdf2_sha256$120000$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(digest).decode()
+
+
+def verify_password(raw_password: str, stored_password: str) -> bool:
+    stored_password = stored_password or ""
+    if stored_password.startswith("pbkdf2_sha256$"):
+        try:
+            _, rounds, salt_b64, digest_b64 = stored_password.split("$", 3)
+            salt = base64.b64decode(salt_b64.encode())
+            expected = base64.b64decode(digest_b64.encode())
+            actual = hashlib.pbkdf2_hmac("sha256", (raw_password or "").encode("utf-8"), salt, int(rounds))
+            return hmac.compare_digest(actual, expected)
+        except Exception:
+            return False
+    # Compatibilidade com contas antigas em texto puro. Ao logar, o código atualiza para hash.
+    return hmac.compare_digest(stored_password, raw_password or "")
+
+
+def make_email_verification_token() -> str:
+    return secrets.token_urlsafe(40)
+
+
+def public_base_url(request: Optional[Request] = None) -> str:
+    env_url = (os.getenv("PUBLIC_BASE_URL") or os.getenv("SERVER_URL") or "").strip().rstrip("/")
+    if env_url:
+        return env_url
+    if request:
+        return str(request.base_url).rstrip("/")
+    return ""
+
+
+def send_verification_email(user: User, request: Optional[Request] = None) -> bool:
+    if not getattr(user, "email_verification_token", ""):
+        return False
+    base_url = public_base_url(request)
+    link = f"{base_url}/confirmar-email?token={user.email_verification_token}"
+    subject = "Confirme seu e-mail no Lancei o Certo"
+    body = (
+        f"Olá, {user.full_name}.\n\n"
+        "Para ativar seu acesso ao Lancei o Certo, confirme seu e-mail pelo link abaixo:\n"
+        f"{link}\n\n"
+        "Este link expira em 24 horas. Se você não criou essa conta, ignore esta mensagem.\n"
+    )
+    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT") or "587")
+    smtp_user = (os.getenv("SMTP_USER") or "").strip()
+    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
+    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
+    if not smtp_host or not smtp_from:
+        print(f"[EMAIL VERIFICATION DEV] {user.email}: {link}")
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = user.email
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
+                server.starttls()
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception as exc:
+        print(f"[EMAIL VERIFICATION ERROR] {user.email}: {exc} | link={link}")
+        return False
 
 def fmt_deadline(dt: Optional[datetime]) -> str:
     if not dt:
@@ -1074,6 +1174,10 @@ def ensure_columns() -> None:
                 "verified_at": "TIMESTAMP NULL",
                 "terms_accepted_at": "TIMESTAMP NULL",
                 "privacy_accepted_at": "TIMESTAMP NULL",
+                "email_verified": "BOOLEAN DEFAULT FALSE",
+                "email_verified_at": "TIMESTAMP NULL",
+                "email_verification_token": "VARCHAR(120) DEFAULT ''",
+                "email_verification_expires_at": "TIMESTAMP NULL",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
@@ -1105,9 +1209,9 @@ def ensure_columns() -> None:
             for name, ddl in {
                 "purchase_link": "VARCHAR(600) DEFAULT ''",
                 "purchase_status": "VARCHAR(40) DEFAULT ''",
-                "purchased_at": "DATETIME",
-                "sent_at": "DATETIME",
-                "delivered_at": "DATETIME",
+                "purchased_at": "TIMESTAMP NULL",
+                "sent_at": "TIMESTAMP NULL",
+                "delivered_at": "TIMESTAMP NULL",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE winner_orders ADD COLUMN {name} {ddl}"))
@@ -1167,7 +1271,9 @@ def seed() -> None:
                     public_name=normalize_public_name(os.getenv("ADMIN_PUBLIC_NAME") or "admin"),
                     nickname=normalize_public_name(os.getenv("ADMIN_PUBLIC_NAME") or "admin"),
                     email=admin_email,
-                    password=admin_password or secrets.token_urlsafe(12),
+                    email_verified=True,
+                    email_verified_at=datetime.utcnow(),
+                    password=hash_password(admin_password or secrets.token_urlsafe(12)),
                     cpf="",
                     phone="",
                     is_admin=True,
@@ -1186,7 +1292,7 @@ def seed() -> None:
                 if not getattr(admin, "nickname", ""):
                     admin.nickname = admin.public_name
                 if admin_password:
-                    admin.password = admin_password
+                    admin.password = hash_password(admin_password)
             default_admin = db.query(User).filter(User.email == "admin@lanceiocerto.local").first()
             if default_admin and default_admin.email != admin_email:
                 default_admin.is_admin = False
@@ -1202,7 +1308,9 @@ def seed() -> None:
                     public_name="admin",
                     nickname="admin",
                     email="admin@lanceiocerto.local",
-                    password="123456",
+                    email_verified=True,
+                    email_verified_at=datetime.utcnow(),
+                    password=hash_password("123456"),
                     cpf="000.000.000-00",
                     phone="(00) 00000-0000",
                     cep="14000-000",
@@ -1428,93 +1536,161 @@ async def register(
     full_name: str = Form(...),
     public_name: str = Form(...),
     email: str = Form(...),
-    password: str = Form(...),
     cpf: str = Form(...),
     phone: str = Form(...),
-    cep: str = Form(...),
-    street: str = Form(...),
-    number: str = Form(...),
-    district: str = Form(...),
-    city: str = Form(...),
-    state: str = Form(...),
-    document_file: UploadFile = File(...),
-    selfie_file: UploadFile = File(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+    cep: str = Form(""),
+    street: str = Form(""),
+    number: str = Form(""),
+    district: str = Form(""),
+    city: str = Form(""),
+    state: str = Form(""),
     accept_terms: str = Form(""),
     accept_privacy: str = Form(""),
+    accept_truth: str = Form(""),
 ):
     db = SessionLocal()
     try:
         clean_public_name = normalize_public_name(public_name)
-        if accept_terms != "on" or accept_privacy != "on":
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Para criar a conta, é obrigatório aceitar os Termos de Uso e a Política de Privacidade."})
-        if not validate_cpf_digits(cpf):
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Informe um CPF válido com 11 dígitos."})
+        clean_email = normalize_email(email)
+        clean_cpf = only_digits(cpf)
+        clean_phone = only_digits(phone)
+
+        def fail(message: str):
+            return templates.TemplateResponse("register.html", {"request": request, "error": message}, status_code=400)
+
+        if accept_terms != "on" or accept_privacy != "on" or accept_truth != "on":
+            return fail("Para criar a conta, aceite os Termos de Uso, a Política de Privacidade e confirme que os dados são verdadeiros.")
+        if len((full_name or "").strip().split()) < 2:
+            return fail("Informe seu nome completo.")
         if len(clean_public_name) < 3:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Escolha um apelido público com pelo menos 3 caracteres."})
-        exists = db.query(User).filter(User.email == email.strip().lower()).first()
-        if exists:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "E-mail já cadastrado."})
+            return fail("Escolha um apelido público com pelo menos 3 caracteres.")
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", clean_email):
+            return fail("Informe um e-mail válido.")
+        if not validate_cpf_digits(clean_cpf):
+            return fail("Informe um CPF válido.")
+        if not validate_phone_digits(clean_phone):
+            return fail("Informe um telefone válido com DDD.")
+        if len(password or "") < 8:
+            return fail("A senha precisa ter pelo menos 8 caracteres.")
+        if password != password_confirm:
+            return fail("A confirmação de senha não confere.")
+
+        if db.query(User).filter(User.email == clean_email).first():
+            return fail("Este e-mail já está cadastrado.")
+        if db.query(User).filter(User.cpf == clean_cpf).first():
+            return fail("Este CPF já está cadastrado.")
+        if db.query(User).filter(User.phone == clean_phone).first():
+            return fail("Este telefone já está cadastrado.")
         if db.query(User).filter(User.public_name == clean_public_name).first():
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Este apelido público já está em uso."})
-        required_values = {
-            "CPF": cpf, "telefone": phone, "CEP": cep, "rua": street, "número": number,
-            "bairro": district, "cidade": city, "estado": state,
-        }
-        missing = [label for label, value in required_values.items() if not (value or "").strip()]
-        if missing:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Preencha todos os campos obrigatórios: " + ", ".join(missing) + "."})
-        if not document_file or not document_file.filename or not selfie_file or not selfie_file.filename:
-            return templates.TemplateResponse("register.html", {"request": request, "error": "Envie o documento e a selfie de verificação para concluir o cadastro."})
-        clean_cpf = cpf.strip()
-        if clean_cpf and db.query(User).filter(User.cpf == clean_cpf).first():
-            return templates.TemplateResponse("register.html", {"request": request, "error": "CPF já cadastrado."})
-        document_url = save_uploaded_image(document_file)
-        selfie_url = save_uploaded_image(selfie_file)
+            return fail("Este apelido público já está em uso.")
+
+        token = make_email_verification_token()
         user = User(
             full_name=full_name.strip(),
             public_name=clean_public_name,
             nickname=clean_public_name,
-            email=email.strip().lower(),
-            password=password.strip(),
-            cpf=cpf.strip(),
-            phone=phone.strip(),
-            cep=cep.strip(),
+            email=clean_email,
+            email_verified=False,
+            email_verification_token=token,
+            email_verification_expires_at=datetime.utcnow() + timedelta(hours=24),
+            password=hash_password(password.strip()),
+            cpf=clean_cpf,
+            phone=clean_phone,
+            cep=only_digits(cep),
             street=street.strip(),
             number=number.strip(),
             district=district.strip(),
             city=city.strip(),
-            state=state.strip(),
+            state=state.strip().upper()[:2],
             document_type="CPF",
-            document_number=cpf.strip(),
-            document_file_url=document_url,
-            selfie_file_url=selfie_url,
+            document_number=clean_cpf,
+            document_file_url="",
+            selfie_file_url="",
             identity_status="pending",
-            identity_note="Cadastro enviado. Documentos aguardando análise do administrador.",
+            identity_note="Conta criada. Verificação de identidade ainda não enviada.",
             terms_accepted_at=datetime.utcnow(),
             privacy_accepted_at=datetime.utcnow(),
             wallet_balance=0.0,
         )
         db.add(user)
         db.flush()
-        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado com documentos pendentes e aceite dos termos.")
+        sent = send_verification_email(user, request)
+        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado. E-mail pendente de confirmação e KYC pendente.")
         db.commit()
-        return RedirectResponse("/login?created=1", status_code=303)
+        suffix = "&email_sent=1" if sent else "&email_dev=1"
+        return RedirectResponse(f"/login?created=1&email_pending=1{suffix}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.get("/confirmar-email", response_class=HTMLResponse)
+def confirm_email(request: Request, token: str = ""):
+    db = SessionLocal()
+    try:
+        token = (token or "").strip()
+        user = db.query(User).filter(User.email_verification_token == token).first() if token else None
+        if not user:
+            return templates.TemplateResponse("login.html", {"request": request, "error": "Link de confirmação inválido.", "created": 0, "email_pending": 0, "email_verified": 0}, status_code=400)
+        if user.email_verification_expires_at and user.email_verification_expires_at < datetime.utcnow():
+            user.email_verification_token = make_email_verification_token()
+            user.email_verification_expires_at = datetime.utcnow() + timedelta(hours=24)
+            send_verification_email(user, request)
+            db.commit()
+            return templates.TemplateResponse("login.html", {"request": request, "error": "O link expirou. Enviamos uma nova confirmação para seu e-mail.", "created": 0, "email_pending": 1, "email_verified": 0}, status_code=400)
+        user.email_verified = True
+        user.email_verified_at = datetime.utcnow()
+        user.email_verification_token = ""
+        user.email_verification_expires_at = None
+        audit_event(db, request, "user.email_verified", user, "user", user.id, "E-mail confirmado pelo link de verificação.")
+        db.commit()
+        return RedirectResponse("/login?email_verified=1", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/reenviar-confirmacao")
+def resend_email_confirmation(request: Request, login_identifier: str = Form("")):
+    db = SessionLocal()
+    try:
+        value = (login_identifier or "").strip()
+        digits = only_digits(value)
+        query = db.query(User)
+        user = query.filter(User.email == normalize_email(value)).first() if "@" in value else query.filter(User.cpf == digits).first()
+        if user and not getattr(user, "email_verified", False):
+            user.email_verification_token = make_email_verification_token()
+            user.email_verification_expires_at = datetime.utcnow() + timedelta(hours=24)
+            send_verification_email(user, request)
+            audit_event(db, request, "user.email_confirmation_resent", user, "user", user.id, "Reenvio de confirmação solicitado.")
+            db.commit()
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Se a conta existir e ainda estiver pendente, um novo link de confirmação será enviado.", "created": 0, "email_pending": 1, "email_verified": 0})
     finally:
         db.close()
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, created: int = 0):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None, "created": created})
+def login_page(request: Request, created: int = 0, email_pending: int = 0, email_verified: int = 0, email_sent: int = 0, email_dev: int = 0):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None, "created": created, "email_pending": email_pending, "email_verified": email_verified, "email_sent": email_sent, "email_dev": email_dev})
 
 
 @app.post("/login")
-def login(request: Request, email: str = Form(...), password: str = Form(...)):
+def login(request: Request, login_identifier: str = Form(...), password: str = Form(...)):
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == email.strip().lower(), User.password == password.strip()).first()
-        if not user:
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Usuário ou senha inválidos.", "created": 0})
+        value = (login_identifier or "").strip()
+        digits = only_digits(value)
+        if "@" in value:
+            user = db.query(User).filter(User.email == normalize_email(value)).first()
+        else:
+            user = db.query(User).filter(User.cpf == digits).first()
+        if not user or not verify_password(password.strip(), user.password):
+            return templates.TemplateResponse("login.html", {"request": request, "error": "Usuário ou senha inválidos.", "created": 0, "email_pending": 0, "email_verified": 0})
+        if user and not str(user.password or "").startswith("pbkdf2_sha256$"):
+            user.password = hash_password(password.strip())
+            db.commit()
+        if not getattr(user, "email_verified", False) and not user.is_admin:
+            return templates.TemplateResponse("login.html", {"request": request, "error": "Confirme seu e-mail antes de entrar. Você pode reenviar o link abaixo.", "created": 0, "email_pending": 1, "email_verified": 0, "login_identifier": value}, status_code=403)
         token = secrets.token_urlsafe(24)
         SESSIONS[token] = user.id
         response = RedirectResponse("/", status_code=303)
@@ -1814,6 +1990,34 @@ def my_profile(request: Request):
     try:
         user = require_user(request, db)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "profile"})
+    finally:
+        db.close()
+
+
+@app.get("/minha-conta/verificacao", response_class=HTMLResponse)
+def account_identity_page(request: Request):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        return templates.TemplateResponse("identity_verification.html", {"request": request, "user": user, "error": None, "success": None})
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/verificacao")
+async def account_identity_submit(request: Request, document_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        if not document_file or not document_file.filename or not selfie_file or not selfie_file.filename:
+            return templates.TemplateResponse("identity_verification.html", {"request": request, "user": user, "error": "Envie o documento e a selfie para análise.", "success": None}, status_code=400)
+        user.document_file_url = save_uploaded_image(document_file)
+        user.selfie_file_url = save_uploaded_image(selfie_file)
+        user.identity_status = "pending"
+        user.identity_note = "Documentos enviados. Aguardando análise do administrador."
+        audit_event(db, request, "user.identity_submitted", user, "user", user.id, "Documentos de identidade enviados para análise.")
+        db.commit()
+        return templates.TemplateResponse("identity_verification.html", {"request": request, "user": user, "error": None, "success": "Documentos enviados com sucesso. Sua conta ficará em análise até a conferência administrativa."})
     finally:
         db.close()
 

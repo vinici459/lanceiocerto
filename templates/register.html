@@ -1,62 +1,112 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="register-pro-shell">
-  <div class="register-pro-card register-production-card">
-    <div class="register-pro-left">
-      <span class="eyebrow">Cadastro seguro</span>
-      <h1>Crie sua conta no Lancei o Certo</h1>
-      <p>Seu apelido público aparece nos leilões. Seus dados pessoais, documento e selfie ficam reservados para análise administrativa, pagamento, entrega e segurança da operação.</p>
-      <div class="trust-list">
-        <div><strong>🔐 Privacidade pública</strong><span>Na página principal, lances e vencedores aparecem como @apelido.</span></div>
-        <div><strong>✅ Verificação obrigatória</strong><span>Você pode participar com documentos pendentes, mas saque e envio dependem da aprovação.</span></div>
-        <div><strong>📦 Entrega protegida</strong><span>Produto só é liberado após pagamento confirmado e conta validada.</span></div>
-      </div>
-    </div>
+<section class="register-pro-shell lc-register-clean">
+  <div class="register-pro-card register-professional-grid">
+    <aside class="register-pro-left register-info-panel">
+      <span class="eyebrow">Cadastro de participante</span>
+      <h1>Abra sua conta com segurança.</h1>
+      <p class="register-lead">Crie seu acesso para participar dos leilões usando um apelido público. CPF, e-mail e telefone são validados para manter uma conta única por participante.</p>
 
-    <form class="register-pro-form" method="post" action="/register" enctype="multipart/form-data">
-      <h2>Dados de acesso</h2>
+      <div class="register-flow-box">
+        <div><strong>1</strong><span>Cadastro com CPF, e-mail, telefone e senha.</span></div>
+        <div><strong>2</strong><span>Confirmação do e-mail por link enviado automaticamente.</span></div>
+        <div><strong>3</strong><span>Verificação de identidade separada, feita depois na Minha Conta.</span></div>
+      </div>
+
+      <div class="register-policy-note">
+        <strong>Conta pendente de documentos</strong>
+        <span>Você poderá acessar a plataforma e participar conforme as regras, mas saques e recebimento de produtos dependem da validação da identidade.</span>
+      </div>
+    </aside>
+
+    <form class="register-pro-form register-main-form" method="post" action="/register" autocomplete="on">
+      <div class="form-title-row">
+        <div>
+          <h2>Dados de acesso</h2>
+          <p>Use informações reais. CPF, e-mail e telefone só podem existir em uma conta.</p>
+        </div>
+      </div>
+
       {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
       <div class="grid-2">
-        <label>Nome completo<input name="full_name" placeholder="Seu nome completo" required></label>
-        <label>Apelido público<input name="public_name" placeholder="ex: lancecerto24" minlength="3" maxlength="24" required><small>Aparecerá como @apelido nos leilões.</small></label>
-        <label>E-mail<input type="email" name="email" placeholder="voce@email.com" required></label>
-        <label>Senha<input type="password" name="password" placeholder="Crie uma senha segura" minlength="6" required></label>
+        <label>Nome completo
+          <input name="full_name" placeholder="Nome e sobrenome" autocomplete="name" required>
+        </label>
+        <label>CPF
+          <input name="cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" data-mask="cpf" autocomplete="off" required>
+        </label>
+        <label>E-mail
+          <input type="email" name="email" placeholder="voce@email.com" autocomplete="email" required>
+        </label>
+        <label>Telefone com DDD
+          <input name="phone" inputmode="tel" placeholder="(00) 00000-0000" maxlength="15" data-mask="phone" autocomplete="tel" required>
+        </label>
+        <label>Apelido público
+          <input name="public_name" placeholder="ex: vinici459" minlength="3" maxlength="24" autocomplete="nickname" required>
+          <small>Será exibido como @apelido nos lances e resultados públicos.</small>
+        </label>
       </div>
 
-      <h2>Dados pessoais obrigatórios</h2>
+      <h2>Senha</h2>
       <div class="grid-2">
-        <label>CPF<input name="cpf" placeholder="000.000.000-00" required></label>
-        <label>Telefone<input name="phone" placeholder="(00) 00000-0000" required></label>
+        <label>Senha
+          <input type="password" name="password" minlength="8" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required>
+        </label>
+        <label>Confirmar senha
+          <input type="password" name="password_confirm" minlength="8" placeholder="Digite a senha novamente" autocomplete="new-password" required>
+        </label>
       </div>
 
-      <h2>Endereço obrigatório</h2>
+      <h2>Endereço para futuras entregas <small class="optional-label">opcional agora</small></h2>
+      <p class="register-note">Você poderá completar ou alterar esses dados antes de receber um produto.</p>
       <div class="grid-2">
-        <label>CEP<input name="cep" placeholder="00000-000" required></label>
-        <label>Rua<input name="street" placeholder="Nome da rua" required></label>
-        <label>Número<input name="number" placeholder="Nº" required></label>
-        <label>Bairro<input name="district" placeholder="Bairro" required></label>
-        <label>Cidade<input name="city" placeholder="Cidade" required></label>
-        <label>Estado<input name="state" placeholder="UF" maxlength="2" required></label>
-      </div>
-
-      <h2>Verificação de identidade</h2>
-      <p class="register-note">Envie uma foto do documento e uma selfie. A conta ficará com status <strong>documentos em análise</strong> até aprovação do administrador.</p>
-      <div class="grid-2">
-        <label>Documento com foto<input type="file" name="document_file" accept="image/*,.pdf" required></label>
-        <label>Selfie de confirmação<input type="file" name="selfie_file" accept="image/*" required></label>
+        <label>CEP<input name="cep" inputmode="numeric" placeholder="00000-000" maxlength="9" data-mask="cep" autocomplete="postal-code"></label>
+        <label>Rua<input name="street" placeholder="Nome da rua" autocomplete="address-line1"></label>
+        <label>Número<input name="number" placeholder="Nº" autocomplete="address-line2"></label>
+        <label>Bairro<input name="district" placeholder="Bairro"></label>
+        <label>Cidade<input name="city" placeholder="Cidade" autocomplete="address-level2"></label>
+        <label>Estado<input name="state" placeholder="UF" maxlength="2" autocomplete="address-level1"></label>
       </div>
 
       <div class="legal-accept-box">
-        <label class="check-line"><input type="checkbox" name="accept_terms" required> Li e aceito os <a href="/termos-de-uso" target="_blank">Termos de Uso</a> e as <a href="/regras-do-leilao" target="_blank">Regras do Leilão</a>.</label>
-        <label class="check-line"><input type="checkbox" name="accept_privacy" required> Li e aceito a <a href="/politica-de-privacidade" target="_blank">Política de Privacidade</a> e autorizo a análise dos documentos enviados.</label>
+        <label class="check-line"><input type="checkbox" name="accept_terms" required> Li e aceito os <a href="/termos-de-uso" target="_blank" rel="noopener">Termos de Uso</a> e as <a href="/regras-do-leilao" target="_blank" rel="noopener">Regras do Leilão</a>.</label>
+        <label class="check-line"><input type="checkbox" name="accept_privacy" required> Li e aceito a <a href="/politica-de-privacidade" target="_blank" rel="noopener">Política de Privacidade</a>.</label>
+        <label class="check-line"><input type="checkbox" name="accept_truth" required> Declaro que os dados informados são verdadeiros e pertencem a mim.</label>
       </div>
-      <button class="btn full" type="submit">Criar conta para análise</button>
-      <p class="form-footer">Ao criar a conta, você confirma que os dados enviados são verdadeiros. Saques e envio de produtos dependem da aprovação da identidade.</p>
+
+      <button class="btn full" type="submit">Criar conta e confirmar e-mail</button>
+      <p class="form-footer">Após o cadastro, enviaremos um link de confirmação para seu e-mail. A verificação documental será feita em uma etapa separada.</p>
     </form>
   </div>
+</section>
 
 <style>
-.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:16px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}
+.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.register-policy-note{margin-top:18px;padding:16px;border-radius:18px;border:1px solid rgba(74,222,128,.22);background:rgba(74,222,128,.07)}.register-policy-note strong,.register-policy-note span{display:block}.register-policy-note span{margin-top:6px;color:#b7c6e6;line-height:1.45}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.optional-label{font-size:13px;color:#93c5fd;font-weight:800}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}@media(max-width:980px){.register-info-panel{position:static}}
 </style>
-</section>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  const cpf = document.querySelector('[data-mask="cpf"]');
+  const phone = document.querySelector('[data-mask="phone"]');
+  const cep = document.querySelector('[data-mask="cep"]');
+  function digits(v){ return String(v || "").replace(/\D/g, ""); }
+  cpf?.addEventListener("input", function(){
+    let v = digits(this.value).slice(0,11);
+    v = v.replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+    this.value = v;
+  });
+  phone?.addEventListener("input", function(){
+    let v = digits(this.value).slice(0,11);
+    if(v.length > 10){ v = v.replace(/(\d{2})(\d{5})(\d{0,4})/, "($1) $2-$3"); }
+    else { v = v.replace(/(\d{2})(\d{4})(\d{0,4})/, "($1) $2-$3"); }
+    this.value = v.trim().replace(/-$/, "");
+  });
+  cep?.addEventListener("input", function(){
+    let v = digits(this.value).slice(0,8);
+    if(v.length > 5) v = v.replace(/(\d{5})(\d{0,3})/, "$1-$2");
+    this.value = v;
+  });
+});
+</script>
 {% endblock %}
