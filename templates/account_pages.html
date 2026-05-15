@@ -919,7 +919,7 @@ button:disabled{opacity:.58;cursor:not-allowed}
       <a href="/minha-conta">Minha Conta</a>
 
       <div class="site-user-card">
-        <strong>{{ user.full_name or user.username or user.user or 'Usuário' }}</strong>
+        <strong>@{{ user.public_name or user.nickname or user.full_name.split()[0] or 'usuario' }}</strong>
         <span>Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
       </div>
 

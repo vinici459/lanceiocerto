@@ -396,7 +396,7 @@ window.__AUCTION__ = {{ item | tojson }};
   let wsConnected = false;
   let wsReconnectTimer = null;
   let stateFetchInFlight = false;
-  let zeroSyncLocked = false;
+  let lastZeroSyncAt = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
 
@@ -422,11 +422,18 @@ window.__AUCTION__ = {{ item | tojson }};
     if(h > 0) return `${h}h ${String(m).padStart(2,"0")}m ${String(s).padStart(2,"0")}s`;
     return `${m}m ${String(s).padStart(2,"0")}s`;
   }
-  function normalCooldown(value){
-    const n = Number(value || 0);
-    if(n <= 0.10) return 10;
-    if(n <= 0.50) return 20;
-    return 30;
+  function cooldownForCurrentMode(){
+    const level = Number(auction.turbo_level || 0);
+    if(level >= 4) return 40;
+    if(level >= 3) return 35;
+    if(level >= 2) return 30;
+    return 20;
+  }
+  function applyButtonCooldown(value, seconds){
+    const key = bidKey(value);
+    const cd = Math.max(0, Math.ceil(Number(seconds || cooldownForCurrentMode())));
+    if(cd > 0) cooldowns[key] = cd;
+    renderButtons();
   }
   function setFeedback(text){
     if(els.feedback) els.feedback.textContent = text || "";
@@ -528,7 +535,7 @@ window.__AUCTION__ = {{ item | tojson }};
     const s = status();
 
     remaining = Number(isScheduled(s) ? auction.start_remaining : isLive(s) ? auction.remaining_seconds : 0);
-    zeroSyncLocked = false;
+    lastZeroSyncAt = 0;
 
     if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
     if(els.countdown) els.countdown.textContent = isClosed(s) ? (s === "pending_payment" ? "Aguardando" : "Encerrado") : timeLabel(remaining);
@@ -588,10 +595,12 @@ window.__AUCTION__ = {{ item | tojson }};
       remaining = Math.max(0, remaining - 1);
       if(els.countdown) els.countdown.textContent = timeLabel(remaining);
 
-      if(remaining <= 0 && !zeroSyncLocked){
-        zeroSyncLocked = true;
-        fetchState("zero");
-        setTimeout(() => fetchState("zero-confirm"), 900);
+      if(remaining <= 0){
+        const nowMs = Date.now();
+        if(nowMs - lastZeroSyncAt >= 1000){
+          lastZeroSyncAt = nowMs;
+          fetchState(isScheduled(s) ? "start-zero-retry" : "end-zero-retry");
+        }
       }
     }
 
@@ -630,17 +639,20 @@ window.__AUCTION__ = {{ item | tojson }};
       const form = new FormData();
       form.append("bid_value", value);
 
+      let bidResponse = null;
       try{
-        const {res, json} = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 5000);
+        bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 5000);
+        const {res, json} = bidResponse;
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
         setFeedback("");
         applyAuctionState(json.auction, "bid");
-        if(Number(auction.turbo_level || 0) < 2) cooldowns[value] = normalCooldown(value);
+        applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode());
       } catch(err){
         const msg = err?.name === "AbortError"
           ? "Conexão lenta. Atualizando o leilão..."
           : (err?.message || "Não foi possível confirmar o lance agora.");
         setFeedback(msg);
+        if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after);
         fetchState("bid-error");
       } finally {
         delete pendingBids[value];
