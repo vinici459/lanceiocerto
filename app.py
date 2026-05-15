@@ -69,13 +69,17 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     email_verification_token: Mapped[str] = mapped_column(String(120), default="")
+    email_verification_code: Mapped[str] = mapped_column(String(12), default="")
     email_verification_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     password: Mapped[str] = mapped_column(String(120))
     cpf: Mapped[str] = mapped_column(String(20), default="")
     phone: Mapped[str] = mapped_column(String(30), default="")
+    gender: Mapped[str] = mapped_column(String(30), default="")
+    birth_date: Mapped[str] = mapped_column(String(20), default="")
     cep: Mapped[str] = mapped_column(String(20), default="")
     street: Mapped[str] = mapped_column(String(150), default="")
     number: Mapped[str] = mapped_column(String(30), default="")
+    complement: Mapped[str] = mapped_column(String(100), default="")
     district: Mapped[str] = mapped_column(String(100), default="")
     city: Mapped[str] = mapped_column(String(80), default="")
     state: Mapped[str] = mapped_column(String(20), default="")
@@ -88,6 +92,7 @@ class User(Base):
     document_type: Mapped[str] = mapped_column(String(40), default="CPF")
     document_number: Mapped[str] = mapped_column(String(40), default="")
     document_file_url: Mapped[str] = mapped_column(String(600), default="")
+    document_back_file_url: Mapped[str] = mapped_column(String(600), default="")
     selfie_file_url: Mapped[str] = mapped_column(String(600), default="")
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -394,7 +399,18 @@ NORMAL_TIME_EFFECT_SECONDS = {
     1.00: -25,
 }
 
-NORMAL_BID_BUTTON_COOLDOWN_SECONDS = {v: 20 for v in ALLOWED_BIDS}
+NORMAL_BID_BUTTON_COOLDOWN_SECONDS = {
+    0.10: 10,
+    0.20: 20,
+    0.30: 20,
+    0.40: 20,
+    0.50: 20,
+    0.60: 30,
+    0.70: 30,
+    0.80: 30,
+    0.90: 30,
+    1.00: 30,
+}
 
 TURBO_2_SECONDS = {
     1.00: 8,
@@ -613,6 +629,10 @@ def make_email_verification_token() -> str:
     return secrets.token_urlsafe(40)
 
 
+def make_email_verification_code() -> str:
+    return f"{secrets.randbelow(900000) + 100000}"
+
+
 def public_base_url(request: Optional[Request] = None) -> str:
     env_url = (os.getenv("PUBLIC_BASE_URL") or os.getenv("SERVER_URL") or "").strip().rstrip("/")
     if env_url:
@@ -621,6 +641,78 @@ def public_base_url(request: Optional[Request] = None) -> str:
         return str(request.base_url).rstrip("/")
     return ""
 
+
+def send_verification_code_email(user: User, request: Optional[Request] = None) -> bool:
+    code = (getattr(user, "email_verification_code", "") or "").strip()
+    if not code:
+        return False
+    subject = "Seu código de confirmação — Lancei o Certo"
+    body = (
+        f"Olá, {user.full_name}.\n\n"
+        "Use o código abaixo para confirmar seu e-mail no Lancei o Certo:\n\n"
+        f"Código: {code}\n\n"
+        "Este código expira em 15 minutos. Se você não criou essa conta, ignore esta mensagem.\n"
+    )
+    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT") or "587")
+    smtp_user = (os.getenv("SMTP_USER") or "").strip()
+    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
+    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
+    if not smtp_host or not smtp_from:
+        print(f"[EMAIL CODE DEV] {user.email}: {code}")
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = user.email
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
+                server.starttls()
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception as exc:
+        print(f"[EMAIL CODE ERROR] {user.email}: {exc} | code={code}")
+        return False
+
+
+def send_identity_rejection_email(user: User, note: str = "") -> bool:
+    subject = "Não foi possível concluir sua verificação — Lancei o Certo"
+    reason = (note or "documentação ilegível ou incompatível com os dados informados").strip()
+    body = (
+        f"Olá, {user.full_name}. Tudo bem?\n\n"
+        "Analisamos a sua documentação e infelizmente não foi possível concluir a verificação neste momento.\n\n"
+        f"Motivo: {reason}.\n\n"
+        "Você pode acessar sua conta e enviar os documentos novamente com uma imagem legível, atual e compatível com os dados informados no cadastro.\n\n"
+        "Equipe Lancei o Certo.\n"
+    )
+    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT") or "587")
+    smtp_user = (os.getenv("SMTP_USER") or "").strip()
+    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
+    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
+    if not smtp_host or not smtp_from:
+        print(f"[IDENTITY REJECTION DEV] {user.email}: {reason}")
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = user.email
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
+                server.starttls()
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception as exc:
+        print(f"[IDENTITY REJECTION ERROR] {user.email}: {exc}")
+        return False
 
 def send_verification_email(user: User, request: Optional[Request] = None) -> bool:
     if not getattr(user, "email_verification_token", ""):
@@ -1223,21 +1315,20 @@ def build_admin_order_cards(db: Session, orders: list[WinnerOrder]) -> list[dict
 
 
 def build_order_card(order: WinnerOrder) -> dict:
-    auction = getattr(order, "auction", None)
     return {
         "id": order.id,
         "auction_id": order.auction_id,
         "status": order.status,
-        "auction_title": auction.title if auction else "Produto removido",
-        "image_url": safe_image_url(auction.image_url if auction else ""),
+        "auction_title": order.auction.title,
+        "image_url": order.auction.image_url,
         "final_price": BR(order.final_price),
         "deadline_label": fmt_deadline(order.payment_deadline),
         "remaining_label": remaining_label(order.payment_deadline),
         "payment_link": order.payment_link,
         "tracking_code": order.tracking_code,
         "admin_note": order.admin_note,
-        "source_store": auction.source_store if auction else "—",
-        "source_url": auction.source_url if auction else "",
+        "source_store": order.auction.source_store,
+        "source_url": order.auction.source_url,
         "created_at": order.created_at.strftime("%d/%m/%Y %H:%M"),
     }
 
@@ -1349,11 +1440,15 @@ def ensure_columns() -> None:
             for name, ddl in {
                 "public_name": "VARCHAR(40) DEFAULT ''",
                 "nickname": "VARCHAR(40) DEFAULT ''",
+                "gender": "VARCHAR(30) DEFAULT ''",
+                "birth_date": "VARCHAR(20) DEFAULT ''",
+                "complement": "VARCHAR(100) DEFAULT ''",
                 "identity_status": "VARCHAR(30) DEFAULT 'pending'",
                 "identity_note": "TEXT DEFAULT ''",
                 "document_type": "VARCHAR(40) DEFAULT 'CPF'",
                 "document_number": "VARCHAR(40) DEFAULT ''",
                 "document_file_url": "VARCHAR(600) DEFAULT ''",
+                "document_back_file_url": "VARCHAR(600) DEFAULT ''",
                 "selfie_file_url": "VARCHAR(600) DEFAULT ''",
                 "verified_at": "TIMESTAMP NULL",
                 "terms_accepted_at": "TIMESTAMP NULL",
@@ -1361,6 +1456,7 @@ def ensure_columns() -> None:
                 "email_verified": "BOOLEAN DEFAULT FALSE",
                 "email_verified_at": "TIMESTAMP NULL",
                 "email_verification_token": "VARCHAR(120) DEFAULT ''",
+                "email_verification_code": "VARCHAR(12) DEFAULT ''",
                 "email_verification_expires_at": "TIMESTAMP NULL",
             }.items():
                 if name not in cols:
@@ -1415,13 +1511,6 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_support_tickets_user_created ON support_tickets (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_key ON product_suggestion_votes (product_key)",
-            "CREATE INDEX IF NOT EXISTS ix_auction_items_live_end ON auction_items (status, ends_at)",
-            "CREATE INDEX IF NOT EXISTS ix_winner_orders_status_deadline ON winner_orders (status, payment_deadline)",
-            "CREATE INDEX IF NOT EXISTS ix_cashback_events_status_deadline ON cashback_events (status, join_deadline)",
-            "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_value_created ON bids (auction_id, user_id, bid_value, created_at)",
-            "CREATE INDEX IF NOT EXISTS ix_admin_messages_order_created ON admin_direct_messages (order_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS ix_audit_logs_user_created ON audit_logs (user_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_user_created ON product_suggestion_votes (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_cashback_events_auction ON cashback_events (auction_id)",
         ]:
             try:
@@ -1601,7 +1690,7 @@ async def auction_watcher():
                 if start_auction_if_due(item, now):
                     changed_ids.append(item.id)
 
-            live_items = db.query(AuctionItem).filter(AuctionItem.status == "live", AuctionItem.ends_at <= now).all()
+            live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").all()
             for item in live_items:
                 if item.ends_at and item.ends_at <= now:
                     last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
@@ -1639,11 +1728,11 @@ async def auction_watcher():
                         item.status = "ended"
                     changed_ids.append(item.id)
 
-            open_cashbacks = db.query(CashbackEvent).filter(CashbackEvent.status == "open", CashbackEvent.join_deadline <= now).all()
+            open_cashbacks = db.query(CashbackEvent).filter(CashbackEvent.status == "open").all()
             for cashback in open_cashbacks:
                 draw_cashback_if_due(cashback, db, now)
 
-            pending_orders = db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment", WinnerOrder.payment_deadline <= now).all()
+            pending_orders = db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").all()
             for order in pending_orders:
                 if order.payment_deadline and order.payment_deadline <= now:
                     order.status = "expired"
@@ -1753,11 +1842,14 @@ async def register(
     email: str = Form(...),
     cpf: str = Form(...),
     phone: str = Form(...),
+    gender: str = Form(""),
+    birth_date: str = Form(""),
     password: str = Form(...),
     password_confirm: str = Form(...),
     cep: str = Form(""),
     street: str = Form(""),
     number: str = Form(""),
+    complement: str = Form(""),
     district: str = Form(""),
     city: str = Form(""),
     state: str = Form(""),
@@ -1787,6 +1879,12 @@ async def register(
             return fail("Informe um CPF válido.")
         if not validate_phone_digits(clean_phone):
             return fail("Informe um telefone válido com DDD.")
+        clean_gender = (gender or "").strip()[:30]
+        clean_birth_date = (birth_date or "").strip()[:20]
+        if not clean_gender:
+            return fail("Informe o gênero.")
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", clean_birth_date):
+            return fail("Informe a data de nascimento.")
         if len(password or "") < 8:
             return fail("A senha precisa ter pelo menos 8 caracteres.")
         if password != password_confirm:
@@ -1802,6 +1900,7 @@ async def register(
             return fail("Este apelido público já está em uso.")
 
         token = make_email_verification_token()
+        code = make_email_verification_code()
         user = User(
             full_name=full_name.strip(),
             public_name=clean_public_name,
@@ -1809,13 +1908,17 @@ async def register(
             email=clean_email,
             email_verified=False,
             email_verification_token=token,
-            email_verification_expires_at=datetime.utcnow() + timedelta(hours=24),
+            email_verification_code=code,
+            email_verification_expires_at=datetime.utcnow() + timedelta(minutes=15),
             password=hash_password(password.strip()),
             cpf=clean_cpf,
             phone=clean_phone,
+            gender=clean_gender,
+            birth_date=clean_birth_date,
             cep=only_digits(cep),
             street=street.strip(),
             number=number.strip(),
+            complement=complement.strip(),
             district=district.strip(),
             city=city.strip(),
             state=state.strip().upper()[:2],
@@ -1831,11 +1934,115 @@ async def register(
         )
         db.add(user)
         db.flush()
-        sent = send_verification_email(user, request)
-        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado. E-mail pendente de confirmação e KYC pendente.")
+        sent = send_verification_code_email(user, request)
+        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado. Código de e-mail enviado e KYC pendente.")
         db.commit()
         suffix = "&email_sent=1" if sent else "&email_dev=1"
-        return RedirectResponse(f"/login?created=1&email_pending=1{suffix}", status_code=303)
+        return RedirectResponse(f"/cadastro/confirmar-email?email={clean_email}{suffix}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.get("/cadastro/confirmar-email", response_class=HTMLResponse)
+def register_confirm_email_page(request: Request, email: str = "", email_sent: int = 0, email_dev: int = 0):
+    return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": normalize_email(email), "error": None, "email_sent": email_sent, "email_dev": email_dev})
+
+
+@app.post("/cadastro/confirmar-email")
+def register_confirm_email_submit(request: Request, email: str = Form(...), code: str = Form(...)):
+    db = SessionLocal()
+    try:
+        clean_email = normalize_email(email)
+        clean_code = only_digits(code)
+        user = db.query(User).filter(User.email == clean_email).first()
+        if not user:
+            return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "Conta não encontrada.", "email_sent": 0, "email_dev": 0}, status_code=400)
+        if user.email_verified:
+            token = secrets.token_urlsafe(24)
+            SESSIONS[token] = user.id
+            response = RedirectResponse("/cadastro/documentos", status_code=303)
+            response.set_cookie("session_token", token, httponly=True, samesite="lax")
+            return response
+        if not clean_code or clean_code != (user.email_verification_code or ""):
+            return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "Código inválido.", "email_sent": 0, "email_dev": 0}, status_code=400)
+        if user.email_verification_expires_at and user.email_verification_expires_at < datetime.utcnow():
+            user.email_verification_code = make_email_verification_code()
+            user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
+            send_verification_code_email(user, request)
+            db.commit()
+            return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "O código expirou. Enviamos um novo código para seu e-mail.", "email_sent": 1, "email_dev": 0}, status_code=400)
+        user.email_verified = True
+        user.email_verified_at = datetime.utcnow()
+        user.email_verification_code = ""
+        user.email_verification_token = ""
+        user.email_verification_expires_at = None
+        audit_event(db, request, "user.email_code_verified", user, "user", user.id, "E-mail confirmado por código.")
+        db.commit()
+        token = secrets.token_urlsafe(24)
+        SESSIONS[token] = user.id
+        response = RedirectResponse("/cadastro/documentos", status_code=303)
+        response.set_cookie("session_token", token, httponly=True, samesite="lax")
+        return response
+    finally:
+        db.close()
+
+
+@app.post("/cadastro/reenviar-codigo")
+def register_resend_code(request: Request, email: str = Form(...)):
+    db = SessionLocal()
+    try:
+        clean_email = normalize_email(email)
+        user = db.query(User).filter(User.email == clean_email).first()
+        if user and not user.email_verified:
+            user.email_verification_code = make_email_verification_code()
+            user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
+            send_verification_code_email(user, request)
+            db.commit()
+        return RedirectResponse(f"/cadastro/confirmar-email?email={clean_email}&email_sent=1", status_code=303)
+    finally:
+        db.close()
+
+
+@app.get("/cadastro/documentos", response_class=HTMLResponse)
+def register_documents_page(request: Request):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        return templates.TemplateResponse("register_documents.html", {"request": request, "user": user, "error": None, "success": None})
+    finally:
+        db.close()
+
+
+@app.post("/cadastro/documentos")
+async def register_documents_submit(request: Request, document_front_file: UploadFile | None = File(None), document_back_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        if not document_front_file or not document_front_file.filename or not document_back_file or not document_back_file.filename or not selfie_file or not selfie_file.filename:
+            return templates.TemplateResponse("register_documents.html", {"request": request, "user": user, "error": "Envie a frente do documento, o verso e uma selfie atual.", "success": None}, status_code=400)
+        user.document_file_url = save_uploaded_image(document_front_file)
+        user.document_back_file_url = save_uploaded_image(document_back_file)
+        user.selfie_file_url = save_uploaded_image(selfie_file)
+        user.identity_status = "pending"
+        user.identity_note = "Documentos enviados. Aguardando análise do administrador."
+        audit_event(db, request, "user.identity_submitted", user, "user", user.id, "Documentos enviados no cadastro inicial.")
+        db.commit()
+        return RedirectResponse("/minha-conta?cadastro=concluido", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/cadastro/documentos/enviar-depois")
+def register_documents_skip(request: Request):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        if user.identity_status not in {"verified", "pending"}:
+            user.identity_status = "pending"
+        if not user.identity_note:
+            user.identity_note = "Documentos serão enviados depois."
+        db.commit()
+        return RedirectResponse("/minha-conta?cadastro=concluido", status_code=303)
     finally:
         db.close()
 
@@ -2212,7 +2419,7 @@ def my_receipts(request: Request):
     try:
         user = require_user(request, db)
         transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(100).all()
-        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
+        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
         audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(100).all()
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", "wallet_transactions": transactions, "orders_raw": orders, "audit_logs": audits})
     finally:
@@ -2239,13 +2446,16 @@ def account_identity_page(request: Request):
 
 
 @app.post("/minha-conta/verificacao")
-async def account_identity_submit(request: Request, document_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None)):
+async def account_identity_submit(request: Request, document_front_file: UploadFile | None = File(None), document_back_file: UploadFile | None = File(None), document_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None)):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        if not document_file or not document_file.filename or not selfie_file or not selfie_file.filename:
-            return templates.TemplateResponse("identity_verification.html", {"request": request, "user": user, "error": "Envie o documento e a selfie para análise.", "success": None}, status_code=400)
-        user.document_file_url = save_uploaded_image(document_file)
+        front = document_front_file if document_front_file and document_front_file.filename else document_file
+        if not front or not front.filename or not selfie_file or not selfie_file.filename:
+            return templates.TemplateResponse("identity_verification.html", {"request": request, "user": user, "error": "Envie a frente do documento e a selfie para análise.", "success": None}, status_code=400)
+        user.document_file_url = save_uploaded_image(front)
+        if document_back_file and document_back_file.filename:
+            user.document_back_file_url = save_uploaded_image(document_back_file)
         user.selfie_file_url = save_uploaded_image(selfie_file)
         user.identity_status = "pending"
         user.identity_note = "Documentos enviados. Aguardando análise do administrador."
@@ -2261,14 +2471,12 @@ def my_participations(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        bids = db.query(Bid).options(selectinload(Bid.auction)).filter(Bid.user_id == user.id).order_by(desc(Bid.created_at)).limit(500).all()
+        bids = db.query(Bid).filter(Bid.user_id == user.id).order_by(desc(Bid.created_at)).all()
         grouped = {}
         for bid in bids:
             aid = bid.auction_id
             if aid not in grouped:
                 item = bid.auction
-                if not item:
-                    continue
                 grouped[aid] = {
                     "auction_id": aid,
                     "title": item.title,
@@ -2292,7 +2500,7 @@ def my_wins(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
+        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).all()
         data = [build_order_card(x) for x in orders]
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wins", "orders": data})
     finally:
@@ -2306,10 +2514,8 @@ def my_pending_payments(request: Request):
         user = require_user(request, db)
         orders = (
             db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
             .order_by(desc(WinnerOrder.created_at))
-            .limit(100)
             .all()
         )
         data = [build_order_card(x) for x in orders]
@@ -2420,10 +2626,8 @@ def my_expired_orders(request: Request):
         user = require_user(request, db)
         orders = (
             db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "expired")
             .order_by(desc(WinnerOrder.created_at))
-            .limit(100)
             .all()
         )
         data = [build_order_card(x) for x in orders]
@@ -2533,6 +2737,7 @@ def admin_dashboard(request: Request):
             like = f"%{search}%"
             users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
         users = users_query.order_by(desc(User.created_at)).limit(40).all()
+        identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(80).all()
         items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(40).all()
         for item in items:
             item.collected_percent = auction_progress_percent(item)
@@ -2554,9 +2759,9 @@ def admin_dashboard(request: Request):
             "users": db.query(User).count(),
             "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
             "scheduled": db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).count(),
-            "pending_payment": db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").count(),
+            "pending_payment": len(pending_payment_orders),
             "completed": db.query(AuctionItem).filter(AuctionItem.status.in_(["ended"])).count(),
-            "pending_shipping": db.query(WinnerOrder).filter(WinnerOrder.status.in_(["paid", "processing", "purchased"])).count(),
+            "pending_shipping": len(shipping_orders),
             "active_users": db.query(User).filter(User.is_banned == False).count(),
             "identity_pending": db.query(User).filter(User.identity_status == "pending").count(),
             "pending_withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").count(),
@@ -2570,6 +2775,7 @@ def admin_dashboard(request: Request):
                 "user": admin,
                 "stats": stats,
                 "users": users,
+                "identity_pending_users": identity_pending_users,
                 "items": items,
                 "orders": orders,
                 "admin_order_cards": admin_order_cards,
@@ -3039,7 +3245,7 @@ def admin_verify_user(request: Request, user_id: int, note: str = Form("")):
         user.verified_at = datetime.utcnow()
         audit_event(db, request, "kyc.verified", user, "user", user.id, note.strip())
         db.commit()
-        return RedirectResponse("/admin#admin-users", status_code=303)
+        return RedirectResponse("/admin#admin-identity-pending", status_code=303)
     finally:
         db.close()
 
@@ -3053,10 +3259,12 @@ def admin_reject_user(request: Request, user_id: int, note: str = Form("")):
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
         user.identity_status = "rejected"
-        user.identity_note = note.strip()
+        user.identity_note = note.strip() or "Documentação ilegível ou incompatível com os dados informados."
         user.verified_at = None
+        send_identity_rejection_email(user, user.identity_note)
+        audit_event(db, request, "kyc.rejected", user, "user", user.id, user.identity_note)
         db.commit()
-        return RedirectResponse("/admin#admin-users", status_code=303)
+        return RedirectResponse("/admin#admin-identity-pending", status_code=303)
     finally:
         db.close()
 

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="form-wrap docs-wrap">
+  <div class="form-card wide docs-card">
+    <span class="eyebrow">Verificação de identidade</span>
+    <h1>Envie seus documentos</h1>
+    <p class="muted">Essa etapa ajuda a proteger sua conta. Você pode enviar agora ou deixar para depois.</p>
+
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    {% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+
+    <form method="post" action="/cadastro/documentos" enctype="multipart/form-data">
+      <div class="docs-upload-grid">
+        <label>Frente do documento
+          <input type="file" name="document_front_file" accept="image/*,.pdf" capture="environment" required>
+          <small>No celular, você pode tirar a foto na hora. No computador, envie uma imagem legível.</small>
+        </label>
+
+        <label>Verso do documento
+          <input type="file" name="document_back_file" accept="image/*,.pdf" capture="environment" required>
+          <small>Use boa iluminação e evite cortes no documento.</small>
+        </label>
+
+        <label>Selfie atual
+          <input type="file" name="selfie_file" accept="image/*" capture="user" required>
+          <small>A selfie precisa ser recente e mostrar bem o rosto.</small>
+        </label>
+      </div>
+
+      <button class="btn full" type="submit">Enviar documentos para análise</button>
+    </form>
+
+    <form method="post" action="/cadastro/documentos/enviar-depois" class="skip-docs-form">
+      <button class="btn full ghost" type="submit">Enviar depois</button>
+    </form>
+  </div>
+</section>
+<style>
+.docs-wrap{align-items:start}.docs-card h1{margin:8px 0 8px}.docs-upload-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.docs-upload-grid label{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:14px}.docs-upload-grid small{display:block;margin-top:8px;line-height:1.35}.skip-docs-form{margin-top:12px}@media(max-width:840px){.docs-upload-grid{grid-template-columns:1fr}}
+</style>
+{% endblock %}

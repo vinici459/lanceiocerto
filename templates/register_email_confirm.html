@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="form-wrap email-confirm-wrap">
+  <form class="form-card email-confirm-card" method="post" action="/cadastro/confirmar-email" autocomplete="one-time-code">
+    <span class="eyebrow">Confirmação de e-mail</span>
+    <h1>Digite o código enviado.</h1>
+    <p class="muted">Enviamos um código de 6 dígitos para <strong>{{ email }}</strong>.</p>
+
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    {% if email_sent %}<div class="alert success">Código enviado. Confira sua caixa de entrada.</div>{% endif %}
+    {% if email_dev %}<div class="alert">E-mail não configurado no servidor. Confira o código no console/log da aplicação.</div>{% endif %}
+
+    <input type="hidden" name="email" value="{{ email }}">
+
+    <label>Código de confirmação
+      <input class="code-input" name="code" inputmode="numeric" maxlength="6" placeholder="000000" required>
+    </label>
+
+    <button class="btn full" type="submit">Confirmar e continuar</button>
+  </form>
+
+  <form method="post" action="/cadastro/reenviar-codigo" class="resend-code-form">
+    <input type="hidden" name="email" value="{{ email }}">
+    <button type="submit" class="btn ghost small">Reenviar código</button>
+  </form>
+</section>
+<style>
+.email-confirm-wrap{align-content:start}.email-confirm-card h1{margin:8px 0 8px}.code-input{text-align:center;letter-spacing:.28em;font-size:24px;font-weight:900}.resend-code-form{margin-top:-20px;text-align:center}.resend-code-form .btn{display:inline-flex;width:auto}
+</style>
+{% endblock %}
