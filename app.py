@@ -394,18 +394,7 @@ NORMAL_TIME_EFFECT_SECONDS = {
     1.00: -25,
 }
 
-NORMAL_BID_BUTTON_COOLDOWN_SECONDS = {
-    0.10: 10,
-    0.20: 20,
-    0.30: 20,
-    0.40: 20,
-    0.50: 20,
-    0.60: 30,
-    0.70: 30,
-    0.80: 30,
-    0.90: 30,
-    1.00: 30,
-}
+NORMAL_BID_BUTTON_COOLDOWN_SECONDS = {v: 20 for v in ALLOWED_BIDS}
 
 TURBO_2_SECONDS = {
     1.00: 8,
@@ -1234,20 +1223,21 @@ def build_admin_order_cards(db: Session, orders: list[WinnerOrder]) -> list[dict
 
 
 def build_order_card(order: WinnerOrder) -> dict:
+    auction = getattr(order, "auction", None)
     return {
         "id": order.id,
         "auction_id": order.auction_id,
         "status": order.status,
-        "auction_title": order.auction.title,
-        "image_url": order.auction.image_url,
+        "auction_title": auction.title if auction else "Produto removido",
+        "image_url": safe_image_url(auction.image_url if auction else ""),
         "final_price": BR(order.final_price),
         "deadline_label": fmt_deadline(order.payment_deadline),
         "remaining_label": remaining_label(order.payment_deadline),
         "payment_link": order.payment_link,
         "tracking_code": order.tracking_code,
         "admin_note": order.admin_note,
-        "source_store": order.auction.source_store,
-        "source_url": order.auction.source_url,
+        "source_store": auction.source_store if auction else "—",
+        "source_url": auction.source_url if auction else "",
         "created_at": order.created_at.strftime("%d/%m/%Y %H:%M"),
     }
 
@@ -1425,6 +1415,13 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_support_tickets_user_created ON support_tickets (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_key ON product_suggestion_votes (product_key)",
+            "CREATE INDEX IF NOT EXISTS ix_auction_items_live_end ON auction_items (status, ends_at)",
+            "CREATE INDEX IF NOT EXISTS ix_winner_orders_status_deadline ON winner_orders (status, payment_deadline)",
+            "CREATE INDEX IF NOT EXISTS ix_cashback_events_status_deadline ON cashback_events (status, join_deadline)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_value_created ON bids (auction_id, user_id, bid_value, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_admin_messages_order_created ON admin_direct_messages (order_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_audit_logs_user_created ON audit_logs (user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_user_created ON product_suggestion_votes (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_cashback_events_auction ON cashback_events (auction_id)",
         ]:
             try:
@@ -1604,7 +1601,7 @@ async def auction_watcher():
                 if start_auction_if_due(item, now):
                     changed_ids.append(item.id)
 
-            live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").all()
+            live_items = db.query(AuctionItem).filter(AuctionItem.status == "live", AuctionItem.ends_at <= now).all()
             for item in live_items:
                 if item.ends_at and item.ends_at <= now:
                     last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
@@ -1642,11 +1639,11 @@ async def auction_watcher():
                         item.status = "ended"
                     changed_ids.append(item.id)
 
-            open_cashbacks = db.query(CashbackEvent).filter(CashbackEvent.status == "open").all()
+            open_cashbacks = db.query(CashbackEvent).filter(CashbackEvent.status == "open", CashbackEvent.join_deadline <= now).all()
             for cashback in open_cashbacks:
                 draw_cashback_if_due(cashback, db, now)
 
-            pending_orders = db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").all()
+            pending_orders = db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment", WinnerOrder.payment_deadline <= now).all()
             for order in pending_orders:
                 if order.payment_deadline and order.payment_deadline <= now:
                     order.status = "expired"
@@ -2215,7 +2212,7 @@ def my_receipts(request: Request):
     try:
         user = require_user(request, db)
         transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(100).all()
-        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
+        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
         audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(100).all()
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", "wallet_transactions": transactions, "orders_raw": orders, "audit_logs": audits})
     finally:
@@ -2264,12 +2261,14 @@ def my_participations(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        bids = db.query(Bid).filter(Bid.user_id == user.id).order_by(desc(Bid.created_at)).all()
+        bids = db.query(Bid).options(selectinload(Bid.auction)).filter(Bid.user_id == user.id).order_by(desc(Bid.created_at)).limit(500).all()
         grouped = {}
         for bid in bids:
             aid = bid.auction_id
             if aid not in grouped:
                 item = bid.auction
+                if not item:
+                    continue
                 grouped[aid] = {
                     "auction_id": aid,
                     "title": item.title,
@@ -2293,7 +2292,7 @@ def my_wins(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).all()
+        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
         data = [build_order_card(x) for x in orders]
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wins", "orders": data})
     finally:
@@ -2307,8 +2306,10 @@ def my_pending_payments(request: Request):
         user = require_user(request, db)
         orders = (
             db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
             .order_by(desc(WinnerOrder.created_at))
+            .limit(100)
             .all()
         )
         data = [build_order_card(x) for x in orders]
@@ -2419,8 +2420,10 @@ def my_expired_orders(request: Request):
         user = require_user(request, db)
         orders = (
             db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "expired")
             .order_by(desc(WinnerOrder.created_at))
+            .limit(100)
             .all()
         )
         data = [build_order_card(x) for x in orders]
@@ -2551,9 +2554,9 @@ def admin_dashboard(request: Request):
             "users": db.query(User).count(),
             "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
             "scheduled": db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).count(),
-            "pending_payment": len(pending_payment_orders),
+            "pending_payment": db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").count(),
             "completed": db.query(AuctionItem).filter(AuctionItem.status.in_(["ended"])).count(),
-            "pending_shipping": len(shipping_orders),
+            "pending_shipping": db.query(WinnerOrder).filter(WinnerOrder.status.in_(["paid", "processing", "purchased"])).count(),
             "active_users": db.query(User).filter(User.is_banned == False).count(),
             "identity_pending": db.query(User).filter(User.identity_status == "pending").count(),
             "pending_withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").count(),
