@@ -357,6 +357,14 @@ app = FastAPI(title=APP_NAME)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
+
+
+@app.middleware("http")
+async def add_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
+    return response
 SESSIONS: dict[str, int] = {}
 BANNED_WORDS = {
     "idiota", "burro", "otario", "otário", "droga", "merda", "porra", "fdp", "puta",
@@ -908,6 +916,36 @@ def public_auction_payload(item: AuctionItem, db: Session) -> dict:
     }
 
 
+def public_auction_card_payload(item: AuctionItem) -> dict:
+    """Payload leve para a vitrine/home.
+
+    Mantém os campos usados pelos cards, mas evita consultas extras por leilão
+    (lances, cashback, usuário vencedor etc.). A página completa do leilão
+    continua usando public_auction_payload(), preservando a lógica original.
+    """
+    remaining = 0
+    if item.status == "live" and item.ends_at:
+        remaining = max(0, int((item.ends_at - datetime.utcnow()).total_seconds()))
+
+    start_remaining = 0
+    if item.status in {"scheduled", "relisted"} and item.scheduled_start:
+        start_remaining = max(0, int((item.scheduled_start - datetime.utcnow()).total_seconds()))
+
+    return {
+        "id": item.id,
+        "title": item.title,
+        "status": item.status,
+        "current_price": BR(item.current_price),
+        "source_price": BR(item.source_price),
+        "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
+        "start_remaining": start_remaining,
+        "remaining_seconds": remaining,
+        "winner_name": public_user_name(item.winner) if item.winner else None,
+        "image_url": safe_image_url(item.image_url),
+    }
+
+
+
 def user_stats(db: Session, user: User) -> dict:
     bids_total = db.query(Bid).filter(Bid.user_id == user.id).count()
     distinct_auctions = db.query(Bid.auction_id).filter(Bid.user_id == user.id).distinct().count()
@@ -997,11 +1035,15 @@ def build_finance_dashboard(db: Session) -> dict:
 
 def build_cashflow_movements(db: Session) -> list[dict]:
     rows = []
-    for tx in db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(120).all():
+    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(120).all()
+    user_ids = {tx.user_id for tx in transactions if tx.user_id}
+    users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    for tx in transactions:
+        tx_user = users_by_id.get(tx.user_id)
         rows.append({
             "created_at": tx.created_at,
             "type": tx.kind,
-            "description": f"Usuário #{tx.user_id} • CPF {getattr(db.get(User, tx.user_id), 'cpf', '—') or '—'} • {tx.note or 'Movimentação'}",
+            "description": f"Usuário #{tx.user_id} • CPF {getattr(tx_user, 'cpf', '—') or '—'} • {tx.note or 'Movimentação'}",
             "amount": BR(tx.amount or 0.0),
             "balance_after": 0.0,
             "status": "registrado",
@@ -1472,17 +1514,19 @@ def home(request: Request):
     db = SessionLocal()
     try:
         user = current_user(request, db)
-        live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).all()
-        upcoming_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).all()
-        ended_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).all()
+        # A vitrine não precisa carregar o histórico completo de todos os leilões.
+        # Limitar os cards evita travamentos quando o banco cresce.
+        live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(12).all()
+        upcoming_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(12).all()
+        ended_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(12).all()
         return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
                 "user": user,
-                "live_items": [public_auction_payload(x, db) for x in live_items],
-                "upcoming_items": [public_auction_payload(x, db) for x in upcoming_items],
-                "ended_items": [public_auction_payload(x, db) for x in ended_items],
+                "live_items": [public_auction_card_payload(x) for x in live_items],
+                "upcoming_items": [public_auction_card_payload(x) for x in upcoming_items],
+                "ended_items": [public_auction_card_payload(x) for x in ended_items],
                 "suggestion_products": SUGGESTION_PRODUCTS,
                 "suggestion_vote_stats": suggestion_vote_stats(db),
                 "today_suggestion_vote": user_today_suggestion_vote(db, user),
@@ -1942,7 +1986,7 @@ def my_account(request: Request):
             .order_by(desc(WinnerOrder.created_at))
             .all()
         )
-        won_orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).all()
+        won_orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(50).all()
         latest = [build_order_card(x) for x in won_orders[:5]]
         pending = [build_order_card(x) for x in pending_orders[:3]]
         return templates.TemplateResponse(
@@ -2243,7 +2287,6 @@ def user_audit_map(db: Session, users: list[User]) -> dict[int, dict]:
 
 
 @app.get("/admin", response_class=HTMLResponse)
-@app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
     db = SessionLocal()
     try:
@@ -2263,21 +2306,19 @@ def admin_dashboard(request: Request):
         if search:
             like = f"%{search}%"
             users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-        users = users_query.order_by(desc(User.created_at)).limit(200).all()
-        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).all()
+        users = users_query.order_by(desc(User.created_at)).limit(60).all()
+        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(80).all()
         for item in items:
             item.collected_percent = auction_progress_percent(item)
             item.cash_reserved = auction_cash_reserved_before_payment(item)
             item.expected_total_if_paid = auction_total_if_paid(item)
             item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
-        for item in items:
-            item.collected_percent = auction_progress_percent(item)
-        orders = db.query(WinnerOrder).order_by(desc(WinnerOrder.created_at)).limit(300).all()
+        orders = db.query(WinnerOrder).order_by(desc(WinnerOrder.created_at)).limit(80).all()
         pending_payment_orders = [o for o in orders if o.status == "pending_payment"]
         shipping_orders = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
         consultation_orders = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
-        withdrawal_requests = db.query(WithdrawalRequest).order_by(desc(WithdrawalRequest.created_at)).limit(200).all()
-        support_tickets = db.query(SupportTicket).order_by(desc(SupportTicket.created_at)).limit(200).all()
+        withdrawal_requests = db.query(WithdrawalRequest).order_by(desc(WithdrawalRequest.created_at)).limit(80).all()
+        support_tickets = db.query(SupportTicket).order_by(desc(SupportTicket.created_at)).limit(80).all()
         admin_order_cards = build_admin_order_cards(db, orders)
         returned_items = build_returned_items(db)
         finance = build_finance_dashboard(db)
@@ -2313,14 +2354,14 @@ def admin_dashboard(request: Request):
                 "withdrawal_requests": withdrawal_requests,
                 "support_tickets": support_tickets,
                 "user_audit": user_audit_map(db, users),
-                "audit_logs": db.query(AuditLog).order_by(desc(AuditLog.created_at)).limit(300).all(),
+                "audit_logs": db.query(AuditLog).order_by(desc(AuditLog.created_at)).limit(80).all(),
                 "search": search,
                 "finished_auctions": build_finished_auctions(db),
                 "returned_items": returned_items,
                 "finance": finance,
                 "cashflow_movements": cashflow_movements,
                 "auction_results": auction_results,
-                "recent_chat_messages": db.query(ChatMessage).order_by(desc(ChatMessage.created_at)).limit(80).all(),
+                "recent_chat_messages": db.query(ChatMessage).order_by(desc(ChatMessage.created_at)).limit(40).all(),
                 "moderation_users": db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).all(),
                 "payment_deadline_minutes": PAYMENT_DEADLINE_MINUTES,
                 "returned_items": returned_items,

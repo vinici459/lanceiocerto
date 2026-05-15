@@ -2,7 +2,7 @@
 {% block content %}
 <section class="container auction-layout" data-auction-id="{{ item.id }}" id="auction-layout">
   <div class="auction-main">
-    <img class="auction-image" src="{{ item.image_url }}" alt="{{ entity.title }}" loading="eager" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
+    <img class="auction-image" src="{{ item.image_url }}" alt="{{ entity.title }}" loading="eager" fetchpriority="high" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
     <div class="auction-panel">
       <div class="status-row">
         <span class="status {{ item.status }}" id="auction-status">{% if item.status in ['scheduled', 'relisted'] %}PRÓXIMO{% elif item.status == 'live' %}AO VIVO{% elif item.status == 'pending_payment' %}AGUARDANDO PAGAMENTO{% elif item.status == 'ended' %}ENCERRADO{% else %}{{ item.status|upper }}{% endif %}</span>

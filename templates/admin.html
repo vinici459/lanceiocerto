@@ -238,7 +238,7 @@
         <div class="returned-card-grid">
           {% for item in returned_items if returned_items is defined %}
           <article class="returned-mini-card">
-            <img src="{{ item.image_url }}" alt="{{ item.title }}">
+            <img src="{{ item.image_url }}" alt="{{ item.title }}" loading="lazy" decoding="async">
             <div>
               <h3>{{ item.title }}</h3>
               <p>Original: <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></p>
@@ -624,7 +624,7 @@
               {% set f = card.finance %}
               <article class="admin-order-card" data-search="{{ (o.user.full_name ~ ' ' ~ o.user.email ~ ' ' ~ o.user.cpf ~ ' ' ~ o.auction.title ~ ' ' ~ o.status)|lower }}">
                 <div class="admin-order-summary">
-                  <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}">
+                  <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async">
                   <div>
                     <h3>{{ o.auction.title }}</h3>
                     <p><strong>Ganhador:</strong> {{ o.user.full_name }} • {{ o.user.email }}</p>

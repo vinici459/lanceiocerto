@@ -1088,7 +1088,7 @@ button:disabled{opacity:.58;cursor:not-allowed}
     {% if latest_orders %}
       {% set o = latest_orders[0] %}
       <div class="mini-auction">
-        <img src="{{ o.image_url }}" alt="{{ o.auction_title }}">
+        <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async">
         <div>
           <strong>{{ o.auction_title }}</strong>
           <p>Status: {{ o.status }}</p>
@@ -1147,7 +1147,7 @@ button:disabled{opacity:.58;cursor:not-allowed}
   <div class="cards account-cards">
     {% for item in items %}
     <article class="card auction-card compact-card">
-      <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image"/>
+      <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async"/>
       <div class="card-body">
         <h3>{{ item.title }}</h3>
         <p>Total de lances: <strong>{{ item.total_bids }}</strong></p>
@@ -1169,7 +1169,7 @@ button:disabled{opacity:.58;cursor:not-allowed}
   <div class="cards account-cards">
     {% for o in orders %}
     <article class="card auction-card compact-card">
-      <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" class="card-image"/>
+      <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" class="card-image" loading="lazy" decoding="async"/>
       <div class="card-body">
         <h3>{{ o.auction_title }}</h3>
         <p>Valor vencido: <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></p>
@@ -1237,7 +1237,7 @@ button:disabled{opacity:.58;cursor:not-allowed}
 
     <!-- ESQUERDA -->
     <div class="checkout-summary checkout-summary-pro">
-      <img src="{{ order.image_url }}" alt="{{ order.auction_title }}">
+      <img src="{{ order.image_url }}" alt="{{ order.auction_title }}" loading="lazy" decoding="async">
 
       <h3>{{ order.auction_title }}</h3>
 

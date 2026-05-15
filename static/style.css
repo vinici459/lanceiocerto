@@ -176,3 +176,13 @@
 .chat-form input{margin-top:0}
 .chat-form .btn{flex:0 0 auto}
 @media(max-width:520px){.price-box,.meta-grid{grid-template-columns:1fr}.chat-form{flex-direction:column;align-items:stretch}}
+
+/* Otimização de performance: reduz custo de pintura/animação em aparelhos fracos */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    scroll-behavior:auto!important;
+    transition-duration:.01ms!important;
+  }
+}
