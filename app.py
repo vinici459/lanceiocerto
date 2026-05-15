@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -33,8 +34,9 @@ from sqlalchemy import (
     desc,
     inspect,
     text,
+    func,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker, selectinload
 
 
 APP_NAME = "Lanceio Certo"
@@ -354,6 +356,7 @@ class ConnectionManager:
 
 
 app = FastAPI(title=APP_NAME)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -964,10 +967,14 @@ def user_stats(db: Session, user: User) -> dict:
 
 
 def build_returned_items(db: Session) -> list[dict]:
+    # Carrega os pedidos expirados com produto e usuário em lote.
+    # Antes, order.auction/order.user podiam gerar consultas extras durante o loop.
     expired_orders = (
         db.query(WinnerOrder)
+        .options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user))
         .filter(WinnerOrder.status == "expired")
         .order_by(desc(WinnerOrder.expired_at), desc(WinnerOrder.created_at))
+        .limit(80)
         .all()
     )
     returned = []
@@ -1006,15 +1013,32 @@ def build_returned_items(db: Session) -> list[dict]:
     return returned
 
 
+def _sum_scalar(db: Session, expr, *filters) -> float:
+    query = db.query(func.coalesce(func.sum(expr), 0.0))
+    if filters:
+        query = query.filter(*filters)
+    return BR(query.scalar() or 0.0)
+
+
 def build_finance_dashboard(db: Session) -> dict:
-    items = db.query(AuctionItem).all()
-    total_fees = BR(sum((x.total_bid_fees or 0.0) for x in items))
-    total_bid_spent = BR(sum((x.total_bid_spent or 0.0) for x in items))
-    paid_orders = db.query(WinnerOrder).filter(WinnerOrder.status.in_(["paid", "processing", "purchased", "sent", "delivered"])).all()
-    total_payments = BR(sum((o.final_price or 0.0) for o in paid_orders))
-    user_wallet_total = BR(sum((u.wallet_balance or 0.0) for u in db.query(User).all()))
-    pending_withdrawals = BR(sum((w.amount or 0.0) for w in db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").all()))
-    expected_outgoing = BR(sum((o.auction.source_price or 0.0) for o in paid_orders if o.status in ["paid", "processing", "purchased"]) + pending_withdrawals)
+    # Agregações direto no banco: evita carregar todos os produtos, usuários e pedidos em memória.
+    paid_statuses = ["paid", "processing", "purchased", "sent", "delivered"]
+    outgoing_statuses = ["paid", "processing", "purchased"]
+
+    total_fees = _sum_scalar(db, AuctionItem.total_bid_fees)
+    total_bid_spent = _sum_scalar(db, AuctionItem.total_bid_spent)
+    total_payments = _sum_scalar(db, WinnerOrder.final_price, WinnerOrder.status.in_(paid_statuses))
+    user_wallet_total = _sum_scalar(db, User.wallet_balance)
+    pending_withdrawals = _sum_scalar(db, WithdrawalRequest.amount, WithdrawalRequest.status == "pending")
+
+    expected_products = BR(
+        db.query(func.coalesce(func.sum(AuctionItem.source_price), 0.0))
+        .join(WinnerOrder, WinnerOrder.auction_id == AuctionItem.id)
+        .filter(WinnerOrder.status.in_(outgoing_statuses))
+        .scalar()
+        or 0.0
+    )
+    expected_outgoing = BR(expected_products + pending_withdrawals)
     total_income = BR(total_bid_spent + total_fees + total_payments)
     net_result = BR(total_income - expected_outgoing)
     return {
@@ -1053,7 +1077,7 @@ def build_cashflow_movements(db: Session) -> list[dict]:
 
 def build_auction_results(db: Session) -> list[dict]:
     rows = []
-    for item in db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).all():
+    for item in db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(120).all():
         source_price = BR(item.source_price or 0.0)
         final_price = BR(item.current_price or 0.0)
         fees_total = BR(item.total_bid_fees or 0.0)
@@ -1100,7 +1124,21 @@ def order_direct_messages(db: Session, order_id: int) -> list[AdminDirectMessage
 
 
 def build_admin_order_cards(db: Session, orders: list[WinnerOrder]) -> list[dict]:
-    return [{"order": o, "finance": admin_order_finance(o), "messages": order_direct_messages(db, o.id)} for o in orders]
+    """Monta cards do admin sem fazer uma consulta de mensagens por pedido."""
+    order_ids = [o.id for o in orders]
+    messages_by_order: dict[int, list[AdminDirectMessage]] = defaultdict(list)
+    if order_ids:
+        messages = (
+            db.query(AdminDirectMessage)
+            .filter(AdminDirectMessage.order_id.in_(order_ids))
+            .order_by(desc(AdminDirectMessage.created_at))
+            .limit(300)
+            .all()
+        )
+        for msg in messages:
+            if len(messages_by_order[msg.order_id]) < 5:
+                messages_by_order[msg.order_id].append(msg)
+    return [{"order": o, "finance": admin_order_finance(o), "messages": messages_by_order.get(o.id, [])} for o in orders]
 
 
 def build_order_card(order: WinnerOrder) -> dict:
@@ -1199,16 +1237,23 @@ def user_today_suggestion_vote(db: Session, user: Optional[User]) -> Optional[Pr
 
 
 def suggestion_vote_stats(db: Session) -> list[dict]:
-    total_votes = db.query(ProductSuggestionVote).count()
+    """Estatísticas de indicação em uma única consulta agregada.
+
+    Antes havia um count() para o total e mais um count() por produto.
+    Com muitos acessos simultâneos, isso aumenta o tempo de resposta da home/admin.
+    """
+    grouped = (
+        db.query(ProductSuggestionVote.product_key, func.count(ProductSuggestionVote.id))
+        .group_by(ProductSuggestionVote.product_key)
+        .all()
+    )
+    votes_by_key = {key: int(total or 0) for key, total in grouped}
+    total_votes = sum(votes_by_key.values())
     rows = []
     for product in SUGGESTION_PRODUCTS:
-        votes = db.query(ProductSuggestionVote).filter(ProductSuggestionVote.product_key == product["key"]).count()
+        votes = votes_by_key.get(product["key"], 0)
         percent = round((votes / total_votes) * 100, 2) if total_votes else 0.0
-        rows.append({
-            **product,
-            "votes": votes,
-            "percent": percent,
-        })
+        rows.append({**product, "votes": votes, "percent": percent})
     rows.sort(key=lambda item: item["votes"], reverse=True)
     return rows
 
@@ -1272,6 +1317,28 @@ def ensure_columns() -> None:
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE winner_orders ADD COLUMN {name} {ddl}"))
+
+
+        # Índices leves para as consultas mais repetidas da home, conta, admin e leilão.
+        # CREATE INDEX IF NOT EXISTS funciona em SQLite e PostgreSQL.
+        for ddl in [
+            "CREATE INDEX IF NOT EXISTS ix_auction_items_status_created ON auction_items (status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_auction_items_status_start ON auction_items (status, scheduled_start)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_auction_created ON bids (auction_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_user ON bids (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_winner_orders_user_status_created ON winner_orders (user_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_winner_orders_auction_created ON winner_orders (auction_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_user_created ON wallet_transactions (user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_withdrawals_user_created ON withdrawal_requests (user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_support_tickets_user_created ON support_tickets (user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_key ON product_suggestion_votes (product_key)",
+            "CREATE INDEX IF NOT EXISTS ix_cashback_events_auction ON cashback_events (auction_id)",
+        ]:
+            try:
+                conn.execute(text(ddl))
+            except Exception:
+                pass
 
 
 def save_uploaded_image(file: Optional[UploadFile]) -> str:
@@ -1982,11 +2049,20 @@ def my_account(request: Request):
         stats = user_stats(db, user)
         pending_orders = (
             db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
             .order_by(desc(WinnerOrder.created_at))
+            .limit(10)
             .all()
         )
-        won_orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(50).all()
+        won_orders = (
+            db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
+            .filter(WinnerOrder.user_id == user.id)
+            .order_by(desc(WinnerOrder.created_at))
+            .limit(30)
+            .all()
+        )
         latest = [build_order_card(x) for x in won_orders[:5]]
         pending = [build_order_card(x) for x in pending_orders[:3]]
         return templates.TemplateResponse(
@@ -2252,10 +2328,31 @@ def my_expired_orders(request: Request):
 
 
 def build_finished_auctions(db: Session) -> list[dict]:
-    rows = []
+    # Evita uma consulta de WinnerOrder para cada leilão finalizado.
     finished_status = ["ended", "delivered", "expired"]
-    for item in db.query(AuctionItem).filter(AuctionItem.status.in_(finished_status)).order_by(desc(AuctionItem.created_at)).all():
-        order = db.query(WinnerOrder).filter(WinnerOrder.auction_id == item.id).order_by(desc(WinnerOrder.created_at)).first()
+    items = (
+        db.query(AuctionItem)
+        .options(selectinload(AuctionItem.winner))
+        .filter(AuctionItem.status.in_(finished_status))
+        .order_by(desc(AuctionItem.created_at))
+        .limit(80)
+        .all()
+    )
+    item_ids = [item.id for item in items]
+    latest_order_by_auction: dict[int, WinnerOrder] = {}
+    if item_ids:
+        orders = (
+            db.query(WinnerOrder)
+            .filter(WinnerOrder.auction_id.in_(item_ids))
+            .order_by(desc(WinnerOrder.created_at))
+            .all()
+        )
+        for order in orders:
+            latest_order_by_auction.setdefault(order.auction_id, order)
+
+    rows = []
+    for item in items:
+        order = latest_order_by_auction.get(item.id)
         source_price = BR(item.source_price or 0.0)
         final_price = BR((order.final_price if order else item.current_price) or 0.0)
         fees_total = BR(item.total_bid_fees or 0.0)
@@ -2274,15 +2371,38 @@ def build_finished_auctions(db: Session) -> list[dict]:
 
 
 def user_audit_map(db: Session, users: list[User]) -> dict[int, dict]:
-    data = {}
-    for u in users:
-        data[u.id] = {
-            "bids": db.query(Bid).filter(Bid.user_id == u.id).count(),
-            "orders": db.query(WinnerOrder).filter(WinnerOrder.user_id == u.id).count(),
-            "transactions": db.query(WalletTransaction).filter(WalletTransaction.user_id == u.id).order_by(desc(WalletTransaction.created_at)).limit(10).all(),
-            "withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id == u.id).order_by(desc(WithdrawalRequest.created_at)).limit(10).all(),
-            "tickets": db.query(SupportTicket).filter(SupportTicket.user_id == u.id).order_by(desc(SupportTicket.created_at)).limit(10).all(),
+    # Versão em lote. A anterior fazia várias consultas por usuário.
+    user_ids = [u.id for u in users]
+    if not user_ids:
+        return {}
+
+    def grouped_count(model, column):
+        return {
+            user_id: int(total or 0)
+            for user_id, total in db.query(column, func.count(model.id)).filter(column.in_(user_ids)).group_by(column).all()
         }
+
+    bid_counts = grouped_count(Bid, Bid.user_id)
+    order_counts = grouped_count(WinnerOrder, WinnerOrder.user_id)
+
+    data = {u.id: {"bids": bid_counts.get(u.id, 0), "orders": order_counts.get(u.id, 0), "transactions": [], "withdrawals": [], "tickets": []} for u in users}
+
+    transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id.in_(user_ids)).order_by(desc(WalletTransaction.created_at)).limit(300).all()
+    withdrawals = db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id.in_(user_ids)).order_by(desc(WithdrawalRequest.created_at)).limit(300).all()
+    tickets = db.query(SupportTicket).filter(SupportTicket.user_id.in_(user_ids)).order_by(desc(SupportTicket.created_at)).limit(300).all()
+
+    for tx in transactions:
+        bucket = data.get(tx.user_id)
+        if bucket is not None and len(bucket["transactions"]) < 10:
+            bucket["transactions"].append(tx)
+    for wd in withdrawals:
+        bucket = data.get(wd.user_id)
+        if bucket is not None and len(bucket["withdrawals"]) < 10:
+            bucket["withdrawals"].append(wd)
+    for ticket in tickets:
+        bucket = data.get(ticket.user_id)
+        if bucket is not None and len(bucket["tickets"]) < 10:
+            bucket["tickets"].append(ticket)
     return data
 
 
@@ -2306,25 +2426,24 @@ def admin_dashboard(request: Request):
         if search:
             like = f"%{search}%"
             users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-        users = users_query.order_by(desc(User.created_at)).limit(60).all()
-        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(80).all()
+        users = users_query.order_by(desc(User.created_at)).limit(40).all()
+        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(40).all()
         for item in items:
             item.collected_percent = auction_progress_percent(item)
             item.cash_reserved = auction_cash_reserved_before_payment(item)
             item.expected_total_if_paid = auction_total_if_paid(item)
             item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
-        orders = db.query(WinnerOrder).order_by(desc(WinnerOrder.created_at)).limit(80).all()
+        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(50).all()
         pending_payment_orders = [o for o in orders if o.status == "pending_payment"]
         shipping_orders = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
         consultation_orders = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
-        withdrawal_requests = db.query(WithdrawalRequest).order_by(desc(WithdrawalRequest.created_at)).limit(80).all()
-        support_tickets = db.query(SupportTicket).order_by(desc(SupportTicket.created_at)).limit(80).all()
+        withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(40).all()
+        support_tickets = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(40).all()
         admin_order_cards = build_admin_order_cards(db, orders)
         returned_items = build_returned_items(db)
         finance = build_finance_dashboard(db)
         cashflow_movements = build_cashflow_movements(db)
         auction_results = build_auction_results(db)
-        returned_items = build_returned_items(db)
         stats = {
             "users": db.query(User).count(),
             "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
@@ -2354,15 +2473,15 @@ def admin_dashboard(request: Request):
                 "withdrawal_requests": withdrawal_requests,
                 "support_tickets": support_tickets,
                 "user_audit": user_audit_map(db, users),
-                "audit_logs": db.query(AuditLog).order_by(desc(AuditLog.created_at)).limit(80).all(),
+                "audit_logs": db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(40).all(),
                 "search": search,
                 "finished_auctions": build_finished_auctions(db),
                 "returned_items": returned_items,
                 "finance": finance,
                 "cashflow_movements": cashflow_movements,
                 "auction_results": auction_results,
-                "recent_chat_messages": db.query(ChatMessage).order_by(desc(ChatMessage.created_at)).limit(40).all(),
-                "moderation_users": db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).all(),
+                "recent_chat_messages": db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(25).all(),
+                "moderation_users": db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(40).all(),
                 "payment_deadline_minutes": PAYMENT_DEADLINE_MINUTES,
                 "returned_items": returned_items,
                 "suggestion_vote_stats": suggestion_vote_stats(db),
