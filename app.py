@@ -451,14 +451,14 @@ TURBO_4_SECONDS = {
     0.10: 11,
 }
 
-# Cooldown visual e operacional do botão após cada lance.
-# Regra solicitada: normal 20s, Turbo 2.0 30s, Turbo 4.0 40s.
-# Turbo 3.0 fica no meio para manter progressão natural sem alterar a lógica do relógio do leilão.
+# Cooldown visual e operacional após cada lance.
+# Regra atual: modo normal 20s; qualquer modo turbo 30s.
+# O cooldown é aplicado para todos os botões do usuário naquele leilão, evitando clique em sequência.
 BID_COOLDOWN_NORMAL_SECONDS = 20
 TURBO_BUTTON_COOLDOWN_SECONDS = {
     2: 30,
-    3: 35,
-    4: 40,
+    3: 30,
+    4: 30,
 }
 TURBO_GLOBAL_COOLDOWN_SECONDS = TURBO_BUTTON_COOLDOWN_SECONDS
 TURBO_AUCTION_COOLDOWN_UNTIL: dict[int, datetime] = {}
@@ -1017,7 +1017,7 @@ def public_auction_payload(item: AuctionItem, db: Session) -> dict:
     }
 
 
-def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashback: bool = False) -> dict:
+def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashback: bool = False, bids_count_override: Optional[int] = None, last_bidder_override: Optional[str] = None) -> dict:
     """Payload leve para atualizações em tempo real do leilão.
 
     O endpoint de lance precisa ser rápido. O payload completo chama cashback e
@@ -1027,18 +1027,24 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
     """
     if item.status in {"scheduled", "relisted"}:
         bids_count = 0
-        last_bid = None
         last_bidder = None
     else:
-        bids_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
-        last_bid = (
-            db.query(Bid)
-            .options(selectinload(Bid.user))
-            .filter(Bid.auction_id == item.id)
-            .order_by(desc(Bid.created_at))
-            .first()
-        )
-        last_bidder = public_user_name(last_bid.user) if last_bid else None
+        if bids_count_override is None:
+            bids_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
+        else:
+            bids_count = int(bids_count_override or 0)
+
+        if last_bidder_override is not None:
+            last_bidder = last_bidder_override
+        else:
+            last_bid = (
+                db.query(Bid)
+                .options(selectinload(Bid.user))
+                .filter(Bid.auction_id == item.id)
+                .order_by(desc(Bid.created_at))
+                .first()
+            )
+            last_bidder = public_user_name(last_bid.user) if last_bid else None
 
     now = datetime.utcnow()
     remaining = 0
@@ -1504,6 +1510,7 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_auction_items_status_start ON auction_items (status, scheduled_start)",
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_created ON bids (auction_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bids_user ON bids (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_created ON bids (auction_id, user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_user_status_created ON winner_orders (user_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_auction_created ON winner_orders (auction_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_user_created ON wallet_transactions (user_id, created_at)",
@@ -2178,7 +2185,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
     button_cooldown = 0
 
     # Serializa lances do mesmo leilão dentro deste processo.
-    # Isso evita clique duplo/race condition gerando contagem, preço e último lance inconsistentes.
+    # Evita clique duplo/race condition gerando preço, relógio e último lance inconsistentes.
     async with AUCTION_BID_LOCKS[auction_id]:
         db = SessionLocal()
         try:
@@ -2204,27 +2211,33 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             active_turbo = compute_turbo_level(item)
             button_cooldown = bid_button_cooldown_seconds(bid_value, active_turbo)
 
-            previous_user_bid_count = db.query(func.count(Bid.id)).filter(
-                Bid.auction_id == item.id,
-                Bid.user_id == user.id,
-            ).scalar() or 0
-            if active_turbo >= 2 and previous_user_bid_count <= 0:
-                raise HTTPException(status_code=403, detail="O modo turbo é exclusivo para quem já participou deste leilão antes da ativação.")
-
-            last_same_button = (
+            # Cooldown correto: depois de qualquer lance, o usuário precisa aguardar
+            # antes de usar qualquer outro botão no mesmo leilão.
+            last_user_bid = (
                 db.query(Bid.created_at)
-                .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
+                .filter(Bid.auction_id == item.id, Bid.user_id == user.id)
                 .order_by(desc(Bid.created_at))
                 .first()
             )
-            if last_same_button:
-                elapsed = (now - last_same_button[0]).total_seconds()
+
+            if active_turbo >= 2 and not last_user_bid:
+                raise HTTPException(status_code=403, detail="O modo turbo é exclusivo para quem já participou deste leilão antes da ativação.")
+
+            if last_user_bid:
+                elapsed = (now - last_user_bid[0]).total_seconds()
                 if elapsed < button_cooldown:
                     remaining_cd = math.ceil(button_cooldown - elapsed)
                     return JSONResponse(
-                        {"ok": False, "detail": f"Aguarde {remaining_cd}s para usar esse botão novamente.", "retry_after": remaining_cd},
+                        {
+                            "ok": False,
+                            "detail": f"Aguarde {remaining_cd}s para dar outro lance.",
+                            "retry_after": remaining_cd,
+                            "cooldown_scope": "all",
+                        },
                         status_code=429,
                     )
+
+            previous_total_bid_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
 
             fee_value = 0.0
             increment = BR(bid_value)
@@ -2257,8 +2270,14 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             db.commit()
             db.refresh(item)
 
-            payload = public_auction_live_payload(item, db)
+            payload = public_auction_live_payload(
+                item,
+                db,
+                bids_count_override=previous_total_bid_count + 1,
+                last_bidder_override=public_user_name(user),
+            )
             payload["button_cooldown"] = button_cooldown
+            payload["cooldown_scope"] = "all"
             payload["bid_value"] = bid_value
             payload["server_time"] = datetime.utcnow().isoformat()
         finally:
@@ -2266,8 +2285,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
 
     if payload:
         asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
-    return JSONResponse({"ok": True, "auction": payload, "button_cooldown": button_cooldown})
-
+    return JSONResponse({"ok": True, "auction": payload, "button_cooldown": button_cooldown, "cooldown_scope": "all"})
 
 @app.get("/api/auction/{auction_id}/state")
 async def auction_state(request: Request, auction_id: int):

@@ -397,6 +397,7 @@ window.__AUCTION__ = {{ item | tojson }};
   let wsReconnectTimer = null;
   let stateFetchInFlight = false;
   let lastZeroSyncAt = 0;
+  let allButtonCooldown = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
 
@@ -424,15 +425,24 @@ window.__AUCTION__ = {{ item | tojson }};
   }
   function cooldownForCurrentMode(){
     const level = Number(auction.turbo_level || 0);
-    if(level >= 4) return 40;
-    if(level >= 3) return 35;
     if(level >= 2) return 30;
     return 20;
   }
-  function applyButtonCooldown(value, seconds){
-    const key = bidKey(value);
+  function applyButtonCooldown(value, seconds, scope="all"){
     const cd = Math.max(0, Math.ceil(Number(seconds || cooldownForCurrentMode())));
-    if(cd > 0) cooldowns[key] = cd;
+    if(cd <= 0){
+      renderButtons();
+      return;
+    }
+
+    // Regra atual: após qualquer lance, todos os botões ficam em contagem.
+    if(scope === "all"){
+      allButtonCooldown = Math.max(allButtonCooldown, cd);
+    } else {
+      const key = bidKey(value);
+      cooldowns[key] = Math.max(Number(cooldowns[key] || 0), cd);
+    }
+
     renderButtons();
   }
   function setFeedback(text){
@@ -441,7 +451,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function renderButton(btn){
     const key = bidKey(btn.dataset.bid);
-    const cd = Number(cooldowns[key] || 0);
+    const cd = Math.max(Number(cooldowns[key] || 0), Number(allButtonCooldown || 0));
     const busy = Boolean(pendingBids[key]);
     const canBid = isLive(status());
 
@@ -563,7 +573,7 @@ window.__AUCTION__ = {{ item | tojson }};
     renderButtons();
   }
 
-  async function fetchJson(url, options={}, timeoutMs=4500){
+  async function fetchJson(url, options={}, timeoutMs=8000){
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try{
@@ -575,14 +585,14 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
-  async function fetchState(reason="fallback"){
+  async function fetchState(reason="fallback", timeoutMs=8000){
     if(!auctionId || stateFetchInFlight) return;
     stateFetchInFlight = true;
     try{
-      const {res, json} = await fetchJson(`/api/auction/${auctionId}/state`, {}, 4000);
+      const {res, json} = await fetchJson(`/api/auction/${auctionId}/state`, {}, timeoutMs);
       if(res.ok && json.ok && json.auction) applyAuctionState(json.auction, reason);
     } catch(e){
-      // silencioso: o relógio local continua; websocket/polling recupera depois.
+      // O relógio local continua; a próxima tentativa confirma o estado no servidor.
     } finally {
       stateFetchInFlight = false;
     }
@@ -599,10 +609,12 @@ window.__AUCTION__ = {{ item | tojson }};
         const nowMs = Date.now();
         if(nowMs - lastZeroSyncAt >= 1000){
           lastZeroSyncAt = nowMs;
-          fetchState(isScheduled(s) ? "start-zero-retry" : "end-zero-retry");
+          fetchState(isScheduled(s) ? "start-zero-retry" : "end-zero-retry", 9000);
         }
       }
     }
+
+    allButtonCooldown = Math.max(0, Number(allButtonCooldown || 0) - 1);
 
     Object.keys(cooldowns).forEach((key) => {
       cooldowns[key] = Math.max(0, Number(cooldowns[key] || 0) - 1);
@@ -621,11 +633,11 @@ window.__AUCTION__ = {{ item | tojson }};
 
   // Polling só como fallback. Com websocket ativo, não fica batendo no backend o tempo todo.
   setInterval(() => {
-    if(!wsConnected) fetchState("ws-offline");
-  }, 7000);
+    if(!wsConnected) fetchState("ws-offline", 8000);
+  }, 5000);
 
-  // Uma sincronização leve a cada 30s evita drift sem inundar o Railway.
-  setInterval(() => fetchState("slow-sync"), 30000);
+  // Uma sincronização leve evita drift sem inundar o Railway.
+  setInterval(() => fetchState("slow-sync", 8000), 20000);
 
   document.querySelectorAll(".bid-btn").forEach((btn) => {
     btn.dataset.bid = bidKey(btn.dataset.bid);
@@ -634,25 +646,26 @@ window.__AUCTION__ = {{ item | tojson }};
       if(btn.disabled || pendingBids[value]) return;
 
       pendingBids[value] = true;
-      renderButtons();
+      // Mostra a contagem na hora do clique, sem esperar o Railway responder.
+      applyButtonCooldown(value, cooldownForCurrentMode(), "all");
 
       const form = new FormData();
       form.append("bid_value", value);
 
       let bidResponse = null;
       try{
-        bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 5000);
+        bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 9000);
         const {res, json} = bidResponse;
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
         setFeedback("");
         applyAuctionState(json.auction, "bid");
-        applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode());
+        applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(), json.cooldown_scope || json.auction?.cooldown_scope || "all");
       } catch(err){
         const msg = err?.name === "AbortError"
           ? "Conexão lenta. Atualizando o leilão..."
           : (err?.message || "Não foi possível confirmar o lance agora.");
         setFeedback(msg);
-        if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after);
+        if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "all");
         fetchState("bid-error");
       } finally {
         delete pendingBids[value];
@@ -740,7 +753,7 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   applyAuctionState(auction, "initial");
-  if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero");
+  if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero", 9000);
 })();
 </script>
 {% endblock %}
