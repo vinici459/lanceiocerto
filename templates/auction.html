@@ -628,6 +628,98 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
+  function cashbackCard(){
+    return document.getElementById("cashback-card");
+  }
+
+  function bindJoinCashbackButton(){
+    const btn = document.getElementById("join-cashback-btn");
+    if(!btn || btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Entrando no sorteio...";
+      try{
+        const {res, json} = await fetchJson(`/api/auction/${auctionId}/cashback/join`, {method:"POST"}, 5000);
+        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível entrar no cashback.");
+        btn.textContent = "Você já está participando";
+        const state = await fetchJson(`/api/auction/${auctionId}/state`, {}, 5000);
+        if(state.res.ok && state.json.ok && state.json.auction) applyAuctionState(state.json.auction, "cashback-join");
+      } catch(err){
+        btn.disabled = false;
+        btn.textContent = err?.message || "Tentar novamente";
+      }
+    });
+  }
+
+  function renderCashback(){
+    const cashback = auction.cashback || {};
+    let card = cashbackCard();
+
+    if(!cashback.available){
+      if(card) card.style.display = "none";
+      return;
+    }
+
+    if(!card){
+      card = document.createElement("div");
+      card.className = "strategy-card cashback-card cashback-just-opened";
+      card.id = "cashback-card";
+      const anchor = els.stateAlert || els.bidForm || els.turboAnnouncement;
+      if(anchor && anchor.parentNode){
+        anchor.parentNode.insertBefore(card, anchor.nextSibling);
+      } else if(els.layout){
+        els.layout.appendChild(card);
+      }
+    }
+
+    card.style.display = "block";
+    const status = String(cashback.status || "");
+    cashbackRemaining = Number(cashback.join_remaining_seconds || 0);
+
+    if(status === "open"){
+      if(cashback.joined){
+        card.innerHTML = `
+          <div class="strategy-top">
+            <span class="turbo-badge">🎁 Cashback do leilão</span>
+            <strong id="cashback-status">Você já está participando</strong>
+          </div>
+          <p>Você já entrou no sorteio. Se for sorteado, recebe de volta o valor usado somente neste leilão.</p>
+        `;
+      } else {
+        card.innerHTML = `
+          <div class="strategy-top">
+            <span class="turbo-badge">🎁 Cashback do leilão</span>
+            <strong id="cashback-status">Participe em até <span id="cashback-countdown" data-seconds="${cashbackRemaining}">${timeLabel(cashbackRemaining)}</span></strong>
+          </div>
+          <p>Quem participou deste leilão pode entrar no sorteio aleatório para receber de volta o valor usado somente neste leilão.</p>
+          <button class="btn full" type="button" id="join-cashback-btn">Participar do sorteio de cashback</button>
+        `;
+        bindJoinCashbackButton();
+      }
+    } else if(status === "drawn"){
+      card.innerHTML = `
+        <div class="strategy-top">
+          <span class="turbo-badge">🎁 Cashback do leilão</span>
+          <strong id="cashback-status">Sorteado: ${cashback.winner_name || "—"}</strong>
+        </div>
+        <p>Vencedor público do cashback: <strong>${cashback.winner_name || "—"}</strong>. Valor: <strong>${moneyBR(cashback.cashback_amount || 0)}</strong>.</p>
+      `;
+    } else {
+      card.innerHTML = `
+        <div class="strategy-top">
+          <span class="turbo-badge">🎁 Cashback do leilão</span>
+          <strong id="cashback-status">Encerrado</strong>
+        </div>
+        <p>O prazo de participação foi encerrado.</p>
+      `;
+    }
+
+    els.cashbackCountdown = document.getElementById("cashback-countdown");
+    els.joinCashbackBtn = document.getElementById("join-cashback-btn");
+    bindJoinCashbackButton();
+  }
+
   function renderControls(s){
     const live = isLive(s);
     const scheduled = isScheduled(s);
@@ -711,6 +803,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
     renderControls(s);
     renderChat();
+    renderCashback();
     renderButtons();
   }
 
@@ -798,11 +891,12 @@ window.__AUCTION__ = {{ item | tojson }};
       }
 
       pendingBids[value] = true;
-      // Não altera preço/lances localmente. O backend é a fonte da verdade.
-      // O botão clicado entra em cooldown visual imediatamente, mas a grade não
-      // fica com contagem falsa nem aplica turbo local antes da confirmação.
+      // Resposta visual instantânea: o usuário vê o lance na hora, sem esperar
+      // o POST voltar. O servidor continua sendo a fonte da verdade e corrige
+      // qualquer diferença assim que confirmar.
+      applyOptimisticBid(value);
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
-      setFeedback("Registrando lance...");
+      setFeedback("Lance enviado. Confirmando...");
 
       const form = new FormData();
       form.append("bid_value", value);
@@ -883,20 +977,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
   connectSocket();
 
-  if(els.joinCashbackBtn){
-    els.joinCashbackBtn.addEventListener("click", async () => {
-      els.joinCashbackBtn.disabled = true;
-      els.joinCashbackBtn.textContent = "Entrando no sorteio...";
-      try{
-        const {res, json} = await fetchJson(`/api/auction/${auctionId}/cashback/join`, {method:"POST"}, 5000);
-        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível entrar no cashback.");
-        els.joinCashbackBtn.textContent = "Você já está participando";
-      } catch(err){
-        els.joinCashbackBtn.disabled = false;
-        els.joinCashbackBtn.textContent = err?.message || "Tentar novamente";
-      }
-    });
-  }
+  bindJoinCashbackButton();
 
   if(els.chatForm){
     els.chatForm.addEventListener("submit", async (event) => {

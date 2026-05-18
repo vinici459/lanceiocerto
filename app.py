@@ -1259,8 +1259,11 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "chat_open": auction_chat_is_open(item),
         "button_cooldown": bid_button_cooldown_seconds(0.10, level),
     }
-    if include_cashback:
-        payload["cashback"] = cashback_payload(item, db)
+    # Durante lances, o payload fica leve. Porém quando o leilão encerra
+    # precisa levar o cashback junto; caso contrário a tela só muda para
+    # aguardando pagamento e o card do cashback não nasce dinamicamente.
+    if include_cashback or item.status in {"pending_payment", "ended"}:
+        payload["cashback"] = cashback_payload(item, db, user=user)
     return payload
 
 
