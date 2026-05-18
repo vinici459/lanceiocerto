@@ -200,8 +200,6 @@
   <div class="section-head"><div><h1>Meu Cadastro</h1><p>Dados básicos, acesso e endereço principal.</p></div></div>
   <div class="profile-grid">
     <div><span>Apelido público</span><strong>@{{ user.public_name or user.nickname }}</strong></div>
-    <div><span>Apelido público</span><strong class="account-public-name {{ 'verified-name' if user.identity_status == 'verified' else 'pending-name' }}">{{ '@' ~ user.public_name if user.public_name else (user.username or user.nickname or user.user or '—') }}</strong></div>
-    <div><span>Status documental</span><strong class="{{ 'verified-name' if user.identity_status == 'verified' else 'pending-name' }}">{{ 'Conta verificada' if user.identity_status == 'verified' else ('Documentos recusados' if user.identity_status == 'rejected' else 'Documentos pendentes/em análise') }}</strong></div>
     <div><span>E-mail</span><strong>{{ user.email }}</strong></div>
     <div><span>CPF</span><strong>{{ user.cpf or '—' }}</strong></div>
     <div><span>Telefone</span><strong>{{ user.phone or '—' }}</strong></div>
@@ -211,6 +209,53 @@
     <div><span>Bairro</span><strong>{{ user.district or '—' }}</strong></div>
     <div><span>Cidade</span><strong>{{ user.city or '—' }}</strong></div>
     <div><span>Estado</span><strong>{{ user.state or '—' }}</strong></div>
+  </div>
+</div>
+
+<div class="panel-card account-doc-status-card {{ user.identity_status or 'pending' }}">
+  <div class="doc-status-header">
+    <div>
+      <span class="eyebrow">Verificação documental</span>
+      {% if user.identity_status == 'verified' %}
+        <h2>Documentos aprovados</h2>
+        <p>Sua conta foi conferida pelo administrador. Entregas e saques ficam liberados conforme as regras da plataforma.</p>
+      {% elif user.identity_status == 'rejected' %}
+        <h2>Correção necessária</h2>
+        <p>Algum documento precisa ser reenviado. Confira a observação abaixo e envie uma nova versão legível.</p>
+      {% else %}
+        <h2>Documentos recebidos e em análise</h2>
+        <p>Seus documentos ficam na fila de conferência do administrador. Enquanto isso, o status aparece como pendente/em análise.</p>
+      {% endif %}
+    </div>
+    <span class="doc-status-pill {{ user.identity_status or 'pending' }}">
+      {% if user.identity_status == 'verified' %}Aprovado{% elif user.identity_status == 'rejected' %}Reenviar{% else %}Em análise{% endif %}
+    </span>
+  </div>
+
+  {% if user.identity_note %}
+  <div class="doc-admin-note">
+    <strong>Observação do administrador</strong>
+    <span>{{ user.identity_note }}</span>
+  </div>
+  {% endif %}
+
+  <div class="doc-progress-line">
+    <div class="doc-step done"><strong>1</strong><span>Cadastro enviado</span></div>
+    <div class="doc-step {{ 'done' if user.document_file_url else '' }}"><strong>2</strong><span>Documento</span></div>
+    <div class="doc-step {{ 'done' if user.selfie_file_url else '' }}"><strong>3</strong><span>Selfie</span></div>
+    <div class="doc-step {{ 'done' if user.identity_status == 'verified' else '' }}"><strong>4</strong><span>Aprovação</span></div>
+  </div>
+
+  <div class="doc-check-grid">
+    <div><span>Frente do documento</span><strong class="{{ 'verified-name' if user.document_file_url else 'pending-name' }}">{{ 'Enviado' if user.document_file_url else 'Pendente' }}</strong></div>
+    <div><span>Verso do documento</span><strong class="{{ 'verified-name' if user.document_back_file_url else 'pending-name' }}">{{ 'Enviado' if user.document_back_file_url else 'Não enviado' }}</strong></div>
+    <div><span>Selfie atual</span><strong class="{{ 'verified-name' if user.selfie_file_url else 'pending-name' }}">{{ 'Enviada' if user.selfie_file_url else 'Pendente' }}</strong></div>
+    <div><span>Comprovante de residência</span><strong class="{{ 'verified-name' if user.residence_proof_file_url else 'pending-name' }}">{{ 'Enviado' if user.residence_proof_file_url else 'Recomendado' }}</strong></div>
+  </div>
+
+  <div class="doc-actions-row">
+    <a href="/minha-conta/verificacao" class="btn">{{ 'Reenviar documentos' if user.identity_status == 'rejected' else 'Editar/Reenviar documentos' }}</a>
+    <small>Ao reenviar, sua conta volta para análise e o administrador verá os novos arquivos.</small>
   </div>
 </div>
 
@@ -584,6 +629,10 @@
 </main>
 </div>
 {% endblock %}
+
+<style>
+.account-doc-status-card{border-color:rgba(96,165,250,.28);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(15,23,42,.82))}.doc-status-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}.doc-status-header h2{margin:4px 0 6px;font-size:24px}.doc-status-header p{margin:0;color:#b7c6e6;line-height:1.45}.doc-status-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:999px;font-weight:900;white-space:nowrap;border:1px solid rgba(251,191,36,.38);background:rgba(251,191,36,.12);color:#fde68a}.doc-status-pill.verified{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.12);color:#bbf7d0}.doc-status-pill.rejected{border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.12);color:#fecaca}.doc-admin-note{display:grid;gap:5px;margin:12px 0 16px;padding:13px 14px;border-radius:15px;border:1px solid rgba(96,165,250,.26);background:rgba(37,99,235,.10)}.doc-admin-note span{color:#dbeafe}.doc-progress-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}.doc-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#b7c6e6;font-weight:800}.doc-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff}.doc-step.done{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08);color:#dcfce7}.doc-step.done strong{background:#22c55e;color:#fff}.doc-check-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.doc-check-grid div{border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);border-radius:15px;padding:12px}.doc-check-grid span{display:block;color:#bfdbfe;font-size:13px;margin-bottom:5px}.doc-actions-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}.doc-actions-row small{color:#b7c6e6}@media(max-width:850px){.doc-progress-line,.doc-check-grid{grid-template-columns:1fr}.doc-status-header{flex-direction:column}}
+</style>
 {% block extra_scripts %}
 <script>
 document.addEventListener("DOMContentLoaded", function () {
