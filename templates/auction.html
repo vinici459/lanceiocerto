@@ -657,7 +657,17 @@ window.__AUCTION__ = {{ item | tojson }};
   function applyAuctionState(data, source="unknown"){
     if(!data) return;
     if(data.user_turbo_eligible === null || typeof data.user_turbo_eligible === "undefined"){
-      data = {...data, user_turbo_eligible: auction.user_turbo_eligible};
+      const incomingLevel = Number(data.turbo_level || 0);
+      if(incomingLevel >= 2){
+        // Broadcast por websocket não é personalizado. Ao entrar no turbo, não podemos
+        // preservar o "true" do modo normal para usuários que nunca deram lance.
+        // Bloqueia por segurança e pede um /state personalizado para liberar quem já participou.
+        const alreadyInTurbo = Number(auction.turbo_level || 0) >= 2;
+        data = {...data, user_turbo_eligible: alreadyInTurbo ? auction.user_turbo_eligible : false};
+        if(source === "ws") setTimeout(() => fetchState("turbo-eligibility", 8000), 150);
+      } else {
+        data = {...data, user_turbo_eligible: auction.user_turbo_eligible};
+      }
     }
     if(!shouldAcceptIncomingState(data, source)) return;
 
@@ -740,6 +750,8 @@ window.__AUCTION__ = {{ item | tojson }};
         if(isScheduled(s)){
           activateLiveLocally();
         } else {
+          if(els.countdown) els.countdown.textContent = "Encerrando...";
+          document.querySelectorAll(".bid-btn").forEach((btn) => { btn.disabled = true; btn.classList.add("cooling"); });
           const nowMs = Date.now();
           if(nowMs - lastZeroSyncAt >= 1000){
             lastZeroSyncAt = nowMs;
@@ -784,9 +796,10 @@ window.__AUCTION__ = {{ item | tojson }};
       }
 
       pendingBids[value] = true;
-      // Mostra a contagem e atualiza a tela na hora do clique, sem esperar o Railway responder.
+      // Backend é a fonte única da verdade: não alteramos preço/lances/turbo localmente.
+      // Isso elimina o bug do primeiro lance aparecer e depois voltar.
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
-      applyOptimisticBid(value);
+      setFeedback("Registrando lance...");
 
       const form = new FormData();
       form.append("bid_value", value);
@@ -802,11 +815,13 @@ window.__AUCTION__ = {{ item | tojson }};
       } catch(err){
         const isTimeout = err?.name === "AbortError";
         const msg = isTimeout
-          ? "Conexão lenta. Mantendo o lance na tela enquanto confirmo com o servidor..."
+          ? "Conexão lenta. Aguardando confirmação do servidor..."
           : (err?.message || "Não foi possível confirmar o lance agora.");
         setFeedback(msg);
         if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
-        if(isTimeout){
+        if(bidResponse?.json?.auction){
+          applyAuctionState(bidResponse.json.auction, "bid-error");
+        } else if(isTimeout){
           setTimeout(() => fetchState("slow-bid-confirm", 9000), 1600);
         } else {
           optimisticHoldUntil = 0;

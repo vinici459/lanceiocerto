@@ -837,13 +837,25 @@ def auction_expected_profit_if_paid(item: AuctionItem) -> float:
 
 
 def turbo_base_amount(item: AuctionItem) -> float:
-    base_value = float(getattr(item, "turbo_base_value", 0.0) or 0.0)
-    if base_value > 0:
-        return BR(base_value)
+    """Valor em que o Turbo 2.0 deve começar.
+
+    Regra financeira ajustada:
+    - winner_min_percent é o percentual que o vencedor deve pagar no mínimo (ex.: 50%).
+    - target_profit_percent é a margem desejada sobre o produto (ex.: 10%).
+    - Como o vencedor paga novamente o preço final, a margem desejada entra pela metade no gatilho.
+
+    Ex.: produto R$ 16,00, mínimo 50% e meta 10%:
+    Turbo em 55% = R$ 8,80. O vencedor paga R$ 8,80, totalizando R$ 17,60,
+    com lucro bruto de R$ 1,60 antes de somar as taxas dos lances.
+    """
     source_price = float(getattr(item, "source_price", 0.0) or 0.0)
-    min_pct = float(getattr(item, "winner_min_percent", 50.0) or 50.0)
-    target_pct = float(getattr(item, "target_profit_percent", PLATFORM_PROFIT_PERCENT) or PLATFORM_PROFIT_PERCENT)
-    return BR(source_price * ((min_pct + target_pct) / 100.0))
+    pct = float(getattr(item, "turbo_trigger_percent", 0.0) or 0.0)
+    if pct <= 0:
+        pct = calculate_turbo_trigger_percent(
+            getattr(item, "winner_min_percent", 50.0),
+            getattr(item, "target_profit_percent", PLATFORM_PROFIT_PERCENT),
+        )
+    return BR(source_price * (pct / 100.0))
 
 
 def turbo_trigger_amount(item: AuctionItem) -> float:
@@ -855,8 +867,15 @@ def auction_progress_percent(item: AuctionItem) -> float:
     return round((auction_collected_total(item) / item.source_price) * 100, 2)
 
 def calculate_turbo_trigger_percent(winner_min_percent: float = 50.0, target_profit_percent: float = 10.0) -> float:
-    """Regra simples: preço mínimo desejado + meta de lucro/taxa.
-    Ex.: 50% + 10% = Turbo 2.0 em 60% do preço original.
+    """Calcula o gatilho automático do Turbo 2.0.
+
+    Regra correta definida para o projeto:
+    - O vencedor paga o preço final do leilão.
+    - Então, para buscar 10% de margem sobre o produto, o gatilho não deve ser 50% + 10%,
+      e sim 50% + metade da meta.
+
+    Ex.: produto R$ 16,00, mínimo 50%, meta 10%:
+    50 + (10 / 2) = 55% => Turbo em R$ 8,80, não R$ 9,60.
     """
     try:
         winner_min = float(winner_min_percent)
@@ -866,7 +885,7 @@ def calculate_turbo_trigger_percent(winner_min_percent: float = 50.0, target_pro
         target = float(target_profit_percent)
     except Exception:
         target = 10.0
-    return max(1.0, min(95.0, winner_min + target))
+    return max(1.0, min(95.0, winner_min + (target / 2.0)))
 
 
 def compute_turbo_level(item: AuctionItem) -> int:
@@ -986,6 +1005,67 @@ def start_auction_if_due(item: AuctionItem, now: Optional[datetime] = None) -> b
         item.chat_paused = False
         return True
     return False
+
+
+def finish_auction_if_due(item: AuctionItem, db: Session, now: Optional[datetime] = None) -> bool:
+    """Finaliza imediatamente um leilão live cujo relógio chegou a zero.
+
+    Essa função é chamada pelo watcher, pelo endpoint /state e antes de aceitar lances.
+    Assim o frontend não recebe um estado live vencido e não reinicia o cronômetro.
+    """
+    now = now or datetime.utcnow()
+    if not item or item.status != "live" or not item.ends_at or item.ends_at > now:
+        return False
+
+    last_bid = (
+        db.query(Bid)
+        .filter(Bid.auction_id == item.id)
+        .order_by(desc(Bid.created_at))
+        .first()
+    )
+
+    if not last_bid:
+        item.status = "ended"
+        item.ends_at = None
+        item.winner_user_id = None
+        item.winner_deadline = None
+        item.chat_paused = True
+        return True
+
+    item.status = "pending_payment"
+    item.winner_user_id = last_bid.user_id
+    item.winner_deadline = now + timedelta(minutes=PAYMENT_DEADLINE_MINUTES)
+    item.ends_at = None
+    item.chat_paused = True
+
+    existing = db.query(WinnerOrder).filter(
+        WinnerOrder.auction_id == item.id,
+        WinnerOrder.status.in_(["pending_payment", "paid", "processing", "purchased", "sent", "delivered"]),
+    ).first()
+    if not existing:
+        winner = db.get(User, last_bid.user_id)
+        order = WinnerOrder(
+            auction_id=item.id,
+            user_id=last_bid.user_id,
+            final_price=BR(item.current_price),
+            status="pending_payment",
+            payment_deadline=item.winner_deadline,
+            pix_code=f"PIX-LANCEIOCERTO-{item.id}-{last_bid.user_id}",
+            payment_link=f"/minha-conta/pagamentos/{item.id}",
+            delivery_name=getattr(winner, "full_name", "") if winner else "",
+            delivery_cep=getattr(winner, "cep", "") if winner else "",
+            delivery_street=getattr(winner, "street", "") if winner else "",
+            delivery_number=getattr(winner, "number", "") if winner else "",
+            delivery_district=getattr(winner, "district", "") if winner else "",
+            delivery_city=getattr(winner, "city", "") if winner else "",
+            delivery_state=getattr(winner, "state", "") if winner else "",
+        )
+        db.add(order)
+
+    if ENABLE_CASHBACK_DRAW and getattr(item, "cashback_enabled", False):
+        ensure_cashback_event(item, db, now)
+
+    return True
 
 
 def clamp_initial_duration(minutes: int | float | None) -> int:
@@ -1265,8 +1345,14 @@ def build_finance_dashboard(db: Session) -> dict:
     paid_statuses = ["paid", "processing", "purchased", "sent", "delivered"]
     outgoing_statuses = ["paid", "processing", "purchased"]
 
-    total_fees = _sum_scalar(db, AuctionItem.total_bid_fees)
-    total_bid_spent = _sum_scalar(db, AuctionItem.total_bid_spent)
+    # Usa a tabela de lances como fonte principal, para não depender de campos acumulados
+    # que podem ter ficado desatualizados em versões anteriores.
+    total_fees_from_bids = _sum_scalar(db, Bid.fee_value)
+    total_fees_from_items = _sum_scalar(db, AuctionItem.total_bid_fees)
+    total_fees = BR(max(total_fees_from_bids, total_fees_from_items))
+    total_bid_spent_from_bids = _sum_scalar(db, Bid.bid_value)
+    total_bid_spent_from_items = _sum_scalar(db, AuctionItem.total_bid_spent)
+    total_bid_spent = BR(max(total_bid_spent_from_bids, total_bid_spent_from_items))
     total_payments = _sum_scalar(db, WinnerOrder.final_price, WinnerOrder.status.in_(paid_statuses))
     user_wallet_total = _sum_scalar(db, User.wallet_balance)
     pending_withdrawals = _sum_scalar(db, WithdrawalRequest.amount, WithdrawalRequest.status == "pending")
@@ -1314,7 +1400,27 @@ def build_cashflow_movements(db: Session) -> list[dict]:
             "balance_after": 0.0,
             "status": "registrado",
         })
-    return rows
+
+    fee_bids = (
+        db.query(Bid)
+        .options(selectinload(Bid.auction), selectinload(Bid.user))
+        .filter(Bid.fee_value > 0)
+        .order_by(desc(Bid.created_at))
+        .limit(120)
+        .all()
+    )
+    for bid in fee_bids:
+        rows.append({
+            "created_at": bid.created_at,
+            "type": "taxa_lance",
+            "description": f"Taxa de lance • {bid.auction.title if bid.auction else 'Leilão'} • {public_user_name(bid.user)}",
+            "amount": BR(bid.fee_value or 0.0),
+            "balance_after": 0.0,
+            "status": "registrado",
+        })
+
+    rows.sort(key=lambda r: r.get("created_at") or datetime.min, reverse=True)
+    return rows[:120]
 
 
 def build_auction_results(db: Session) -> list[dict]:
@@ -1762,40 +1868,7 @@ async def auction_watcher():
 
             live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").all()
             for item in live_items:
-                if item.ends_at and item.ends_at <= now:
-                    last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
-                    if last_bid:
-                        item.status = "pending_payment"
-                        item.winner_user_id = last_bid.user_id
-                        item.winner_deadline = now + timedelta(minutes=PAYMENT_DEADLINE_MINUTES)
-                        existing = db.query(WinnerOrder).filter(
-                            WinnerOrder.auction_id == item.id,
-                            WinnerOrder.status.in_(["pending_payment", "paid", "processing", "purchased", "sent", "delivered"])
-                        ).first()
-                        if not existing:
-                            winner = db.get(User, last_bid.user_id)
-                            order = WinnerOrder(
-                                auction_id=item.id,
-                                user_id=last_bid.user_id,
-                                final_price=BR(item.current_price),
-                                status="pending_payment",
-                                payment_deadline=item.winner_deadline,
-                                pix_code=f"PIX-LANCEIOCERTO-{item.id}-{last_bid.user_id}",
-                                payment_link=f"/minha-conta/pagamentos/{item.id}",
-                                delivery_name=winner.full_name,
-                                delivery_cep=winner.cep,
-                                delivery_street=winner.street,
-                                delivery_number=winner.number,
-                                delivery_district=winner.district,
-                                delivery_city=winner.city,
-                                delivery_state=winner.state,
-                            )
-                            db.add(order)
-                        if ENABLE_CASHBACK_DRAW:
-                            if getattr(item, 'cashback_enabled', False):
-                                ensure_cashback_event(item, db, now)
-                    else:
-                        item.status = "ended"
+                if finish_auction_if_due(item, db, now):
                     changed_ids.append(item.id)
 
             open_cashbacks = db.query(CashbackEvent).filter(CashbackEvent.status == "open").all()
@@ -2262,10 +2335,13 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
                 db.commit()
                 item = db.get(AuctionItem, auction_id)
 
+            if finish_auction_if_due(item, db, now):
+                db.commit()
+                db.refresh(item)
+                return JSONResponse({"ok": False, "detail": "Este leilão foi encerrado.", "auction": public_auction_live_payload(item, db, user=user)}, status_code=400)
+
             if item.status != "live":
                 raise HTTPException(status_code=400, detail="Leilão não está ao vivo.")
-            if item.ends_at and item.ends_at <= now:
-                raise HTTPException(status_code=400, detail="Este leilão já está encerrando. Aguarde a atualização.")
 
             bid_value = BR(bid_value)
             if bid_value not in ALLOWED_BIDS:
@@ -2384,9 +2460,12 @@ async def auction_state(request: Request, auction_id: int):
         item = db.get(AuctionItem, auction_id)
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
-        changed = start_auction_if_due(item)
+        now = datetime.utcnow()
+        changed = start_auction_if_due(item, now)
+        changed = finish_auction_if_due(item, db, now) or changed
         if changed:
             db.commit()
+            db.refresh(item)
             payload = public_auction_live_payload(item, db, user=user)
             asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
             return JSONResponse({"ok": True, "auction": payload})
@@ -2929,7 +3008,7 @@ async def admin_create_item(
     turbo_trigger_percent: float = Form(0),
     turbo_fee_target_percent: float = Form(10),
     winner_min_percent: float = Form(50),
-    bid_fee_percent: float = Form(1),
+    bid_fee_percent: float = Form(10),
     max_site_complement_percent: float = Form(50),
     cashback_enabled: int = Form(0),
 ):
