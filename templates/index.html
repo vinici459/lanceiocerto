@@ -235,42 +235,63 @@
       {% endif %}
 
       {% if user %}
-      <div class="suggestion-interactive-panel">
+      <div class="suggestion-interactive-panel suggestion-step-panel">
         <div class="suggestion-panel-copy">
           <span class="eyebrow">Participação pública</span>
-          <h3>Indicar produto para votação</h3>
+          <h3>Indique um produto para a votação da semana</h3>
           {% if user_week_nomination %}
-            <p>Você já indicou nesta semana: <strong>{{ user_week_nomination.product_name }}</strong>. Volte na próxima semana para indicar outro.</p>
+            <p>Você já indicou nesta semana: <strong>{{ user_week_nomination.product_name }}</strong>. Na próxima semana a lista zera e você poderá indicar outro produto.</p>
           {% elif suggestion_week_count >= suggestion_week_limit %}
-            <p>A lista desta semana já atingiu o limite de {{ suggestion_week_limit }} produtos.</p>
+            <p>A lista desta semana já atingiu o limite de {{ suggestion_week_limit }} produtos indicados.</p>
           {% else %}
-            <p>Selecione um produto do catálogo. Não precisa digitar nada e o sistema impede repetição na semana.</p>
+            <p>Escolha primeiro uma categoria e depois selecione um produto pronto da lista. Ninguém precisa digitar nome de produto.</p>
           {% endif %}
         </div>
 
-        <form method="post" action="/indicacao/indicar" class="suggestion-picker-form">
-          <div class="suggestion-picker-grid">
-            <label>Categoria
-              <select id="suggestionCategoryFilter">
-                <option value="">Todas as categorias</option>
-                {% for cat in suggestion_categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}
-              </select>
-            </label>
-            <label>Buscar produto
-              <input id="suggestionSearchInput" type="search" placeholder="Ex: fone, air fryer, notebook...">
-            </label>
-            <label>Produto para indicar
-              <select name="product_key" id="suggestionProductSelect" required {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>
-                <option value="">Selecione um produto</option>
-                {% for product in suggestion_catalog %}
-                  <option value="{{ product.key }}" data-category="{{ product.category }}" data-search="{{ (product.name ~ ' ' ~ product.category ~ ' ' ~ product.price_level)|lower }}">
-                    {{ product.name }} — {{ product.category }} — {{ product.price_level }}
-                  </option>
-                {% endfor %}
-              </select>
-            </label>
+        <form method="post" action="/indicacao/indicar" class="suggestion-picker-form" id="suggestionPickerForm">
+          <input type="hidden" name="product_key" id="suggestionSelectedProduct" required>
+
+          <div class="suggestion-step-card">
+            <div class="suggestion-step-title">
+              <span>1</span>
+              <div>
+                <strong>Selecione a categoria</strong>
+                <small>Depois de escolher a categoria, os produtos aparecem logo abaixo.</small>
+              </div>
+            </div>
+
+            <div class="suggestion-category-buttons" id="suggestionCategoryButtons">
+              {% for cat in suggestion_categories %}
+              <button type="button" class="suggestion-category-chip" data-category="{{ cat }}" {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>{{ cat }}</button>
+              {% endfor %}
+            </div>
           </div>
-          <button class="btn full" type="submit" {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>Indicar produto para votação</button>
+
+          <div class="suggestion-step-card suggestion-products-step">
+            <div class="suggestion-step-title">
+              <span>2</span>
+              <div>
+                <strong>Escolha o produto para indicar</strong>
+                <small id="suggestionProductHint">Selecione uma categoria para ver os produtos disponíveis.</small>
+              </div>
+              <em id="suggestionProductCount" class="suggestion-count-pill">0 produtos</em>
+            </div>
+
+            <div id="suggestionProductList" class="suggestion-product-card-grid">
+              {% for product in suggestion_catalog %}
+              <button type="button" class="suggestion-product-card" data-category="{{ product.category }}" data-product-key="{{ product.key }}" {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>
+                <strong>{{ product.name }}</strong>
+                <small>{{ product.category }} • {{ product.price_level }}</small>
+              </button>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="suggestion-selected-bar" id="suggestionSelectedBar">
+            <span>Nenhum produto selecionado.</span>
+          </div>
+
+          <button class="btn full" id="suggestionSubmitBtn" type="submit" disabled>Indicar produto para votação</button>
         </form>
       </div>
 
@@ -433,27 +454,63 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
 
-  const suggestionCategoryFilter = document.getElementById("suggestionCategoryFilter");
-  const suggestionSearchInput = document.getElementById("suggestionSearchInput");
-  const suggestionProductSelect = document.getElementById("suggestionProductSelect");
+  const suggestionCategoryButtons = document.getElementById("suggestionCategoryButtons");
+  const suggestionProductList = document.getElementById("suggestionProductList");
+  const suggestionProductHint = document.getElementById("suggestionProductHint");
+  const suggestionProductCount = document.getElementById("suggestionProductCount");
+  const suggestionSelectedProduct = document.getElementById("suggestionSelectedProduct");
+  const suggestionSelectedBar = document.getElementById("suggestionSelectedBar");
+  const suggestionSubmitBtn = document.getElementById("suggestionSubmitBtn");
 
-  function filterSuggestionProducts() {
-    if (!suggestionProductSelect) return;
-    const category = (suggestionCategoryFilter?.value || "").toLowerCase();
-    const term = (suggestionSearchInput?.value || "").trim().toLowerCase();
-    Array.from(suggestionProductSelect.options).forEach((option) => {
-      if (!option.value) return;
-      const optionCategory = (option.dataset.category || "").toLowerCase();
-      const text = (option.dataset.search || option.textContent || "").toLowerCase();
-      const visible = (!category || optionCategory === category) && (!term || text.includes(term));
-      option.hidden = !visible;
+  function setSuggestionCategory(category) {
+    if (!suggestionProductList) return;
+    let visible = 0;
+
+    suggestionCategoryButtons?.querySelectorAll(".suggestion-category-chip").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.category === category);
     });
-    const selected = suggestionProductSelect.selectedOptions[0];
-    if (selected && selected.hidden) suggestionProductSelect.value = "";
+
+    suggestionProductList.querySelectorAll(".suggestion-product-card").forEach((card) => {
+      const match = category && card.dataset.category === category;
+      card.classList.toggle("is-visible", Boolean(match));
+      card.classList.remove("selected");
+      card.style.display = match ? "flex" : "none";
+      if (match) visible += 1;
+    });
+
+    if (suggestionSelectedProduct) suggestionSelectedProduct.value = "";
+    if (suggestionSelectedBar) suggestionSelectedBar.innerHTML = "<span>Nenhum produto selecionado.</span>";
+    if (suggestionSubmitBtn) suggestionSubmitBtn.disabled = true;
+
+    if (suggestionProductHint) {
+      suggestionProductHint.textContent = category
+        ? "Agora escolha um produto desta categoria."
+        : "Selecione uma categoria para ver os produtos disponíveis.";
+    }
+    if (suggestionProductCount) {
+      suggestionProductCount.textContent = visible === 1 ? "1 produto" : `${visible} produtos`;
+    }
+    suggestionProductList.classList.toggle("has-category", Boolean(category));
   }
 
-  suggestionCategoryFilter?.addEventListener("change", filterSuggestionProducts);
-  suggestionSearchInput?.addEventListener("input", filterSuggestionProducts);
+  suggestionCategoryButtons?.querySelectorAll(".suggestion-category-chip").forEach((btn) => {
+    btn.addEventListener("click", () => setSuggestionCategory(btn.dataset.category || ""));
+  });
+
+  suggestionProductList?.querySelectorAll(".suggestion-product-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      if (card.disabled || !card.classList.contains("is-visible")) return;
+      suggestionProductList.querySelectorAll(".suggestion-product-card").forEach((item) => item.classList.remove("selected"));
+      card.classList.add("selected");
+      const key = card.dataset.productKey || "";
+      const name = card.querySelector("strong")?.textContent?.trim() || "produto selecionado";
+      if (suggestionSelectedProduct) suggestionSelectedProduct.value = key;
+      if (suggestionSelectedBar) suggestionSelectedBar.innerHTML = `<span>Produto selecionado:</span><strong>${name}</strong>`;
+      if (suggestionSubmitBtn) suggestionSubmitBtn.disabled = !key;
+    });
+  });
+
+  setSuggestionCategory("");
 
   function formatTime(totalSeconds) {
     let seconds = Math.max(0, parseInt(totalSeconds || 0, 10));
@@ -982,6 +1039,139 @@ document.addEventListener("DOMContentLoaded", function () {
   .price-line {
     grid-template-columns: 1fr;
   }
+}
+
+
+/* Correção real: indicação sem select nativo e sem lista branca gigante */
+.suggestion-step-panel { overflow: hidden; }
+.suggestion-step-card {
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(2,6,23,.28);
+  border-radius: 18px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.suggestion-step-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.suggestion-step-title > span {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: linear-gradient(135deg,#2563eb,#3b82f6);
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+.suggestion-step-title strong,
+.suggestion-step-title small { display: block; }
+.suggestion-step-title small { color: rgba(255,255,255,.65); margin-top: 3px; font-weight: 700; }
+.suggestion-category-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.suggestion-category-chip {
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(255,255,255,.055);
+  color: #fff;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: .16s ease;
+}
+.suggestion-category-chip:hover,
+.suggestion-category-chip.active {
+  background: rgba(59,130,246,.22);
+  border-color: rgba(96,165,250,.45);
+}
+.suggestion-category-chip:disabled { opacity: .55; cursor: not-allowed; }
+.suggestion-product-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  min-height: 110px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.suggestion-product-card-grid:not(.has-category)::before {
+  content: "Escolha uma categoria acima para ver os produtos.";
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  min-height: 110px;
+  color: rgba(255,255,255,.65);
+  border: 1px dashed rgba(148,163,184,.25);
+  border-radius: 16px;
+  background: rgba(255,255,255,.025);
+  text-align: center;
+  padding: 14px;
+}
+.suggestion-product-card {
+  display: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  text-align: left;
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(255,255,255,.055);
+  color: #fff;
+  border-radius: 16px;
+  padding: 13px;
+  cursor: pointer;
+  transition: .16s ease;
+}
+.suggestion-product-card.is-visible { display: flex; }
+.suggestion-product-card:hover {
+  border-color: rgba(96,165,250,.48);
+  background: rgba(59,130,246,.13);
+}
+.suggestion-product-card.selected {
+  border-color: rgba(74,222,128,.60);
+  background: rgba(74,222,128,.12);
+  box-shadow: 0 0 0 2px rgba(74,222,128,.10) inset;
+}
+.suggestion-product-card strong { color: #fff; line-height: 1.2; }
+.suggestion-product-card small { color: rgba(255,255,255,.65); font-weight: 800; }
+.suggestion-selected-bar {
+  min-height: 48px;
+  border: 1px solid rgba(96,165,250,.24);
+  background: rgba(59,130,246,.10);
+  color: #dbeafe;
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.suggestion-selected-bar strong { color: #fff; }
+.suggestion-rules-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 22px;
+}
+.suggestion-rules-grid > div {
+  border: 1px solid rgba(148,163,184,.18);
+  background: rgba(255,255,255,.045);
+  border-radius: 16px;
+  padding: 13px;
+}
+.suggestion-rules-grid strong,
+.suggestion-rules-grid span { display: block; }
+.suggestion-rules-grid span { color: rgba(255,255,255,.68); margin-top: 4px; line-height: 1.35; }
+#suggestionSubmitBtn:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .suggestion-rules-grid { grid-template-columns: 1fr; }
+  .suggestion-product-card-grid { grid-template-columns: 1fr; }
 }
 </style>
 {% endblock %}
