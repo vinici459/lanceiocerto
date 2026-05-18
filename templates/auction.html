@@ -493,6 +493,16 @@ window.__AUCTION__ = {{ item | tojson }};
     return Number(map[bidKey(value)] || 0);
   }
 
+  function turboTimeSeconds(value, level){
+    const key = bidKey(value);
+    const turbo2 = {"1.00":8,"0.90":10,"0.80":12,"0.70":14,"0.60":16,"0.50":18,"0.40":20,"0.30":22,"0.20":24,"0.10":26};
+    const turbo3 = {"1.00":4,"0.90":5,"0.80":6,"0.70":7,"0.60":8,"0.50":9,"0.40":10,"0.30":11,"0.20":12,"0.10":13};
+    const turbo4 = {"1.00":2,"0.90":3,"0.80":4,"0.70":5,"0.60":6,"0.50":7,"0.40":8,"0.30":9,"0.20":10,"0.10":11};
+    if(Number(level || 0) >= 4) return Number(turbo4[key] || 2);
+    if(Number(level || 0) >= 3) return Number(turbo3[key] || 4);
+    return Number(turbo2[key] || 8);
+  }
+
   function activateLiveLocally(){
     if(!isScheduled(status())) return;
     auction = {
@@ -511,7 +521,7 @@ window.__AUCTION__ = {{ item | tojson }};
     const feePercent = Math.max(0, Math.min(100, Number(auction.bid_fee_percent ?? 10)));
     const fee = Math.round((gross * feePercent / 100) * 100) / 100;
     const increment = Math.round((gross - fee) * 100) / 100;
-    const level = Number(auction.turbo_level || 0);
+    const levelBeforeBid = Number(auction.turbo_level || 0);
 
     auction = {
       ...auction,
@@ -522,15 +532,20 @@ window.__AUCTION__ = {{ item | tojson }};
       last_bidder: "Você"
     };
 
-    if(level === 0){
-      remaining = Math.max(1, remaining + normalTimeDelta(value));
-    }
-
     if(auction.source_price > 0){
       auction.progress_percent = Math.round(((Number(auction.current_price || 0) + Number(auction.total_bid_fees || 0)) / Number(auction.source_price || 1)) * 10000) / 100;
     }
 
     const nextLevel = localTurboLevelFromProgress(auction.progress_percent);
+    const timingLevel = nextLevel >= 2 ? nextLevel : levelBeforeBid;
+
+    if(timingLevel >= 2){
+      // No turbo, o lance define a janela curta. Não soma/subtrai tempo normal.
+      remaining = turboTimeSeconds(value, timingLevel);
+    } else {
+      remaining = Math.max(1, remaining + normalTimeDelta(value));
+    }
+
     if(nextLevel > Number(auction.turbo_level || 0)){
       auction.turbo_level = nextLevel;
       auction.turbo_label = nextLevel === 4 ? "Turbo 4.0" : nextLevel === 3 ? "Turbo 3.0" : "Turbo 2.0";
@@ -762,6 +777,11 @@ window.__AUCTION__ = {{ item | tojson }};
     btn.addEventListener("click", async () => {
       const value = bidKey(btn.dataset.bid);
       if(btn.disabled || pendingBids[value]) return;
+      if(isTurboLockedForUser()){
+        setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
+        renderButtons();
+        return;
+      }
 
       pendingBids[value] = true;
       // Mostra a contagem e atualiza a tela na hora do clique, sem esperar o Railway responder.
