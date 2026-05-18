@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import mimetypes
 import os
 import re
 import secrets
@@ -46,6 +47,17 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./lanceiocerto.db")
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(8 * 1024 * 1024)))
+ALLOWED_UPLOAD_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "application/pdf",
+}
+ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"}
+
 
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
@@ -1709,13 +1721,50 @@ def ensure_columns() -> None:
 
 
 def save_uploaded_image(file: Optional[UploadFile]) -> str:
+    """Salva uploads com validação de extensão, MIME e tamanho.
+
+    A função é usada tanto para imagens de produto quanto para documentos de
+    identidade. Por isso aceita imagens e PDF, mas bloqueia arquivos grandes ou
+    extensões perigosas antes de gravar no disco.
+    """
     if not file or not file.filename:
         return ""
-    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", file.filename)
-    final_name = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_name}"
+
+    original_name = Path(file.filename).name
+    ext = Path(original_name).suffix.lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Tipo de arquivo não permitido. Envie JPG, PNG, WEBP, GIF ou PDF.")
+
+    declared_type = (file.content_type or mimetypes.guess_type(original_name)[0] or "").lower()
+    if declared_type and declared_type not in ALLOWED_UPLOAD_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="Formato de arquivo inválido para upload.")
+
+    safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", Path(original_name).stem).strip("_") or "upload"
+    final_name = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{secrets.token_hex(4)}_{safe_stem}{ext}"
     target = UPLOAD_DIR / final_name
-    with target.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+
+    total = 0
+    try:
+        file.file.seek(0)
+    except Exception:
+        pass
+
+    with target.open("wb") as out:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                out.close()
+                target.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Arquivo muito grande. Envie um arquivo menor.")
+            out.write(chunk)
+
+    if total <= 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Arquivo vazio ou inválido.")
+
     return f"/static/uploads/{final_name}"
 
     with engine.begin() as conn:
@@ -1862,50 +1911,80 @@ async def startup_event():
 
 
 async def auction_watcher():
+    """Atualiza transições de leilão sem varrer tabelas inteiras a cada ciclo."""
     while True:
         await asyncio.sleep(1)
         db = SessionLocal()
         try:
             now = datetime.utcnow()
-            changed_ids = []
+            changed_ids: set[int] = set()
 
             to_start = (
                 db.query(AuctionItem)
                 .filter(AuctionItem.status.in_(["scheduled", "relisted"]))
                 .filter(AuctionItem.scheduled_start <= now)
+                .order_by(AuctionItem.scheduled_start.asc())
+                .limit(50)
                 .all()
             )
             for item in to_start:
                 if start_auction_if_due(item, now):
-                    changed_ids.append(item.id)
+                    changed_ids.add(item.id)
 
-            live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").all()
-            for item in live_items:
+            # Só leilões cujo prazo já venceu precisam ser finalizados. Antes o
+            # watcher varria todos os leilões ao vivo a cada segundo.
+            live_to_finish = (
+                db.query(AuctionItem)
+                .filter(AuctionItem.status == "live")
+                .filter(AuctionItem.ends_at.isnot(None))
+                .filter(AuctionItem.ends_at <= now)
+                .order_by(AuctionItem.ends_at.asc())
+                .limit(50)
+                .all()
+            )
+            for item in live_to_finish:
                 if finish_auction_if_due(item, db, now):
-                    changed_ids.append(item.id)
+                    changed_ids.add(item.id)
 
-            open_cashbacks = db.query(CashbackEvent).filter(CashbackEvent.status == "open").all()
-            for cashback in open_cashbacks:
+            due_cashbacks = (
+                db.query(CashbackEvent)
+                .filter(CashbackEvent.status == "open")
+                .filter(CashbackEvent.join_deadline <= now)
+                .order_by(CashbackEvent.join_deadline.asc())
+                .limit(50)
+                .all()
+            )
+            for cashback in due_cashbacks:
                 draw_cashback_if_due(cashback, db, now)
 
-            pending_orders = db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").all()
-            for order in pending_orders:
-                if order.payment_deadline and order.payment_deadline <= now:
-                    order.status = "expired"
-                    order.expired_at = now
-                    item = db.get(AuctionItem, order.auction_id)
-                    if item:
-                        item.status = "ended"
-                        item.winner_deadline = None
-                        item.ends_at = None
-                        changed_ids.append(item.id)
+            expired_orders = (
+                db.query(WinnerOrder)
+                .filter(WinnerOrder.status == "pending_payment")
+                .filter(WinnerOrder.payment_deadline.isnot(None))
+                .filter(WinnerOrder.payment_deadline <= now)
+                .order_by(WinnerOrder.payment_deadline.asc())
+                .limit(50)
+                .all()
+            )
+            for order in expired_orders:
+                order.status = "expired"
+                order.expired_at = now
+                item = db.get(AuctionItem, order.auction_id)
+                if item:
+                    item.status = "ended"
+                    item.winner_deadline = None
+                    item.ends_at = None
+                    item.chat_paused = True
+                    changed_ids.add(item.id)
 
-            db.commit()
-
-            for auction_id in changed_ids:
-                fresh = db.get(AuctionItem, auction_id)
-                if fresh:
-                    asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db)}))
+            if changed_ids:
+                db.commit()
+                for auction_id in changed_ids:
+                    fresh = db.get(AuctionItem, auction_id)
+                    if fresh:
+                        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db)}))
+            else:
+                db.rollback()
         finally:
             db.close()
 
@@ -2948,19 +3027,19 @@ def admin_dashboard(request: Request):
             like = f"%{search}%"
             users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
         users = users_query.order_by(desc(User.created_at)).limit(40).all()
-        identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(80).all()
-        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(40).all()
+        identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all()
+        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(30).all()
         for item in items:
             item.collected_percent = auction_progress_percent(item)
             item.cash_reserved = auction_cash_reserved_before_payment(item)
             item.expected_total_if_paid = auction_total_if_paid(item)
             item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
-        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(50).all()
+        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(30).all()
         pending_payment_orders = [o for o in orders if o.status == "pending_payment"]
         shipping_orders = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
         consultation_orders = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
-        withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(40).all()
-        support_tickets = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(40).all()
+        withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all()
+        support_tickets = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(25).all()
         admin_order_cards = build_admin_order_cards(db, orders)
         returned_items = build_returned_items(db)
         finance = build_finance_dashboard(db)
@@ -2996,17 +3075,16 @@ def admin_dashboard(request: Request):
                 "withdrawal_requests": withdrawal_requests,
                 "support_tickets": support_tickets,
                 "user_audit": user_audit_map(db, users),
-                "audit_logs": db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(40).all(),
+                "audit_logs": db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all(),
                 "search": search,
                 "finished_auctions": build_finished_auctions(db),
                 "returned_items": returned_items,
                 "finance": finance,
                 "cashflow_movements": cashflow_movements,
                 "auction_results": auction_results,
-                "recent_chat_messages": db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(25).all(),
-                "moderation_users": db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(40).all(),
+                "recent_chat_messages": db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(15).all(),
+                "moderation_users": db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all(),
                 "payment_deadline_minutes": PAYMENT_DEADLINE_MINUTES,
-                "returned_items": returned_items,
                 "suggestion_vote_stats": suggestion_vote_stats(db),
             },
         )

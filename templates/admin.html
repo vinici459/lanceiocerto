@@ -592,15 +592,39 @@
             <div class="identity-doc-grid">
               <div>
                 <span>Frente do documento</span>
-                {% if u.document_file_url %}<a href="{{ u.document_file_url }}" target="_blank"><img src="{{ u.document_file_url }}" alt="Frente do documento"></a>{% else %}<p>Não enviado.</p>{% endif %}
+                {% if u.document_file_url %}
+                  <a class="identity-doc-link" href="{{ u.document_file_url }}" target="_blank" rel="noopener">
+                    {% if u.document_file_url.lower().endswith('.pdf') %}
+                      <span class="identity-pdf-preview">PDF — abrir documento</span>
+                    {% else %}
+                      <img src="{{ u.document_file_url }}" alt="Frente do documento" loading="lazy">
+                    {% endif %}
+                  </a>
+                {% else %}<p>Não enviado.</p>{% endif %}
               </div>
               <div>
                 <span>Verso do documento</span>
-                {% if u.document_back_file_url %}<a href="{{ u.document_back_file_url }}" target="_blank"><img src="{{ u.document_back_file_url }}" alt="Verso do documento"></a>{% else %}<p>Não enviado.</p>{% endif %}
+                {% if u.document_back_file_url %}
+                  <a class="identity-doc-link" href="{{ u.document_back_file_url }}" target="_blank" rel="noopener">
+                    {% if u.document_back_file_url.lower().endswith('.pdf') %}
+                      <span class="identity-pdf-preview">PDF — abrir documento</span>
+                    {% else %}
+                      <img src="{{ u.document_back_file_url }}" alt="Verso do documento" loading="lazy">
+                    {% endif %}
+                  </a>
+                {% else %}<p>Não enviado.</p>{% endif %}
               </div>
               <div>
                 <span>Selfie atual</span>
-                {% if u.selfie_file_url %}<a href="{{ u.selfie_file_url }}" target="_blank"><img src="{{ u.selfie_file_url }}" alt="Selfie"></a>{% else %}<p>Não enviada.</p>{% endif %}
+                {% if u.selfie_file_url %}
+                  <a class="identity-doc-link" href="{{ u.selfie_file_url }}" target="_blank" rel="noopener">
+                    {% if u.selfie_file_url.lower().endswith('.pdf') %}
+                      <span class="identity-pdf-preview">PDF — abrir arquivo</span>
+                    {% else %}
+                      <img src="{{ u.selfie_file_url }}" alt="Selfie" loading="lazy">
+                    {% endif %}
+                  </a>
+                {% else %}<p>Não enviada.</p>{% endif %}
               </div>
             </div>
 
@@ -1014,7 +1038,7 @@ document.addEventListener("DOMContentLoaded", function () {
 .direct-message-line p{margin:8px 0 0}
 @media(max-width:900px){.admin-order-summary{grid-template-columns:1fr}.order-detail-grid{grid-template-columns:1fr}}
 
-.identity-review-list{display:grid;gap:16px}.identity-review-card{overflow:visible}.identity-user-grid{margin:14px 0}.identity-doc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.identity-doc-grid>div{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:12px}.identity-doc-grid span{display:block;color:#b7c6e6;font-size:13px;margin-bottom:8px}.identity-doc-grid img{width:100%;height:190px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.08)}.identity-doc-grid p{color:#b7c6e6}.identity-review-actions{display:grid;gap:10px}.identity-review-actions .inline-form{display:flex;gap:8px;flex-wrap:wrap}.identity-review-actions input{min-width:260px;flex:1}@media(max-width:900px){.identity-doc-grid{grid-template-columns:1fr}.identity-doc-grid img{height:auto;max-height:260px}}
+.identity-review-list{display:grid;gap:16px}.identity-review-card{overflow:visible}.identity-user-grid{margin:14px 0}.identity-doc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.identity-doc-grid>div{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:12px}.identity-doc-grid span{display:block;color:#b7c6e6;font-size:13px;margin-bottom:8px}.identity-doc-grid img{width:100%;height:190px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.08)}.identity-doc-link{display:block;text-decoration:none}.identity-pdf-preview{display:grid!important;place-items:center;width:100%;min-height:190px;border-radius:12px;border:1px dashed rgba(147,197,253,.45);background:rgba(59,130,246,.10);color:#bfdbfe!important;font-weight:900;text-align:center;padding:14px}.identity-doc-grid p{color:#b7c6e6}.identity-review-actions{display:grid;gap:10px}.identity-review-actions .inline-form{display:flex;gap:8px;flex-wrap:wrap}.identity-review-actions input{min-width:260px;flex:1}@media(max-width:900px){.identity-doc-grid{grid-template-columns:1fr}.identity-doc-grid img{height:auto;max-height:260px}}
 
 </style>
 
