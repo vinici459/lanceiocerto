@@ -26,6 +26,9 @@
         <label>Selfie atual
           <input type="file" name="selfie_file" accept="image/*" capture="user" required>
         </label>
+        <label>Comprovante de residência
+          <input type="file" name="residence_proof_file" accept="image/*,.pdf" capture="environment">
+        </label>
       </div>
       <button class="btn full" type="submit">Enviar para análise</button>
     </form>
@@ -37,5 +40,5 @@
     </div>
   </div>
 </section>
-<style>.identity-wrap{align-items:start}.identity-card h1{margin-top:0}.identity-status-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.identity-status-grid div,.identity-rules-box{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.04);padding:14px}.identity-status-grid span,.identity-rules-box span{display:block;color:#b7c6e6;margin-top:4px}.identity-status-grid strong{display:block;color:#fff;margin-top:6px}.identity-rules-box{margin-top:18px;display:grid;gap:6px}@media(max-width:760px){.identity-status-grid{grid-template-columns:1fr}}</style>
+<style>.identity-wrap{align-items:start}.identity-card h1{margin-top:0}.identity-status-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}.identity-status-grid div,.identity-rules-box{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.04);padding:14px}.identity-status-grid span,.identity-rules-box span{display:block;color:#b7c6e6;margin-top:4px}.identity-status-grid strong{display:block;color:#fff;margin-top:6px}.identity-rules-box{margin-top:18px;display:grid;gap:6px}@media(max-width:760px){.identity-status-grid{grid-template-columns:1fr}}</style>
 {% endblock %}

@@ -107,6 +107,7 @@ class User(Base):
     document_file_url: Mapped[str] = mapped_column(String(600), default="")
     document_back_file_url: Mapped[str] = mapped_column(String(600), default="")
     selfie_file_url: Mapped[str] = mapped_column(String(600), default="")
+    residence_proof_file_url: Mapped[str] = mapped_column(String(600), default="")
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     privacy_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -1650,6 +1651,7 @@ def ensure_columns() -> None:
                 "document_file_url": "VARCHAR(600) DEFAULT ''",
                 "document_back_file_url": "VARCHAR(600) DEFAULT ''",
                 "selfie_file_url": "VARCHAR(600) DEFAULT ''",
+                "residence_proof_file_url": "VARCHAR(600) DEFAULT ''",
                 "verified_at": "TIMESTAMP NULL",
                 "terms_accepted_at": "TIMESTAMP NULL",
                 "privacy_accepted_at": "TIMESTAMP NULL",
@@ -1982,7 +1984,7 @@ async def auction_watcher():
                 for auction_id in changed_ids:
                     fresh = db.get(AuctionItem, auction_id)
                     if fresh:
-                        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db, include_cashback=True)}))
+                        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db)}))
             else:
                 db.rollback()
         finally:
@@ -2249,7 +2251,7 @@ def register_documents_page(request: Request):
 
 
 @app.post("/cadastro/documentos")
-async def register_documents_submit(request: Request, document_front_file: UploadFile | None = File(None), document_back_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None)):
+async def register_documents_submit(request: Request, document_front_file: UploadFile | None = File(None), document_back_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None), residence_proof_file: UploadFile | None = File(None)):
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -2258,6 +2260,8 @@ async def register_documents_submit(request: Request, document_front_file: Uploa
         user.document_file_url = save_uploaded_image(document_front_file)
         user.document_back_file_url = save_uploaded_image(document_back_file)
         user.selfie_file_url = save_uploaded_image(selfie_file)
+        if residence_proof_file and residence_proof_file.filename:
+            user.residence_proof_file_url = save_uploaded_image(residence_proof_file)
         user.identity_status = "pending"
         user.identity_note = "Documentos enviados. Aguardando análise do administrador."
         audit_event(db, request, "user.identity_submitted", user, "user", user.id, "Documentos enviados no cadastro inicial.")
@@ -2569,7 +2573,7 @@ async def auction_state(request: Request, auction_id: int):
         if changed:
             db.commit()
             db.refresh(item)
-            payload = public_auction_live_payload(item, db, user=user, include_cashback=True)
+            payload = public_auction_live_payload(item, db, user=user)
             asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
             return JSONResponse({"ok": True, "auction": payload})
         return JSONResponse({"ok": True, "auction": public_auction_live_payload(item, db, user=user)})
@@ -2736,7 +2740,7 @@ def account_identity_page(request: Request):
 
 
 @app.post("/minha-conta/verificacao")
-async def account_identity_submit(request: Request, document_front_file: UploadFile | None = File(None), document_back_file: UploadFile | None = File(None), document_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None)):
+async def account_identity_submit(request: Request, document_front_file: UploadFile | None = File(None), document_back_file: UploadFile | None = File(None), document_file: UploadFile | None = File(None), selfie_file: UploadFile | None = File(None), residence_proof_file: UploadFile | None = File(None)):
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -2747,6 +2751,8 @@ async def account_identity_submit(request: Request, document_front_file: UploadF
         if document_back_file and document_back_file.filename:
             user.document_back_file_url = save_uploaded_image(document_back_file)
         user.selfie_file_url = save_uploaded_image(selfie_file)
+        if residence_proof_file and residence_proof_file.filename:
+            user.residence_proof_file_url = save_uploaded_image(residence_proof_file)
         user.identity_status = "pending"
         user.identity_note = "Documentos enviados. Aguardando análise do administrador."
         audit_event(db, request, "user.identity_submitted", user, "user", user.id, "Documentos de identidade enviados para análise.")

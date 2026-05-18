@@ -565,86 +565,106 @@
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Usuários pendentes</h1>
-            <p>Documentos enviados para análise. Abra a ficha, confira os dados e aprove ou recuse a verificação.</p>
+            <p>Lista compacta para análise. Clique em <strong>Abrir dados</strong> para conferir documentos, selfie e comprovante de residência.</p>
           </div>
         </div>
 
-        <div class="identity-review-list">
-          {% for u in identity_pending_users if identity_pending_users is defined %}
-          <article class="panel-card admin-card-pro identity-review-card">
-            <div class="card-title-row">
-              <div>
-                <h2>{{ u.full_name }}</h2>
-                <p class="muted">@{{ u.public_name or u.nickname }} • {{ u.email }}</p>
-              </div>
-              <span class="pill-soft warn">Pendente</span>
-            </div>
+        <div class="panel-card admin-card-pro identity-compact-card">
+          <div class="table-wrap">
+            <table class="identity-compact-table">
+              <thead>
+                <tr>
+                  <th>Nome completo</th>
+                  <th>Apelido</th>
+                  <th>E-mail</th>
+                  <th>Status</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+              {% for u in identity_pending_users if identity_pending_users is defined %}
+                <tr>
+                  <td><strong>{{ u.full_name }}</strong></td>
+                  <td>@{{ u.public_name or u.nickname or '—' }}</td>
+                  <td>{{ u.email }}</td>
+                  <td><span class="pill-soft warn">Pendente</span></td>
+                  <td><button class="btn small ghost identity-open-btn" type="button" data-identity-panel="identity-panel-{{ u.id }}">Abrir dados</button></td>
+                </tr>
+                <tr id="identity-panel-{{ u.id }}" class="identity-detail-row">
+                  <td colspan="5">
+                    <div class="identity-detail-card">
+                      <div class="card-title-row">
+                        <div>
+                          <h2>{{ u.full_name }}</h2>
+                          <p class="muted">CPF: {{ u.cpf or '—' }} • Telefone: {{ u.phone or '—' }} • Nascimento: {{ u.birth_date or '—' }}</p>
+                        </div>
+                        <span class="pill-soft warn">Conferência manual</span>
+                      </div>
 
-            <div class="profile-grid identity-user-grid">
-              <div><span>CPF</span><strong>{{ u.cpf or '—' }}</strong></div>
-              <div><span>Telefone</span><strong>{{ u.phone or '—' }}</strong></div>
-              <div><span>Gênero</span><strong>{{ u.gender or '—' }}</strong></div>
-              <div><span>Nascimento</span><strong>{{ u.birth_date or '—' }}</strong></div>
-              <div><span>Endereço</span><strong>{{ u.street or '—' }}, {{ u.number or '—' }}{% if u.complement %} - {{ u.complement }}{% endif %}</strong></div>
-              <div><span>Cidade/UF</span><strong>{{ u.city or '—' }}/{{ u.state or '—' }}</strong></div>
-            </div>
+                      <div class="profile-grid identity-user-grid">
+                        <div><span>CPF</span><strong>{{ u.cpf or '—' }}</strong></div>
+                        <div><span>Telefone</span><strong>{{ u.phone or '—' }}</strong></div>
+                        <div><span>Gênero</span><strong>{{ u.gender or '—' }}</strong></div>
+                        <div><span>Nascimento</span><strong>{{ u.birth_date or '—' }}</strong></div>
+                        <div><span>Endereço</span><strong>{{ u.street or '—' }}, {{ u.number or '—' }}{% if u.complement %} - {{ u.complement }}{% endif %}</strong></div>
+                        <div><span>Cidade/UF</span><strong>{{ u.city or '—' }}/{{ u.state or '—' }}</strong></div>
+                      </div>
 
-            <div class="identity-doc-grid">
-              <div>
-                <span>Frente do documento</span>
-                {% if u.document_file_url %}
-                  <a class="identity-doc-link" href="{{ u.document_file_url }}" target="_blank" rel="noopener">
-                    {% if u.document_file_url.lower().endswith('.pdf') %}
-                      <span class="identity-pdf-preview">PDF — abrir documento</span>
-                    {% else %}
-                      <img src="{{ u.document_file_url }}" alt="Frente do documento" loading="lazy">
-                    {% endif %}
-                  </a>
-                {% else %}<p>Não enviado.</p>{% endif %}
-              </div>
-              <div>
-                <span>Verso do documento</span>
-                {% if u.document_back_file_url %}
-                  <a class="identity-doc-link" href="{{ u.document_back_file_url }}" target="_blank" rel="noopener">
-                    {% if u.document_back_file_url.lower().endswith('.pdf') %}
-                      <span class="identity-pdf-preview">PDF — abrir documento</span>
-                    {% else %}
-                      <img src="{{ u.document_back_file_url }}" alt="Verso do documento" loading="lazy">
-                    {% endif %}
-                  </a>
-                {% else %}<p>Não enviado.</p>{% endif %}
-              </div>
-              <div>
-                <span>Selfie atual</span>
-                {% if u.selfie_file_url %}
-                  <a class="identity-doc-link" href="{{ u.selfie_file_url }}" target="_blank" rel="noopener">
-                    {% if u.selfie_file_url.lower().endswith('.pdf') %}
-                      <span class="identity-pdf-preview">PDF — abrir arquivo</span>
-                    {% else %}
-                      <img src="{{ u.selfie_file_url }}" alt="Selfie" loading="lazy">
-                    {% endif %}
-                  </a>
-                {% else %}<p>Não enviada.</p>{% endif %}
-              </div>
-            </div>
+                      <div class="identity-doc-grid identity-doc-grid-4">
+                        <div>
+                          <span>Frente do documento</span>
+                          {% if u.document_file_url %}
+                            <a class="identity-doc-link" href="{{ u.document_file_url }}" target="_blank" rel="noopener">
+                              {% if u.document_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_file_url }}" alt="Frente do documento" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviado.</p>{% endif %}
+                        </div>
+                        <div>
+                          <span>Verso do documento</span>
+                          {% if u.document_back_file_url %}
+                            <a class="identity-doc-link" href="{{ u.document_back_file_url }}" target="_blank" rel="noopener">
+                              {% if u.document_back_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_back_file_url }}" alt="Verso do documento" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviado.</p>{% endif %}
+                        </div>
+                        <div>
+                          <span>Selfie atual</span>
+                          {% if u.selfie_file_url %}
+                            <a class="identity-doc-link" href="{{ u.selfie_file_url }}" target="_blank" rel="noopener">
+                              {% if u.selfie_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir arquivo</span>{% else %}<img src="{{ u.selfie_file_url }}" alt="Selfie" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviada.</p>{% endif %}
+                        </div>
+                        <div>
+                          <span>Comprovante de residência</span>
+                          {% if u.residence_proof_file_url %}
+                            <a class="identity-doc-link" href="{{ u.residence_proof_file_url }}" target="_blank" rel="noopener">
+                              {% if u.residence_proof_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir comprovante</span>{% else %}<img src="{{ u.residence_proof_file_url }}" alt="Comprovante de residência" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviado.</p>{% endif %}
+                        </div>
+                      </div>
 
-            <div class="identity-review-actions">
-              <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form">
-                <input name="note" value="Documentação conferida e aprovada." placeholder="Observação da aprovação">
-                <button class="btn small" type="submit">Validar usuário</button>
-              </form>
+                      <div class="identity-review-actions">
+                        <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form">
+                          <input name="note" value="Documentação conferida e aprovada." placeholder="Observação da aprovação">
+                          <button class="btn small" type="submit">Validar usuário</button>
+                        </form>
 
-              <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form">
-                <input name="note" value="Documentação ilegível ou incompatível com os dados informados." placeholder="Motivo da recusa">
-                <button class="btn small danger" type="submit">Enviar incompatibilidade</button>
-              </form>
-            </div>
-          </article>
-          {% else %}
-          <div class="panel-card admin-card-pro">
-            <p>Nenhum usuário pendente de verificação no momento.</p>
+                        <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form">
+                          <input name="note" value="Documentação ilegível ou incompatível com os dados informados." placeholder="Motivo da recusa">
+                          <button class="btn small danger" type="submit">Enviar incompatibilidade</button>
+                        </form>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="5">Nenhum usuário pendente de verificação no momento.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
           </div>
-          {% endfor %}
         </div>
       </section>
 
@@ -1021,6 +1041,17 @@ document.addEventListener("DOMContentLoaded", function () {
       if (panel) panel.classList.toggle("active");
     });
   });
+
+  document.querySelectorAll(".identity-open-btn").forEach((button) => {
+    button.addEventListener("click", function () {
+      const id = this.getAttribute("data-identity-panel");
+      const panel = document.getElementById(id);
+      if (panel) {
+        panel.classList.toggle("active");
+        this.textContent = panel.classList.contains("active") ? "Fechar dados" : "Abrir dados";
+      }
+    });
+  });
 });
 </script>
 
@@ -1114,7 +1145,7 @@ document.addEventListener("DOMContentLoaded", function () {
 .direct-message-line p{margin:8px 0 0}
 @media(max-width:900px){.admin-order-summary{grid-template-columns:1fr}.order-detail-grid{grid-template-columns:1fr}}
 
-.identity-review-list{display:grid;gap:16px}.identity-review-card{overflow:visible}.identity-user-grid{margin:14px 0}.identity-doc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.identity-doc-grid>div{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:12px}.identity-doc-grid span{display:block;color:#b7c6e6;font-size:13px;margin-bottom:8px}.identity-doc-grid img{width:100%;height:190px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.08)}.identity-doc-link{display:block;text-decoration:none}.identity-pdf-preview{display:grid!important;place-items:center;width:100%;min-height:190px;border-radius:12px;border:1px dashed rgba(147,197,253,.45);background:rgba(59,130,246,.10);color:#bfdbfe!important;font-weight:900;text-align:center;padding:14px}.identity-doc-grid p{color:#b7c6e6}.identity-review-actions{display:grid;gap:10px}.identity-review-actions .inline-form{display:flex;gap:8px;flex-wrap:wrap}.identity-review-actions input{min-width:260px;flex:1}@media(max-width:900px){.identity-doc-grid{grid-template-columns:1fr}.identity-doc-grid img{height:auto;max-height:260px}}
+.identity-compact-card{padding:0;overflow:hidden}.identity-compact-table th,.identity-compact-table td{vertical-align:middle}.identity-detail-row{display:none}.identity-detail-row.active{display:table-row}.identity-detail-row>td{padding:0!important;background:rgba(2,6,23,.35)}.identity-detail-card{margin:12px;padding:16px;border-radius:18px;background:rgba(15,23,42,.92);border:1px solid rgba(148,163,184,.20)}.identity-user-grid{margin:14px 0}.identity-doc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.identity-doc-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.identity-doc-grid>div{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:12px}.identity-doc-grid span{display:block;color:#b7c6e6;font-size:13px;margin-bottom:8px}.identity-doc-grid img{width:100%;height:170px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.08)}.identity-doc-link{display:block;text-decoration:none}.identity-pdf-preview{display:grid!important;place-items:center;width:100%;min-height:170px;border-radius:12px;border:1px dashed rgba(147,197,253,.45);background:rgba(59,130,246,.10);color:#bfdbfe!important;font-weight:900;text-align:center;padding:14px}.identity-doc-grid p{color:#b7c6e6}.identity-review-actions{display:grid;gap:10px}.identity-review-actions .inline-form{display:flex;gap:8px;flex-wrap:wrap}.identity-review-actions input{min-width:260px;flex:1}@media(max-width:1100px){.identity-doc-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.identity-compact-table{min-width:760px}.identity-doc-grid,.identity-doc-grid-4{grid-template-columns:1fr}.identity-doc-grid img{height:auto;max-height:260px}}
 
 
 /* Correção visual do select de cashback e formulários admin no tema escuro */

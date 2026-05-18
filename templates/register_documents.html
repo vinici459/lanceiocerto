@@ -25,6 +25,11 @@
           <input type="file" name="selfie_file" accept="image/*" capture="user" required>
           <small>A selfie precisa ser recente e mostrar bem o rosto.</small>
         </label>
+
+        <label>Comprovante de residência
+          <input type="file" name="residence_proof_file" accept="image/*,.pdf" capture="environment">
+          <small>Opcional, mas recomendado para aumentar a segurança da validação.</small>
+        </label>
       </div>
 
       <button class="btn full" type="submit">Enviar documentos para análise</button>
@@ -36,6 +41,6 @@
   </div>
 </section>
 <style>
-.docs-wrap{align-items:start}.docs-card h1{margin:8px 0 8px}.docs-upload-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.docs-upload-grid label{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:14px}.docs-upload-grid small{display:block;margin-top:8px;line-height:1.35}.skip-docs-form{margin-top:12px}@media(max-width:840px){.docs-upload-grid{grid-template-columns:1fr}}
+.docs-wrap{align-items:start}.docs-card h1{margin:8px 0 8px}.docs-upload-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}.docs-upload-grid label{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:14px}.docs-upload-grid small{display:block;margin-top:8px;line-height:1.35}.skip-docs-form{margin-top:12px}@media(max-width:840px){.docs-upload-grid{grid-template-columns:1fr}}
 </style>
 {% endblock %}
