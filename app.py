@@ -495,7 +495,7 @@ BID_BUTTON_COOLDOWN_SECONDS = NORMAL_BID_BUTTON_COOLDOWN_SECONDS
 MAX_INITIAL_DURATION_SECONDS = 60 * 60
 DEFAULT_INITIAL_DURATION_SECONDS = 30 * 60
 PAYMENT_DEADLINE_MINUTES = 10
-ENABLE_CASHBACK_DRAW = False
+ENABLE_CASHBACK_DRAW = os.getenv("ENABLE_CASHBACK_DRAW", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEFAULT_BID_FEE_PERCENT = 10.0
 PLATFORM_PROFIT_PERCENT = 10.0
 
@@ -3175,6 +3175,7 @@ async def admin_returned_update_relist(
     start_in_minutes: int = Form(5),
     initial_duration_minutes: int = Form(30),
     bid_fee_percent: float = Form(10),
+    cashback_enabled: int = Form(0),
 ):
     db = SessionLocal()
     try:
@@ -3215,6 +3216,11 @@ async def admin_returned_update_relist(
         item.turbo_level_4_percent = min(99.0, turbo_trigger_percent + 10.0)
         item.turbo_level = 0
         item.turbo_enabled = True
+        item.cashback_enabled = bool(int(cashback_enabled or 0))
+
+        # Ao relançar, remove sorteio antigo para evitar cashback preso de leilão anterior.
+        db.query(CashbackEntry).filter(CashbackEntry.auction_id == item.id).delete(synchronize_session=False)
+        db.query(CashbackEvent).filter(CashbackEvent.auction_id == item.id).delete(synchronize_session=False)
 
         db.commit()
         return RedirectResponse("/admin", status_code=303)
@@ -3489,13 +3495,21 @@ def account_request_withdrawal(request: Request, amount: float = Form(...), pix_
             raise HTTPException(status_code=400, detail="Valor inválido.")
         if user.wallet_balance < amount:
             raise HTTPException(status_code=400, detail="Saldo insuficiente para solicitar saque.")
+        # Reserva imediata do saque:
+        # o valor sai do saldo do usuário no ato da solicitação e passa a aparecer
+        # no caixa/admin como "saque pendente" para execução manual.
         user.wallet_balance = BR(user.wallet_balance - amount)
         req = WithdrawalRequest(user_id=user.id, amount=amount, pix_key=pix_key.strip(), status="pending")
         db.add(req)
-        db.add(WalletTransaction(user_id=user.id, amount=-amount, kind="withdrawal_request", note=f"Solicitação de saque via Pix: {pix_key.strip()}"))
-        audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Valor: R$ {fmt_money(amount)}")
+        db.add(WalletTransaction(
+            user_id=user.id,
+            amount=-amount,
+            kind="withdrawal_reserved",
+            note=f"Saque solicitado e reservado no caixa para pagamento manual via Pix: {pix_key.strip()}",
+        ))
+        audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Valor reservado para saque: R$ {fmt_money(amount)}")
         db.commit()
-        return RedirectResponse("/minha-conta", status_code=303)
+        return RedirectResponse("/minha-conta#account-balance-panel", status_code=303)
     finally:
         db.close()
 
@@ -3572,12 +3586,12 @@ def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: st
             user = db.get(User, req.user_id)
             if user:
                 user.wallet_balance = BR(user.wallet_balance + req.amount)
-                db.add(WalletTransaction(user_id=user.id, amount=req.amount, kind="withdrawal_reversal", note=f"Saque #{req.id} recusado/devolvido"))
+                db.add(WalletTransaction(user_id=user.id, amount=req.amount, kind="withdrawal_reversal", note=f"Saque #{req.id} recusado/devolvido ao saldo do usuário"))
         req.status = status
         req.admin_note = admin_note.strip()
         req.updated_at = datetime.utcnow()
         db.commit()
-        return RedirectResponse("/admin#admin-cashflow", status_code=303)
+        return RedirectResponse("/admin#admin-withdrawals", status_code=303)
     finally:
         db.close()
 

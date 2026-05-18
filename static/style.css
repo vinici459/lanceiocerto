@@ -192,3 +192,8 @@
 .admin-panel,.account-panel,.panel-card,.card,.product-details-card{content-visibility:auto;contain-intrinsic-size:1px 420px;}
 img{max-width:100%;}
 @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important;}}
+
+
+/* Correção visual dos selects no painel admin: evita dropdown branco/invisível no tema escuro */
+select option{background:#111827;color:#ffffff;}
+select:focus{border-color:rgba(96,165,250,.55);box-shadow:0 0 0 3px rgba(59,130,246,.16);}

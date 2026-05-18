@@ -19,7 +19,7 @@
       <button class="side-link admin-link" data-target="admin-shipping" type="button">Envios Pendentes</button>
       <button class="side-link admin-link" data-target="admin-users" type="button">Usuários</button>
       <button class="side-link admin-link" data-target="admin-identity-pending" type="button">Usuários pendentes</button>
-      <button class="side-link admin-link" data-target="admin-withdrawals" type="button">Saques</button>
+      <button class="side-link admin-link" data-target="admin-withdrawals" type="button">Saques Pendentes</button>
       <button class="side-link admin-link" data-target="admin-tickets" type="button">Chamados/Disputas</button>
       <button class="side-link admin-link" data-target="admin-suggestions" type="button">Indicações</button>
       <button class="side-link admin-link" data-target="admin-search-orders" type="button">Consulta</button>
@@ -649,6 +649,82 @@
       </section>
 
 
+      <section id="admin-withdrawals" class="admin-panel">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Saques Pendentes</h1>
+            <p>Solicitações feitas pelos usuários. O valor já sai do saldo do usuário no momento do pedido e fica reservado no caixa para pagamento manual.</p>
+          </div>
+        </div>
+
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat finance-card warning">
+            <span>Total pendente</span>
+            <strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong>
+            <small>Valor reservado para pagar manualmente</small>
+          </div>
+          <div class="stat">
+            <span>Quantidade</span>
+            <strong>{{ stats.pending_withdrawals if stats.pending_withdrawals is defined else 0 }}</strong>
+            <small>Solicitações aguardando ação</small>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row">
+            <h2>Solicitações de saque</h2>
+            <span class="pill-soft warn">Execução manual</span>
+          </div>
+          <p class="muted withdraw-admin-note">
+            Ao aprovar ou marcar como pago, o saldo do usuário não é descontado novamente, porque já foi reservado no pedido. Se recusar, o sistema devolve o valor ao saldo do usuário automaticamente.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Usuário</th>
+                  <th>CPF</th>
+                  <th>E-mail</th>
+                  <th>Valor</th>
+                  <th>Chave PIX</th>
+                  <th>Status</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for w in withdrawal_requests if withdrawal_requests is defined %}
+                <tr class="{% if w.status == 'pending' %}withdraw-row-pending{% endif %}">
+                  <td>{{ w.created_at.strftime('%d/%m/%Y %H:%M') if w.created_at else '—' }}</td>
+                  <td>{{ w.user.full_name if w.user else 'Usuário removido' }}<br><small>@{{ w.user.public_name or w.user.nickname if w.user else '—' }}</small></td>
+                  <td>{{ w.user.cpf if w.user and w.user.cpf else '—' }}</td>
+                  <td>{{ w.user.email if w.user else '—' }}</td>
+                  <td><strong>R$ {{ '%.2f'|format(w.amount)|replace('.', ',') }}</strong></td>
+                  <td><code class="pix-key-code">{{ w.pix_key }}</code></td>
+                  <td><span class="status {{ w.status }}">{{ w.status }}</span></td>
+                  <td>
+                    <form method="post" action="/admin/withdrawal/{{ w.id }}/set-status" class="withdraw-admin-form">
+                      <select name="status">
+                        <option value="pending" {% if w.status == 'pending' %}selected{% endif %}>Pendente</option>
+                        <option value="approved" {% if w.status == 'approved' %}selected{% endif %}>Aprovado</option>
+                        <option value="paid" {% if w.status == 'paid' %}selected{% endif %}>Pago manualmente</option>
+                        <option value="rejected" {% if w.status == 'rejected' %}selected{% endif %}>Recusar e devolver</option>
+                      </select>
+                      <input name="admin_note" value="{{ w.admin_note or '' }}" placeholder="Observação do admin">
+                      <button class="btn small" type="submit">Salvar</button>
+                    </form>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8">Nenhuma solicitação de saque encontrada.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
       <section id="admin-suggestions" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -1039,6 +1115,24 @@ document.addEventListener("DOMContentLoaded", function () {
 @media(max-width:900px){.admin-order-summary{grid-template-columns:1fr}.order-detail-grid{grid-template-columns:1fr}}
 
 .identity-review-list{display:grid;gap:16px}.identity-review-card{overflow:visible}.identity-user-grid{margin:14px 0}.identity-doc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.identity-doc-grid>div{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:12px}.identity-doc-grid span{display:block;color:#b7c6e6;font-size:13px;margin-bottom:8px}.identity-doc-grid img{width:100%;height:190px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.08)}.identity-doc-link{display:block;text-decoration:none}.identity-pdf-preview{display:grid!important;place-items:center;width:100%;min-height:190px;border-radius:12px;border:1px dashed rgba(147,197,253,.45);background:rgba(59,130,246,.10);color:#bfdbfe!important;font-weight:900;text-align:center;padding:14px}.identity-doc-grid p{color:#b7c6e6}.identity-review-actions{display:grid;gap:10px}.identity-review-actions .inline-form{display:flex;gap:8px;flex-wrap:wrap}.identity-review-actions input{min-width:260px;flex:1}@media(max-width:900px){.identity-doc-grid{grid-template-columns:1fr}.identity-doc-grid img{height:auto;max-height:260px}}
+
+
+/* Correção visual do select de cashback e formulários admin no tema escuro */
+.admin-page-pro select,
+.admin-production-page select,
+.withdraw-admin-form select {
+  color: #ffffff;
+  background: #1e293b;
+  border: 1px solid rgba(148,163,184,.28);
+  border-radius: 12px;
+}
+.admin-page-pro select option,
+.admin-production-page select option,
+.withdraw-admin-form select option {
+  color: #ffffff;
+  background: #1e293b;
+}
+.withdraw-admin-note{margin:0 0 14px}.withdraw-row-pending{background:rgba(251,191,36,.045)}.withdraw-admin-form{display:grid;grid-template-columns:150px minmax(170px,1fr) auto;gap:8px;align-items:center}.pix-key-code{display:inline-block;max-width:210px;white-space:normal;word-break:break-word;padding:6px 8px;border-radius:9px;background:rgba(255,255,255,.07);color:#bfdbfe}@media(max-width:900px){.withdraw-admin-form{grid-template-columns:1fr}}
 
 </style>
 
