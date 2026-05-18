@@ -352,6 +352,21 @@ class ProductSuggestionVote(Base):
     user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 
+class ProductSuggestionNomination(Base):
+    __tablename__ = "product_suggestion_nominations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    product_key: Mapped[str] = mapped_column(String(100), index=True)
+    product_name: Mapped[str] = mapped_column(String(180), default="")
+    category: Mapped[str] = mapped_column(String(80), default="")
+    price_level: Mapped[str] = mapped_column(String(40), default="")
+    week_start: Mapped[datetime] = mapped_column(DateTime, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
 class ConnectionManager:
     def __init__(self) -> None:
         self.connections: dict[int, list[WebSocket]] = defaultdict(list)
@@ -501,28 +516,69 @@ DEFAULT_BID_FEE_PERCENT = 10.0
 PLATFORM_PROFIT_PERCENT = 10.0
 
 
-SUGGESTION_PRODUCTS = [
+SUGGESTION_WEEK_LIMIT = 20
+
+# Catálogo público usado para indicação. A lista é local para evitar depender de
+# scraping/API externa em tempo real. Pode ser ampliada depois com importação de CSV
+# ou integração oficial de marketplace.
+PRODUCT_SUGGESTION_CATALOG = [
     {"key": "fone_bluetooth", "name": "Fone Bluetooth", "category": "Áudio", "price_level": "Baixo"},
+    {"key": "caixa_som_bluetooth", "name": "Caixa de Som Bluetooth", "category": "Áudio", "price_level": "Baixo/Médio"},
+    {"key": "soundbar", "name": "Soundbar", "category": "Áudio", "price_level": "Alto"},
+    {"key": "microfone_usb", "name": "Microfone USB", "category": "Áudio", "price_level": "Médio"},
+    {"key": "headset_gamer", "name": "Headset Gamer", "category": "Áudio", "price_level": "Médio"},
     {"key": "mouse_gamer", "name": "Mouse Gamer", "category": "Informática", "price_level": "Baixo"},
     {"key": "teclado_mecanico", "name": "Teclado Mecânico", "category": "Informática", "price_level": "Baixo/Médio"},
-    {"key": "caixa_som_bluetooth", "name": "Caixa de Som Bluetooth", "category": "Áudio", "price_level": "Baixo/Médio"},
+    {"key": "monitor_24", "name": "Monitor 24 polegadas", "category": "Informática", "price_level": "Médio"},
+    {"key": "notebook", "name": "Notebook", "category": "Informática", "price_level": "Alto"},
+    {"key": "ssd_externo", "name": "SSD Externo", "category": "Informática", "price_level": "Médio"},
+    {"key": "webcam_fullhd", "name": "Webcam Full HD", "category": "Informática", "price_level": "Médio"},
+    {"key": "impressora_multifuncional", "name": "Impressora Multifuncional", "category": "Informática", "price_level": "Médio"},
     {"key": "carregador_portatil", "name": "Carregador Portátil", "category": "Acessórios", "price_level": "Baixo/Médio"},
     {"key": "smartwatch", "name": "Smartwatch", "category": "Wearable", "price_level": "Médio"},
     {"key": "echo_dot_alexa", "name": "Echo Dot / Alexa", "category": "Casa inteligente", "price_level": "Médio"},
+    {"key": "lampada_inteligente", "name": "Lâmpada Inteligente", "category": "Casa inteligente", "price_level": "Baixo"},
+    {"key": "camera_wifi", "name": "Câmera Wi-Fi", "category": "Casa inteligente", "price_level": "Médio"},
     {"key": "controle_gamer", "name": "Controle Gamer", "category": "Games", "price_level": "Médio"},
-    {"key": "kindle", "name": "Kindle", "category": "Leitura", "price_level": "Médio"},
-    {"key": "tablet", "name": "Tablet", "category": "Eletrônicos", "price_level": "Médio"},
-    {"key": "monitor_24", "name": "Monitor 24 polegadas", "category": "Informática", "price_level": "Médio"},
     {"key": "nintendo_switch", "name": "Nintendo Switch", "category": "Games", "price_level": "Médio/Alto"},
     {"key": "playstation_4", "name": "PlayStation 4", "category": "Games", "price_level": "Médio/Alto"},
     {"key": "xbox_series_s", "name": "Xbox Series S", "category": "Games", "price_level": "Médio/Alto"},
+    {"key": "kindle", "name": "Kindle", "category": "Leitura", "price_level": "Médio"},
+    {"key": "tablet", "name": "Tablet", "category": "Eletrônicos", "price_level": "Médio"},
     {"key": "celular_android", "name": "Celular Android", "category": "Smartphone", "price_level": "Médio/Alto"},
     {"key": "iphone", "name": "iPhone", "category": "Smartphone", "price_level": "Alto"},
-    {"key": "notebook", "name": "Notebook", "category": "Informática", "price_level": "Alto"},
     {"key": "tv_43", "name": "TV 43 polegadas", "category": "TV", "price_level": "Alto"},
     {"key": "tv_50", "name": "TV 50 polegadas", "category": "TV", "price_level": "Alto"},
-    {"key": "soundbar", "name": "Soundbar", "category": "Áudio", "price_level": "Alto"},
+    {"key": "air_fryer", "name": "Air Fryer", "category": "Cozinha", "price_level": "Médio"},
+    {"key": "cafeteira_capsula", "name": "Cafeteira de Cápsula", "category": "Cozinha", "price_level": "Médio"},
+    {"key": "liquidificador", "name": "Liquidificador", "category": "Cozinha", "price_level": "Baixo/Médio"},
+    {"key": "batedeira", "name": "Batedeira", "category": "Cozinha", "price_level": "Baixo/Médio"},
+    {"key": "panela_eletrica", "name": "Panela Elétrica", "category": "Cozinha", "price_level": "Médio"},
+    {"key": "jogo_panelas", "name": "Jogo de Panelas", "category": "Cozinha", "price_level": "Médio"},
+    {"key": "faqueiro", "name": "Faqueiro", "category": "Cozinha", "price_level": "Baixo/Médio"},
+    {"key": "aspirador_robo", "name": "Aspirador Robô", "category": "Eletrodomésticos", "price_level": "Alto"},
+    {"key": "aspirador_po", "name": "Aspirador de Pó", "category": "Eletrodomésticos", "price_level": "Médio"},
+    {"key": "ventilador", "name": "Ventilador", "category": "Eletrodomésticos", "price_level": "Baixo/Médio"},
+    {"key": "climatizador", "name": "Climatizador", "category": "Eletrodomésticos", "price_level": "Médio"},
+    {"key": "microondas", "name": "Micro-ondas", "category": "Eletrodomésticos", "price_level": "Médio/Alto"},
+    {"key": "lavadora_alta_pressao", "name": "Lavadora de Alta Pressão", "category": "Casa e Jardim", "price_level": "Médio/Alto"},
+    {"key": "furadeira_parafusadeira", "name": "Furadeira/Parafusadeira", "category": "Ferramentas", "price_level": "Médio"},
+    {"key": "kit_ferramentas", "name": "Kit de Ferramentas", "category": "Ferramentas", "price_level": "Baixo/Médio"},
+    {"key": "mala_viagem", "name": "Mala de Viagem", "category": "Viagem", "price_level": "Médio"},
+    {"key": "cadeira_gamer", "name": "Cadeira Gamer", "category": "Móveis", "price_level": "Médio/Alto"},
+    {"key": "cadeira_escritorio", "name": "Cadeira de Escritório", "category": "Móveis", "price_level": "Médio"},
+    {"key": "bicicleta", "name": "Bicicleta", "category": "Esporte", "price_level": "Médio/Alto"},
+    {"key": "patinete_eletrico", "name": "Patinete Elétrico", "category": "Esporte", "price_level": "Alto"},
+    {"key": "kit_musculacao", "name": "Kit Musculação", "category": "Esporte", "price_level": "Médio"},
+    {"key": "mochila_notebook", "name": "Mochila para Notebook", "category": "Acessórios", "price_level": "Baixo/Médio"},
+    {"key": "maquina_cortar_cabelo", "name": "Máquina de Cortar Cabelo", "category": "Beleza", "price_level": "Baixo/Médio"},
+    {"key": "secador_cabelo", "name": "Secador de Cabelo", "category": "Beleza", "price_level": "Médio"},
+    {"key": "escova_secadora", "name": "Escova Secadora", "category": "Beleza", "price_level": "Médio"},
 ]
+
+# Compatibilidade com templates antigos. Agora a votação usa as indicações semanais,
+# não a lista fixa completa.
+SUGGESTION_PRODUCTS = PRODUCT_SUGGESTION_CATALOG
 
 
 
@@ -1592,11 +1648,48 @@ def today_start_utc() -> datetime:
     return datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def current_week_start_utc(now: Optional[datetime] = None) -> datetime:
+    now = now or datetime.utcnow()
+    base = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return base - timedelta(days=base.weekday())
+
+
+def next_week_start_utc(now: Optional[datetime] = None) -> datetime:
+    return current_week_start_utc(now) + timedelta(days=7)
+
+
 def suggestion_product_by_key(product_key: str) -> Optional[dict]:
-    for product in SUGGESTION_PRODUCTS:
+    for product in PRODUCT_SUGGESTION_CATALOG:
         if product["key"] == product_key:
             return product
     return None
+
+
+def suggestion_categories() -> list[str]:
+    return sorted({p["category"] for p in PRODUCT_SUGGESTION_CATALOG})
+
+
+def current_week_nominations(db: Session) -> list[ProductSuggestionNomination]:
+    week_start = current_week_start_utc()
+    return (
+        db.query(ProductSuggestionNomination)
+        .options(selectinload(ProductSuggestionNomination.user))
+        .filter(ProductSuggestionNomination.week_start == week_start)
+        .order_by(ProductSuggestionNomination.created_at.asc())
+        .all()
+    )
+
+
+def user_week_nomination(db: Session, user: Optional[User]) -> Optional[ProductSuggestionNomination]:
+    if not user:
+        return None
+    week_start = current_week_start_utc()
+    return (
+        db.query(ProductSuggestionNomination)
+        .filter(ProductSuggestionNomination.user_id == user.id, ProductSuggestionNomination.week_start == week_start)
+        .order_by(desc(ProductSuggestionNomination.created_at))
+        .first()
+    )
 
 
 def user_today_suggestion_vote(db: Session, user: Optional[User]) -> Optional[ProductSuggestionVote]:
@@ -1610,25 +1703,55 @@ def user_today_suggestion_vote(db: Session, user: Optional[User]) -> Optional[Pr
     )
 
 
-def suggestion_vote_stats(db: Session) -> list[dict]:
-    """Estatísticas de indicação em uma única consulta agregada.
+def user_today_nomination(db: Session, user: Optional[User]) -> Optional[ProductSuggestionNomination]:
+    if not user:
+        return None
+    return (
+        db.query(ProductSuggestionNomination)
+        .filter(ProductSuggestionNomination.user_id == user.id, ProductSuggestionNomination.created_at >= today_start_utc())
+        .order_by(desc(ProductSuggestionNomination.created_at))
+        .first()
+    )
 
-    Antes havia um count() para o total e mais um count() por produto.
-    Com muitos acessos simultâneos, isso aumenta o tempo de resposta da home/admin.
+
+def suggestion_vote_stats(db: Session) -> list[dict]:
+    """Ranking público da semana.
+
+    Apenas produtos indicados na semana entram na votação. A lista zera
+    automaticamente na segunda-feira porque as consultas usam week_start.
     """
+    week_start = current_week_start_utc()
+    week_end = week_start + timedelta(days=7)
+    nominations = current_week_nominations(db)
+    if not nominations:
+        return []
+
+    keys = [n.product_key for n in nominations]
     grouped = (
         db.query(ProductSuggestionVote.product_key, func.count(ProductSuggestionVote.id))
+        .filter(ProductSuggestionVote.created_at >= week_start, ProductSuggestionVote.created_at < week_end)
+        .filter(ProductSuggestionVote.product_key.in_(keys))
         .group_by(ProductSuggestionVote.product_key)
         .all()
     )
     votes_by_key = {key: int(total or 0) for key, total in grouped}
     total_votes = sum(votes_by_key.values())
     rows = []
-    for product in SUGGESTION_PRODUCTS:
-        votes = votes_by_key.get(product["key"], 0)
+    for n in nominations:
+        votes = votes_by_key.get(n.product_key, 0)
         percent = round((votes / total_votes) * 100, 2) if total_votes else 0.0
-        rows.append({**product, "votes": votes, "percent": percent})
-    rows.sort(key=lambda item: item["votes"], reverse=True)
+        indicated_by = n.user.public_name or n.user.nickname or (n.user.full_name.split()[0] if n.user and n.user.full_name else "usuario")
+        rows.append({
+            "key": n.product_key,
+            "name": n.product_name,
+            "category": n.category,
+            "price_level": n.price_level,
+            "votes": votes,
+            "percent": percent,
+            "indicated_by": indicated_by,
+            "created_at": n.created_at,
+        })
+    rows.sort(key=lambda item: (-item["votes"], item["created_at"]))
     return rows
 
 
@@ -2009,9 +2132,14 @@ def home(request: Request):
                 "live_items": [public_auction_card_payload(x) for x in live_items],
                 "upcoming_items": [public_auction_card_payload(x) for x in upcoming_items],
                 "ended_items": [public_auction_card_payload(x) for x in ended_items],
-                "suggestion_products": SUGGESTION_PRODUCTS,
-                "suggestion_vote_stats": suggestion_vote_stats(db),
+                "suggestion_products": suggestion_vote_stats(db),
+                "suggestion_catalog": PRODUCT_SUGGESTION_CATALOG,
+                "suggestion_categories": suggestion_categories(),
+                "suggestion_week_limit": SUGGESTION_WEEK_LIMIT,
+                "suggestion_week_count": len(current_week_nominations(db)),
+                "user_week_nomination": user_week_nomination(db, user),
                 "today_suggestion_vote": user_today_suggestion_vote(db, user),
+                "today_suggestion_nomination": user_today_nomination(db, user),
                 "fee_percent": "1%",
             },
         )
@@ -2020,8 +2148,8 @@ def home(request: Request):
 
 
 
-@app.post("/indicacao/votar")
-def vote_product_suggestion(request: Request, product_key: str = Form(...)):
+@app.post("/indicacao/indicar")
+def nominate_product_suggestion(request: Request, product_key: str = Form(...)):
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -2029,9 +2157,55 @@ def vote_product_suggestion(request: Request, product_key: str = Form(...)):
         if not product:
             raise HTTPException(status_code=400, detail="Produto inválido para indicação.")
 
-        already = user_today_suggestion_vote(db, user)
-        if already:
+        week_start = current_week_start_utc()
+        if user_week_nomination(db, user):
+            return RedirectResponse("/?indicacao=ja-indicou", status_code=303)
+
+        current_count = db.query(ProductSuggestionNomination).filter(ProductSuggestionNomination.week_start == week_start).count()
+        if current_count >= SUGGESTION_WEEK_LIMIT:
+            return RedirectResponse("/?indicacao=lista-cheia", status_code=303)
+
+        duplicate = (
+            db.query(ProductSuggestionNomination)
+            .filter(ProductSuggestionNomination.week_start == week_start, ProductSuggestionNomination.product_key == product_key)
+            .first()
+        )
+        if duplicate:
+            return RedirectResponse("/?indicacao=repetido", status_code=303)
+
+        db.add(ProductSuggestionNomination(
+            user_id=user.id,
+            product_key=product["key"],
+            product_name=product["name"],
+            category=product["category"],
+            price_level=product["price_level"],
+            week_start=week_start,
+        ))
+        db.commit()
+        return RedirectResponse("/?indicacao=indicou", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/indicacao/votar")
+def vote_product_suggestion(request: Request, product_key: str = Form(...)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        week_start = current_week_start_utc()
+        nominated = (
+            db.query(ProductSuggestionNomination)
+            .filter(ProductSuggestionNomination.week_start == week_start, ProductSuggestionNomination.product_key == product_key)
+            .first()
+        )
+        if not nominated:
+            raise HTTPException(status_code=400, detail="Produto não está na votação desta semana.")
+
+        if user_today_suggestion_vote(db, user):
             return RedirectResponse("/?indicacao=ja-votou", status_code=303)
+
+        if user_today_nomination(db, user):
+            return RedirectResponse("/?indicacao=indicou-hoje", status_code=303)
 
         db.add(ProductSuggestionVote(user_id=user.id, product_key=product_key))
         db.commit()

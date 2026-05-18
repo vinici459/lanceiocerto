@@ -208,68 +208,119 @@
   </div>
 
   <div id="home-suggestions" class="home-tab-panel">
-    <section class="auction-lane suggestion-lane">
-      <div class="lane-head">
+    <section class="auction-lane suggestion-lane suggestion-pro-lane">
+      <div class="lane-head suggestion-head-pro">
         <div>
-          <h3>Indicação de produtos</h3>
-          <p>Vote no produto que você gostaria de ver nos próximos leilões. Cada usuário pode votar uma vez por dia.</p>
+          <h3>Indicação de produtos da semana</h3>
+          <p>Todo usuário pode indicar 1 produto por semana. A votação é pública, zera toda semana e cada conta pode votar 1 vez por dia.</p>
         </div>
-        <span class="lane-count scheduled">{{ suggestion_products|length if suggestion_products is defined else 0 }}</span>
+        <span class="lane-count scheduled">{{ suggestion_week_count if suggestion_week_count is defined else 0 }}/{{ suggestion_week_limit if suggestion_week_limit is defined else 20 }}</span>
       </div>
 
-      {% if request.query_params.get('indicacao') == 'ok' %}
-      <div class="empty-state suggestion-message success">
-        <strong>Voto registrado com sucesso.</strong>
-        <span>Obrigado pela indicação. Você poderá votar novamente amanhã.</span>
-      </div>
-      {% elif request.query_params.get('indicacao') == 'ja-votou' %}
-      <div class="empty-state suggestion-message warn">
-        <strong>Você já fez uma indicação hoje.</strong>
-        <span>O limite é de um voto por usuário a cada dia.</span>
-      </div>
+      {% set msg = request.query_params.get('indicacao') %}
+      {% if msg == 'ok' %}
+      <div class="empty-state suggestion-message success"><strong>Voto registrado com sucesso.</strong><span>Você poderá votar novamente amanhã.</span></div>
+      {% elif msg == 'indicou' %}
+      <div class="empty-state suggestion-message success"><strong>Produto indicado com sucesso.</strong><span>Ele entrou na votação pública desta semana.</span></div>
+      {% elif msg == 'ja-votou' %}
+      <div class="empty-state suggestion-message warn"><strong>Você já votou hoje.</strong><span>O limite é de um voto por dia.</span></div>
+      {% elif msg == 'indicou-hoje' %}
+      <div class="empty-state suggestion-message warn"><strong>Hoje você já indicou um produto.</strong><span>Quem indica um produto só pode votar a partir do dia seguinte.</span></div>
+      {% elif msg == 'ja-indicou' %}
+      <div class="empty-state suggestion-message warn"><strong>Você já indicou um produto nesta semana.</strong><span>Na próxima semana a lista zera e você poderá indicar novamente.</span></div>
+      {% elif msg == 'repetido' %}
+      <div class="empty-state suggestion-message warn"><strong>Produto já indicado nesta semana.</strong><span>Escolha outro produto para manter a votação variada.</span></div>
+      {% elif msg == 'lista-cheia' %}
+      <div class="empty-state suggestion-message warn"><strong>Lista semanal completa.</strong><span>As 20 indicações da semana já foram preenchidas.</span></div>
       {% endif %}
 
       {% if user %}
-        {% if today_suggestion_vote %}
-          <div class="empty-state suggestion-message">
-            <strong>Indicação do dia já registrada.</strong>
-            <span>Você já votou hoje. Volte amanhã para indicar outro produto.</span>
-          </div>
-        {% endif %}
-
-        <div class="cards lc-auction-grid suggestion-grid">
-          {% for product in suggestion_products %}
-          <article class="card lc-auction-card suggestion-card">
-            <div class="card-body">
-              <span class="suggestion-category">{{ product.category }}</span>
-              <h3>{{ product.name }}</h3>
-
-              <div class="price-line">
-                <div>
-                  <span>Faixa</span>
-                  <strong>{{ product.price_level }}</strong>
-                </div>
-                <div>
-                  <span>Votos</span>
-                  {% set stat = (suggestion_vote_stats|selectattr('key', 'equalto', product.key)|list|first) if suggestion_vote_stats is defined else none %}
-                  <strong>{{ stat.votes if stat else 0 }}</strong>
-                </div>
-              </div>
-
-              <form method="post" action="/indicacao/votar">
-                <input type="hidden" name="product_key" value="{{ product.key }}">
-                <button class="btn full" type="submit" {% if today_suggestion_vote %}disabled{% endif %}>
-                  {% if today_suggestion_vote %}Voto diário usado{% else %}Votar neste produto{% endif %}
-                </button>
-              </form>
-            </div>
-          </article>
-          {% endfor %}
+      <div class="suggestion-interactive-panel">
+        <div class="suggestion-panel-copy">
+          <span class="eyebrow">Participação pública</span>
+          <h3>Indicar produto para votação</h3>
+          {% if user_week_nomination %}
+            <p>Você já indicou nesta semana: <strong>{{ user_week_nomination.product_name }}</strong>. Volte na próxima semana para indicar outro.</p>
+          {% elif suggestion_week_count >= suggestion_week_limit %}
+            <p>A lista desta semana já atingiu o limite de {{ suggestion_week_limit }} produtos.</p>
+          {% else %}
+            <p>Selecione um produto do catálogo. Não precisa digitar nada e o sistema impede repetição na semana.</p>
+          {% endif %}
         </div>
+
+        <form method="post" action="/indicacao/indicar" class="suggestion-picker-form">
+          <div class="suggestion-picker-grid">
+            <label>Categoria
+              <select id="suggestionCategoryFilter">
+                <option value="">Todas as categorias</option>
+                {% for cat in suggestion_categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Buscar produto
+              <input id="suggestionSearchInput" type="search" placeholder="Ex: fone, air fryer, notebook...">
+            </label>
+            <label>Produto para indicar
+              <select name="product_key" id="suggestionProductSelect" required {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>
+                <option value="">Selecione um produto</option>
+                {% for product in suggestion_catalog %}
+                  <option value="{{ product.key }}" data-category="{{ product.category }}" data-search="{{ (product.name ~ ' ' ~ product.category ~ ' ' ~ product.price_level)|lower }}">
+                    {{ product.name }} — {{ product.category }} — {{ product.price_level }}
+                  </option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+          <button class="btn full" type="submit" {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>Indicar produto para votação</button>
+        </form>
+      </div>
+
+      <div class="suggestion-rules-grid">
+        <div><strong>1 indicação por semana</strong><span>Cada conta só pode colocar um produto na lista semanal.</span></div>
+        <div><strong>20 produtos por semana</strong><span>Após preencher 20 indicações, a lista fecha até a próxima semana.</span></div>
+        <div><strong>1 voto por dia</strong><span>Quem indicou hoje só começa a votar amanhã.</span></div>
+      </div>
+
+      <div class="suggestion-week-title">
+        <div>
+          <h3>Produtos indicados para votação</h3>
+          <p>Ranking transparente dos produtos mais votados da semana.</p>
+        </div>
+      </div>
+
+      <div class="cards lc-auction-grid suggestion-grid suggestion-vote-grid">
+        {% for product in suggestion_products %}
+        <article class="card lc-auction-card suggestion-card suggestion-public-card">
+          <div class="card-body">
+            <div class="suggestion-card-top">
+              <span class="suggestion-category">{{ product.category }}</span>
+              <span class="suggestion-votes-pill">{{ product.votes }} voto{{ 's' if product.votes != 1 else '' }}</span>
+            </div>
+            <h3>{{ product.name }}</h3>
+            <p class="suggestion-indicated-by">Indicado por <strong>@{{ product.indicated_by }}</strong></p>
+            <div class="price-line">
+              <div><span>Faixa</span><strong>{{ product.price_level }}</strong></div>
+              <div><span>Semana</span><strong>{{ product.percent }}%</strong></div>
+            </div>
+            <div class="suggestion-progress"><span style="width: {{ product.percent if product.percent <= 100 else 100 }}%"></span></div>
+            <form method="post" action="/indicacao/votar">
+              <input type="hidden" name="product_key" value="{{ product.key }}">
+              <button class="btn full" type="submit" {% if today_suggestion_vote or today_suggestion_nomination %}disabled{% endif %}>
+                {% if today_suggestion_vote %}Voto diário usado{% elif today_suggestion_nomination %}Você indicou hoje{% else %}Votar neste produto{% endif %}
+              </button>
+            </form>
+          </div>
+        </article>
+        {% else %}
+        <div class="empty-state suggestion-message">
+          <strong>Nenhum produto indicado ainda.</strong>
+          <span>Seja o primeiro da semana a indicar um produto para votação.</span>
+        </div>
+        {% endfor %}
+      </div>
       {% else %}
         <div class="empty-state suggestion-message">
-          <strong>Entre na conta para votar.</strong>
-          <span>O voto é limitado a uma indicação por usuário por dia.</span>
+          <strong>Entre na conta para indicar e votar.</strong>
+          <span>A votação é pública, mas a participação exige login para evitar duplicidade.</span>
         </div>
       {% endif %}
     </section>
@@ -380,6 +431,29 @@ document.addEventListener("DOMContentLoaded", function () {
   if (searchInput) {
     searchInput.addEventListener("input", filterCards);
   }
+
+
+  const suggestionCategoryFilter = document.getElementById("suggestionCategoryFilter");
+  const suggestionSearchInput = document.getElementById("suggestionSearchInput");
+  const suggestionProductSelect = document.getElementById("suggestionProductSelect");
+
+  function filterSuggestionProducts() {
+    if (!suggestionProductSelect) return;
+    const category = (suggestionCategoryFilter?.value || "").toLowerCase();
+    const term = (suggestionSearchInput?.value || "").trim().toLowerCase();
+    Array.from(suggestionProductSelect.options).forEach((option) => {
+      if (!option.value) return;
+      const optionCategory = (option.dataset.category || "").toLowerCase();
+      const text = (option.dataset.search || option.textContent || "").toLowerCase();
+      const visible = (!category || optionCategory === category) && (!term || text.includes(term));
+      option.hidden = !visible;
+    });
+    const selected = suggestionProductSelect.selectedOptions[0];
+    if (selected && selected.hidden) suggestionProductSelect.value = "";
+  }
+
+  suggestionCategoryFilter?.addEventListener("change", filterSuggestionProducts);
+  suggestionSearchInput?.addEventListener("input", filterSuggestionProducts);
 
   function formatTime(totalSeconds) {
     let seconds = Math.max(0, parseInt(totalSeconds || 0, 10));
