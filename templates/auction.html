@@ -401,6 +401,9 @@ window.__AUCTION__ = {{ item | tojson }};
   let wsReconnectTimer = null;
   let stateFetchInFlight = false;
   let lastZeroSyncAt = 0;
+  let lastAcceptedBidId = Number(auction.last_bid_id || auction.state_version || 0);
+  let lastAcceptedBidCount = Number(auction.bids_count || 0);
+  let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
 
@@ -411,6 +414,36 @@ window.__AUCTION__ = {{ item | tojson }};
   function isLive(s){ return s === "live"; }
   function isClosed(s){ return ["ended", "finished", "closed", "expired", "pending_payment"].includes(s); }
   function show(el, visible, mode="block"){ if(el) el.style.display = visible ? mode : "none"; }
+  function pendingBidCount(){ return Object.keys(pendingBids).length; }
+  function isTurboLockedForUser(){
+    return Number(auction.turbo_level || 0) >= 2 && auction.user_turbo_eligible === false;
+  }
+  function localTurboLevelFromProgress(progress){
+    progress = Number(progress || 0);
+    if(progress >= Number(auction.turbo_level_4_percent || 70)) return 4;
+    if(progress >= Number(auction.turbo_level_3_percent || 65)) return 3;
+    if(progress >= Number(auction.turbo_trigger_percent || 60)) return 2;
+    return 0;
+  }
+  function shouldAcceptIncomingState(data, source){
+    if(!data) return false;
+    const safeSources = new Set(["initial", "bid", "bid-error", "local-start", "confirm-local-start"]);
+    const incomingStatus = String(data.status || "").toLowerCase();
+    if(["ended", "pending_payment", "expired", "finished", "closed"].includes(incomingStatus)) return true;
+    if(safeSources.has(source)) return true;
+
+    const incomingBidId = Number(data.last_bid_id || data.state_version || 0);
+    const incomingCount = Number(data.bids_count || 0);
+    const currentBidId = Number(auction.last_bid_id || auction.state_version || lastAcceptedBidId || 0);
+    const currentCount = Number(auction.bids_count || lastAcceptedBidCount || 0);
+
+    // Proteção principal contra o bug do vídeo: websocket/polling antigo não pode
+    // sobrescrever um lance recém exibido na tela.
+    if(incomingBidId && currentBidId && incomingBidId < currentBidId) return false;
+    if(incomingCount < currentCount && (pendingBidCount() > 0 || Date.now() < optimisticHoldUntil)) return false;
+    if(incomingBidId === currentBidId && incomingCount < currentCount && Date.now() < optimisticHoldUntil) return false;
+    return true;
+  }
   function labelStatus(s){
     if(isScheduled(s)) return "PRÓXIMO";
     if(s === "live") return "AO VIVO";
@@ -496,7 +529,17 @@ window.__AUCTION__ = {{ item | tojson }};
     if(auction.source_price > 0){
       auction.progress_percent = Math.round(((Number(auction.current_price || 0) + Number(auction.total_bid_fees || 0)) / Number(auction.source_price || 1)) * 10000) / 100;
     }
+
+    const nextLevel = localTurboLevelFromProgress(auction.progress_percent);
+    if(nextLevel > Number(auction.turbo_level || 0)){
+      auction.turbo_level = nextLevel;
+      auction.turbo_label = nextLevel === 4 ? "Turbo 4.0" : nextLevel === 3 ? "Turbo 3.0" : "Turbo 2.0";
+      // Quem acabou de dar lance continua habilitado para os próximos lances no turbo.
+      auction.user_turbo_eligible = true;
+    }
+
     auction.remaining_seconds = remaining;
+    optimisticHoldUntil = Date.now() + 6000;
     applyAuctionState(auction, "optimistic-bid");
   }
 
@@ -505,13 +548,19 @@ window.__AUCTION__ = {{ item | tojson }};
     const cd = Math.max(Number(cooldowns[key] || 0));
     const busy = Boolean(pendingBids[key]);
     const canBid = isLive(status());
+    const turboLocked = isTurboLockedForUser();
 
-    btn.disabled = !canBid || busy || cd > 0;
+    btn.disabled = !canBid || turboLocked || busy || cd > 0;
     btn.classList.toggle("cooling", btn.disabled);
     btn.textContent = cd > 0 ? `${moneyBR(key)} • ${cd}s` : moneyBR(key);
   }
   function renderButtons(){
     document.querySelectorAll(".bid-btn").forEach(renderButton);
+    if(isTurboLockedForUser()){
+      setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
+    } else if(els.feedback && String(els.feedback.textContent || "").startsWith("Modo Turbo")){
+      setFeedback("");
+    }
   }
 
   function turboFlash(level){
@@ -592,7 +641,19 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function applyAuctionState(data, source="unknown"){
     if(!data) return;
+    if(data.user_turbo_eligible === null || typeof data.user_turbo_eligible === "undefined"){
+      data = {...data, user_turbo_eligible: auction.user_turbo_eligible};
+    }
+    if(!shouldAcceptIncomingState(data, source)) return;
+
     auction = data;
+    const incomingAcceptedId = Number(auction.last_bid_id || auction.state_version || 0);
+    const previousAcceptedId = lastAcceptedBidId;
+    lastAcceptedBidId = Math.max(lastAcceptedBidId, incomingAcceptedId);
+    lastAcceptedBidCount = Math.max(lastAcceptedBidCount, Number(auction.bids_count || 0));
+    if(source === "bid" || incomingAcceptedId > previousAcceptedId){
+      optimisticHoldUntil = 0;
+    }
     const s = status();
 
     remaining = Number(isScheduled(s) ? auction.start_remaining : isLive(s) ? auction.remaining_seconds : 0);
@@ -719,12 +780,18 @@ window.__AUCTION__ = {{ item | tojson }};
         applyAuctionState(json.auction, "bid");
         applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(value), json.cooldown_scope || json.auction?.cooldown_scope || "button");
       } catch(err){
-        const msg = err?.name === "AbortError"
-          ? "Conexão lenta. Atualizando o leilão..."
+        const isTimeout = err?.name === "AbortError";
+        const msg = isTimeout
+          ? "Conexão lenta. Mantendo o lance na tela enquanto confirmo com o servidor..."
           : (err?.message || "Não foi possível confirmar o lance agora.");
         setFeedback(msg);
         if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
-        fetchState("bid-error");
+        if(isTimeout){
+          setTimeout(() => fetchState("slow-bid-confirm", 9000), 1600);
+        } else {
+          optimisticHoldUntil = 0;
+          fetchState("bid-error");
+        }
       } finally {
         delete pendingBids[value];
         renderButtons();
