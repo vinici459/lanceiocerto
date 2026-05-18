@@ -504,6 +504,24 @@ def BR(v: float) -> float:
     return float(Decimal(str(v)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+def split_bid_amount(bid_value: float, fee_percent: float | None = None) -> tuple[float, float]:
+    """Separa o lance bruto entre taxa da plataforma e aumento real do preço.
+
+    Exemplo com taxa de 10%:
+    - Lance R$ 0,10 -> taxa R$ 0,01 e preço sobe R$ 0,09.
+    - O total bruto do lance continua sendo R$ 0,10 para progresso/controle.
+    """
+    gross = Decimal(str(BR(bid_value)))
+    pct = Decimal(str(fee_percent if fee_percent is not None else DEFAULT_BID_FEE_PERCENT))
+    if pct < 0:
+        pct = Decimal("0")
+    if pct > 100:
+        pct = Decimal("100")
+    fee = (gross * pct / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    increment = (gross - fee).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return float(fee), float(increment)
+
+
 def fmt_money(v: float) -> str:
     return f"{BR(v):.2f}".replace(".", ",")
 
@@ -890,11 +908,10 @@ def turbo_bid_seconds(bid_value: float, turbo_level: int) -> float:
 
 
 def bid_button_cooldown_seconds(bid_value: float, turbo_level: int = 0) -> int:
-    """Cooldown por botão, aplicado no backend e enviado ao frontend.
+    """Cooldown por botão, não global.
 
-    Antes o turbo retornava 0, então o botão não travava e o contador visual
-    não aparecia. Isso permitia cliques repetidos e deixava o leilão parecer
-    bugado/lento quando o servidor recusava ou processava lances em sequência.
+    O usuário pode apertar outros valores de lance sem travar a grade inteira.
+    Apenas o botão usado entra em contagem, respeitando a regra do modo atual.
     """
     level = int(turbo_level or 0)
     if level >= 4:
@@ -903,7 +920,7 @@ def bid_button_cooldown_seconds(bid_value: float, turbo_level: int = 0) -> int:
         return TURBO_BUTTON_COOLDOWN_SECONDS[3]
     if level >= 2:
         return TURBO_BUTTON_COOLDOWN_SECONDS[2]
-    return BID_COOLDOWN_NORMAL_SECONDS
+    return int(NORMAL_BID_BUTTON_COOLDOWN_SECONDS.get(BR(bid_value), BID_COOLDOWN_NORMAL_SECONDS))
 
 
 def turbo_activation_cooldown_seconds(turbo_level: int) -> int:
@@ -1218,7 +1235,9 @@ def build_finance_dashboard(db: Session) -> dict:
         or 0.0
     )
     expected_outgoing = BR(expected_products + pending_withdrawals)
-    total_income = BR(total_bid_spent + total_fees + total_payments)
+    # Entrada real/contábil da plataforma: taxas de lance + pagamentos de vencedores.
+    # total_bid_spent é volume bruto de lances e fica separado para auditoria/progresso.
+    total_income = BR(total_fees + total_payments)
     net_result = BR(total_income - expected_outgoing)
     return {
         "total_fees": total_fees,
@@ -2211,16 +2230,21 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             active_turbo = compute_turbo_level(item)
             button_cooldown = bid_button_cooldown_seconds(bid_value, active_turbo)
 
-            # Cooldown correto: depois de qualquer lance, o usuário precisa aguardar
-            # antes de usar qualquer outro botão no mesmo leilão.
+            # Cooldown por botão: só bloqueia novamente o mesmo valor clicado.
+            # Isso evita o travamento de toda a grade de lances.
             last_user_bid = (
                 db.query(Bid.created_at)
-                .filter(Bid.auction_id == item.id, Bid.user_id == user.id)
+                .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
                 .order_by(desc(Bid.created_at))
                 .first()
             )
+            prior_user_bid_any = (
+                db.query(Bid.id)
+                .filter(Bid.auction_id == item.id, Bid.user_id == user.id)
+                .first()
+            )
 
-            if active_turbo >= 2 and not last_user_bid:
+            if active_turbo >= 2 and not prior_user_bid_any:
                 raise HTTPException(status_code=403, detail="O modo turbo é exclusivo para quem já participou deste leilão antes da ativação.")
 
             if last_user_bid:
@@ -2232,19 +2256,21 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
                             "ok": False,
                             "detail": f"Aguarde {remaining_cd}s para dar outro lance.",
                             "retry_after": remaining_cd,
-                            "cooldown_scope": "all",
+                            "cooldown_scope": "button",
                         },
                         status_code=429,
                     )
 
             previous_total_bid_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
 
-            fee_value = 0.0
-            increment = BR(bid_value)
+            fee_value, increment = split_bid_amount(
+                bid_value,
+                getattr(item, "bid_fee_percent", DEFAULT_BID_FEE_PERCENT),
+            )
 
-            item.current_price = BR(item.current_price + increment)
-            item.total_bid_fees = BR(getattr(item, "total_bid_fees", 0.0) or 0.0)
-            item.total_bid_spent = BR(getattr(item, "total_bid_spent", 0.0) or 0.0)
+            item.current_price = BR((item.current_price or 0.0) + increment)
+            item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
+            item.total_bid_spent = BR((getattr(item, "total_bid_spent", 0.0) or 0.0) + bid_value)
 
             turbo = compute_turbo_level(item)
             item.turbo_level = turbo
@@ -2277,15 +2303,17 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
                 last_bidder_override=public_user_name(user),
             )
             payload["button_cooldown"] = button_cooldown
-            payload["cooldown_scope"] = "all"
+            payload["cooldown_scope"] = "button"
             payload["bid_value"] = bid_value
+            payload["fee_value"] = fee_value
+            payload["price_increment"] = increment
             payload["server_time"] = datetime.utcnow().isoformat()
         finally:
             db.close()
 
     if payload:
         asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
-    return JSONResponse({"ok": True, "auction": payload, "button_cooldown": button_cooldown, "cooldown_scope": "all"})
+    return JSONResponse({"ok": True, "auction": payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
 @app.get("/api/auction/{auction_id}/state")
 async def auction_state(request: Request, auction_id: int):

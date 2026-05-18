@@ -109,10 +109,10 @@
 
         
         <p class="admin-fee-note">
-          Taxas acumuladas: <strong>R$ {{ '%.2f'|format(item.total_bid_fees)|replace('.', ',') }}</strong> •
-          Caixa antes do pagamento: <strong>R$ {{ '%.2f'|format(item.cash_reserved_before_payment)|replace('.', ',') }}</strong> •
-          Total se pago: <strong>R$ {{ '%.2f'|format(item.total_if_paid)|replace('.', ',') }}</strong> •
-          Resultado estimado: <strong>R$ {{ '%.2f'|format(item.expected_profit_if_paid)|replace('.', ',') }}</strong>
+          Taxas acumuladas: <strong id="admin-total-bid-fees">R$ {{ '%.2f'|format(item.total_bid_fees)|replace('.', ',') }}</strong> •
+          Caixa antes do pagamento: <strong id="admin-cash-reserved">R$ {{ '%.2f'|format(item.cash_reserved_before_payment)|replace('.', ',') }}</strong> •
+          Total se pago: <strong id="admin-total-if-paid">R$ {{ '%.2f'|format(item.total_if_paid)|replace('.', ',') }}</strong> •
+          Resultado estimado: <strong id="admin-expected-profit">R$ {{ '%.2f'|format(item.expected_profit_if_paid)|replace('.', ',') }}</strong>
         </p>
       </div>
       {% endif %}
@@ -387,6 +387,10 @@ window.__AUCTION__ = {{ item | tojson }};
     cashbackCountdown: $("cashback-countdown"),
     joinCashbackBtn: $("join-cashback-btn"),
     chatForm: $("chat-form"),
+    adminTotalBidFees: $("admin-total-bid-fees"),
+    adminCashReserved: $("admin-cash-reserved"),
+    adminTotalIfPaid: $("admin-total-if-paid"),
+    adminExpectedProfit: $("admin-expected-profit"),
   };
 
   let auction = window.__AUCTION__ || {};
@@ -397,7 +401,6 @@ window.__AUCTION__ = {{ item | tojson }};
   let wsReconnectTimer = null;
   let stateFetchInFlight = false;
   let lastZeroSyncAt = 0;
-  let allButtonCooldown = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
 
@@ -423,25 +426,28 @@ window.__AUCTION__ = {{ item | tojson }};
     if(h > 0) return `${h}h ${String(m).padStart(2,"0")}m ${String(s).padStart(2,"0")}s`;
     return `${m}m ${String(s).padStart(2,"0")}s`;
   }
-  function cooldownForCurrentMode(){
+  function cooldownForBid(value){
     const level = Number(auction.turbo_level || 0);
+    if(level >= 4) return 40;
     if(level >= 2) return 30;
+    const v = Number(value || 0);
+    if(v >= 0.60) return 30;
+    if(v === 0.10) return 10;
     return 20;
   }
-  function applyButtonCooldown(value, seconds, scope="all"){
-    const cd = Math.max(0, Math.ceil(Number(seconds || cooldownForCurrentMode())));
+  function cooldownForCurrentMode(value){
+    return cooldownForBid(value || 0.10);
+  }
+  function applyButtonCooldown(value, seconds, scope="button"){
+    const cd = Math.max(0, Math.ceil(Number(seconds || cooldownForBid(value))));
     if(cd <= 0){
       renderButtons();
       return;
     }
 
-    // Regra atual: após qualquer lance, todos os botões ficam em contagem.
-    if(scope === "all"){
-      allButtonCooldown = Math.max(allButtonCooldown, cd);
-    } else {
-      const key = bidKey(value);
-      cooldowns[key] = Math.max(Number(cooldowns[key] || 0), cd);
-    }
+    // Regra corrigida: só o botão clicado entra em contagem.
+    const key = bidKey(value);
+    cooldowns[key] = Math.max(Number(cooldowns[key] || 0), cd);
 
     renderButtons();
   }
@@ -449,9 +455,54 @@ window.__AUCTION__ = {{ item | tojson }};
     if(els.feedback) els.feedback.textContent = text || "";
   }
 
+  function normalTimeDelta(value){
+    const map = {"0.10":15,"0.20":20,"0.30":25,"0.40":30,"0.50":35,"0.60":-5,"0.70":-10,"0.80":-15,"0.90":-20,"1.00":-25};
+    return Number(map[bidKey(value)] || 0);
+  }
+
+  function activateLiveLocally(){
+    if(!isScheduled(status())) return;
+    auction = {
+      ...auction,
+      status: "live",
+      start_remaining: 0,
+      remaining_seconds: Number(auction.initial_duration_seconds || auction.remaining_seconds || 1800),
+      chat_open: true
+    };
+    applyAuctionState(auction, "local-start");
+    fetchState("confirm-local-start", 9000);
+  }
+
+  function applyOptimisticBid(value){
+    const gross = Number(value || 0);
+    const feePercent = Math.max(0, Math.min(100, Number(auction.bid_fee_percent ?? 10)));
+    const fee = Math.round((gross * feePercent / 100) * 100) / 100;
+    const increment = Math.round((gross - fee) * 100) / 100;
+    const level = Number(auction.turbo_level || 0);
+
+    auction = {
+      ...auction,
+      current_price: Number(auction.current_price || 0) + increment,
+      total_bid_fees: Number(auction.total_bid_fees || 0) + fee,
+      collected_total: Number(auction.collected_total || 0) + gross,
+      bids_count: Number(auction.bids_count || 0) + 1,
+      last_bidder: "Você"
+    };
+
+    if(level === 0){
+      remaining = Math.max(1, remaining + normalTimeDelta(value));
+    }
+
+    if(auction.source_price > 0){
+      auction.progress_percent = Math.round(((Number(auction.current_price || 0) + Number(auction.total_bid_fees || 0)) / Number(auction.source_price || 1)) * 10000) / 100;
+    }
+    auction.remaining_seconds = remaining;
+    applyAuctionState(auction, "optimistic-bid");
+  }
+
   function renderButton(btn){
     const key = bidKey(btn.dataset.bid);
-    const cd = Math.max(Number(cooldowns[key] || 0), Number(allButtonCooldown || 0));
+    const cd = Math.max(Number(cooldowns[key] || 0));
     const busy = Boolean(pendingBids[key]);
     const canBid = isLive(status());
 
@@ -550,6 +601,10 @@ window.__AUCTION__ = {{ item | tojson }};
     if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
     if(els.countdown) els.countdown.textContent = isClosed(s) ? (s === "pending_payment" ? "Aguardando" : "Encerrado") : timeLabel(remaining);
     if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
+    if(els.adminTotalBidFees) els.adminTotalBidFees.textContent = moneyBR(auction.total_bid_fees);
+    if(els.adminCashReserved) els.adminCashReserved.textContent = moneyBR(auction.cash_reserved_before_payment ?? auction.collected_total);
+    if(els.adminTotalIfPaid) els.adminTotalIfPaid.textContent = moneyBR(auction.total_if_paid);
+    if(els.adminExpectedProfit) els.adminExpectedProfit.textContent = moneyBR(auction.expected_profit_if_paid);
 
     if(els.status){
       els.status.textContent = labelStatus(s);
@@ -606,15 +661,17 @@ window.__AUCTION__ = {{ item | tojson }};
       if(els.countdown) els.countdown.textContent = timeLabel(remaining);
 
       if(remaining <= 0){
-        const nowMs = Date.now();
-        if(nowMs - lastZeroSyncAt >= 1000){
-          lastZeroSyncAt = nowMs;
-          fetchState(isScheduled(s) ? "start-zero-retry" : "end-zero-retry", 9000);
+        if(isScheduled(s)){
+          activateLiveLocally();
+        } else {
+          const nowMs = Date.now();
+          if(nowMs - lastZeroSyncAt >= 1000){
+            lastZeroSyncAt = nowMs;
+            fetchState("end-zero-retry", 9000);
+          }
         }
       }
     }
-
-    allButtonCooldown = Math.max(0, Number(allButtonCooldown || 0) - 1);
 
     Object.keys(cooldowns).forEach((key) => {
       cooldowns[key] = Math.max(0, Number(cooldowns[key] || 0) - 1);
@@ -646,8 +703,9 @@ window.__AUCTION__ = {{ item | tojson }};
       if(btn.disabled || pendingBids[value]) return;
 
       pendingBids[value] = true;
-      // Mostra a contagem na hora do clique, sem esperar o Railway responder.
-      applyButtonCooldown(value, cooldownForCurrentMode(), "all");
+      // Mostra a contagem e atualiza a tela na hora do clique, sem esperar o Railway responder.
+      applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
+      applyOptimisticBid(value);
 
       const form = new FormData();
       form.append("bid_value", value);
@@ -659,13 +717,13 @@ window.__AUCTION__ = {{ item | tojson }};
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
         setFeedback("");
         applyAuctionState(json.auction, "bid");
-        applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(), json.cooldown_scope || json.auction?.cooldown_scope || "all");
+        applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(value), json.cooldown_scope || json.auction?.cooldown_scope || "button");
       } catch(err){
         const msg = err?.name === "AbortError"
           ? "Conexão lenta. Atualizando o leilão..."
           : (err?.message || "Não foi possível confirmar o lance agora.");
         setFeedback(msg);
-        if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "all");
+        if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
         fetchState("bid-error");
       } finally {
         delete pendingBids[value];
@@ -757,3 +815,4 @@ window.__AUCTION__ = {{ item | tojson }};
 })();
 </script>
 {% endblock %}
+  
