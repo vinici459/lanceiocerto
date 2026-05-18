@@ -1259,11 +1259,8 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "chat_open": auction_chat_is_open(item),
         "button_cooldown": bid_button_cooldown_seconds(0.10, level),
     }
-    # Durante lances, o payload fica leve. Porém quando o leilão encerra
-    # precisa levar o cashback junto; caso contrário a tela só muda para
-    # aguardando pagamento e o card do cashback não nasce dinamicamente.
-    if include_cashback or item.status in {"pending_payment", "ended"}:
-        payload["cashback"] = cashback_payload(item, db, user=user)
+    if include_cashback:
+        payload["cashback"] = cashback_payload(item, db)
     return payload
 
 
@@ -1985,7 +1982,7 @@ async def auction_watcher():
                 for auction_id in changed_ids:
                     fresh = db.get(AuctionItem, auction_id)
                     if fresh:
-                        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db)}))
+                        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db, include_cashback=True)}))
             else:
                 db.rollback()
         finally:
@@ -2572,7 +2569,7 @@ async def auction_state(request: Request, auction_id: int):
         if changed:
             db.commit()
             db.refresh(item)
-            payload = public_auction_live_payload(item, db, user=user)
+            payload = public_auction_live_payload(item, db, user=user, include_cashback=True)
             asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
             return JSONResponse({"ok": True, "auction": payload})
         return JSONResponse({"ok": True, "auction": public_auction_live_payload(item, db, user=user)})

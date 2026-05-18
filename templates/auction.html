@@ -628,98 +628,6 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
-  function cashbackCard(){
-    return document.getElementById("cashback-card");
-  }
-
-  function bindJoinCashbackButton(){
-    const btn = document.getElementById("join-cashback-btn");
-    if(!btn || btn.dataset.bound === "1") return;
-    btn.dataset.bound = "1";
-    btn.addEventListener("click", async () => {
-      btn.disabled = true;
-      btn.textContent = "Entrando no sorteio...";
-      try{
-        const {res, json} = await fetchJson(`/api/auction/${auctionId}/cashback/join`, {method:"POST"}, 5000);
-        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível entrar no cashback.");
-        btn.textContent = "Você já está participando";
-        const state = await fetchJson(`/api/auction/${auctionId}/state`, {}, 5000);
-        if(state.res.ok && state.json.ok && state.json.auction) applyAuctionState(state.json.auction, "cashback-join");
-      } catch(err){
-        btn.disabled = false;
-        btn.textContent = err?.message || "Tentar novamente";
-      }
-    });
-  }
-
-  function renderCashback(){
-    const cashback = auction.cashback || {};
-    let card = cashbackCard();
-
-    if(!cashback.available){
-      if(card) card.style.display = "none";
-      return;
-    }
-
-    if(!card){
-      card = document.createElement("div");
-      card.className = "strategy-card cashback-card cashback-just-opened";
-      card.id = "cashback-card";
-      const anchor = els.stateAlert || els.bidForm || els.turboAnnouncement;
-      if(anchor && anchor.parentNode){
-        anchor.parentNode.insertBefore(card, anchor.nextSibling);
-      } else if(els.layout){
-        els.layout.appendChild(card);
-      }
-    }
-
-    card.style.display = "block";
-    const status = String(cashback.status || "");
-    cashbackRemaining = Number(cashback.join_remaining_seconds || 0);
-
-    if(status === "open"){
-      if(cashback.joined){
-        card.innerHTML = `
-          <div class="strategy-top">
-            <span class="turbo-badge">🎁 Cashback do leilão</span>
-            <strong id="cashback-status">Você já está participando</strong>
-          </div>
-          <p>Você já entrou no sorteio. Se for sorteado, recebe de volta o valor usado somente neste leilão.</p>
-        `;
-      } else {
-        card.innerHTML = `
-          <div class="strategy-top">
-            <span class="turbo-badge">🎁 Cashback do leilão</span>
-            <strong id="cashback-status">Participe em até <span id="cashback-countdown" data-seconds="${cashbackRemaining}">${timeLabel(cashbackRemaining)}</span></strong>
-          </div>
-          <p>Quem participou deste leilão pode entrar no sorteio aleatório para receber de volta o valor usado somente neste leilão.</p>
-          <button class="btn full" type="button" id="join-cashback-btn">Participar do sorteio de cashback</button>
-        `;
-        bindJoinCashbackButton();
-      }
-    } else if(status === "drawn"){
-      card.innerHTML = `
-        <div class="strategy-top">
-          <span class="turbo-badge">🎁 Cashback do leilão</span>
-          <strong id="cashback-status">Sorteado: ${cashback.winner_name || "—"}</strong>
-        </div>
-        <p>Vencedor público do cashback: <strong>${cashback.winner_name || "—"}</strong>. Valor: <strong>${moneyBR(cashback.cashback_amount || 0)}</strong>.</p>
-      `;
-    } else {
-      card.innerHTML = `
-        <div class="strategy-top">
-          <span class="turbo-badge">🎁 Cashback do leilão</span>
-          <strong id="cashback-status">Encerrado</strong>
-        </div>
-        <p>O prazo de participação foi encerrado.</p>
-      `;
-    }
-
-    els.cashbackCountdown = document.getElementById("cashback-countdown");
-    els.joinCashbackBtn = document.getElementById("join-cashback-btn");
-    bindJoinCashbackButton();
-  }
-
   function renderControls(s){
     const live = isLive(s);
     const scheduled = isScheduled(s);
@@ -744,6 +652,75 @@ window.__AUCTION__ = {{ item | tojson }};
     show(els.chatClosedAlert, !open);
     show(els.chatPausedAlert, open && paused);
     show(els.chatLiveArea, open && !paused);
+  }
+
+  function bindCashbackButton(){
+    const btn = document.getElementById("join-cashback-btn");
+    if(!btn || btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    els.joinCashbackBtn = btn;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Entrando no sorteio...";
+      try{
+        const {res, json} = await fetchJson(`/api/auction/${auctionId}/cashback/join`, {method:"POST"}, 5000);
+        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível entrar no cashback.");
+        if(json.cashback){ renderCashback(json.cashback, true); }
+        else btn.textContent = "Você já está participando";
+      } catch(err){
+        btn.disabled = false;
+        btn.textContent = err?.message || "Tentar novamente";
+      }
+    });
+  }
+
+  function renderCashback(cashback, focus=false){
+    if(!cashback || !cashback.available) return;
+    let card = document.getElementById("cashback-card");
+    const justCreated = !card;
+    if(!card){
+      card = document.createElement("div");
+      card.id = "cashback-card";
+      card.className = "strategy-card cashback-card cashback-card-live";
+      const anchor = els.stateAlert || els.bidNote || els.bidForm;
+      if(anchor && anchor.parentNode) anchor.parentNode.insertBefore(card, anchor.nextSibling);
+      else els.layout?.appendChild(card);
+    }
+
+    const statusText = cashback.status === "drawn"
+      ? `Sorteado: ${cashback.winner_name || "—"}`
+      : `Participe em até <span id="cashback-countdown" data-seconds="${Number(cashback.join_remaining_seconds || 0)}">${timeLabel(cashback.join_remaining_seconds || 0)}</span>`;
+
+    let body = "";
+    if(cashback.status === "open"){
+      body = cashback.joined
+        ? `<p class="success-text">Você já está participando deste sorteio.</p>`
+        : `<button class="btn full" type="button" id="join-cashback-btn">Participar do sorteio de cashback</button>`;
+    } else if(cashback.status === "drawn"){
+      body = `<p>Vencedor público do cashback: <strong>${cashback.winner_name || "—"}</strong>. Valor: <strong>${moneyBR(cashback.cashback_amount || 0)}</strong>.</p>`;
+    } else {
+      body = `<p>Sorteio de cashback encerrado.</p>`;
+    }
+
+    card.innerHTML = `
+      <div class="strategy-top">
+        <span class="turbo-badge">🎁 Cashback do leilão</span>
+        <strong id="cashback-status">${statusText}</strong>
+      </div>
+      <p>Entre no sorteio para tentar recuperar parte do que gastou em lances neste leilão.</p>
+      ${body}
+    `;
+
+    els.cashbackCountdown = document.getElementById("cashback-countdown");
+    cashbackRemaining = Number(els.cashbackCountdown?.dataset.seconds || 0);
+    bindCashbackButton();
+
+    if(justCreated || focus){
+      card.classList.remove("cashback-pop");
+      void card.offsetWidth;
+      card.classList.add("cashback-pop");
+      setTimeout(() => card.scrollIntoView({behavior:"smooth", block:"center"}), 80);
+    }
   }
 
   function applyAuctionState(data, source="unknown"){
@@ -803,7 +780,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
     renderControls(s);
     renderChat();
-    renderCashback();
+    if(auction.cashback) renderCashback(auction.cashback, isClosed(s));
     renderButtons();
   }
 
@@ -844,6 +821,12 @@ window.__AUCTION__ = {{ item | tojson }};
           activateLiveLocally();
         } else {
           if(els.countdown) els.countdown.textContent = "Encerrando...";
+          show(els.bidForm, false);
+          show(els.bidNote, false);
+          if(els.stateAlert){
+            show(els.stateAlert, true);
+            els.stateAlert.textContent = "Leilão encerrando. Confirmando vencedor e abrindo cashback, se estiver ativo...";
+          }
           document.querySelectorAll(".bid-btn").forEach((btn) => { btn.disabled = true; btn.classList.add("cooling"); });
           const nowMs = Date.now();
           if(nowMs - lastZeroSyncAt >= 1000){
@@ -890,10 +873,11 @@ window.__AUCTION__ = {{ item | tojson }};
         return;
       }
 
+      const previousAuction = {...auction};
+      const previousRemaining = remaining;
       pendingBids[value] = true;
-      // Resposta visual instantânea: o usuário vê o lance na hora, sem esperar
-      // o POST voltar. O servidor continua sendo a fonte da verdade e corrige
-      // qualquer diferença assim que confirmar.
+
+      // Lance visual imediato: a tela responde no mesmo clique e o backend confirma/corrige logo depois.
       applyOptimisticBid(value);
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
       setFeedback("Lance enviado. Confirmando...");
@@ -923,6 +907,9 @@ window.__AUCTION__ = {{ item | tojson }};
           setTimeout(() => fetchState("slow-bid-confirm", 9000), 700);
         } else {
           optimisticHoldUntil = 0;
+          auction = previousAuction;
+          remaining = previousRemaining;
+          applyAuctionState(auction, "bid-error");
           fetchState("bid-error");
         }
       } finally {
@@ -977,7 +964,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
   connectSocket();
 
-  bindJoinCashbackButton();
+  bindCashbackButton();
 
   if(els.chatForm){
     els.chatForm.addEventListener("submit", async (event) => {
@@ -1001,5 +988,27 @@ window.__AUCTION__ = {{ item | tojson }};
   if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero", 9000);
 })();
 </script>
+
+<style>
+.cashback-card-live,
+.cashback-pop{
+  border-color: rgba(74,222,128,.55) !important;
+  box-shadow: 0 18px 48px rgba(34,197,94,.18), 0 0 0 1px rgba(74,222,128,.18) inset !important;
+}
+.cashback-pop{
+  animation: cashbackPop .75s ease both;
+}
+.success-text{color:#86efac;font-weight:900;}
+.bid-feedback{
+  min-height:24px;
+  font-weight:900;
+  color:#bfdbfe;
+}
+@keyframes cashbackPop{
+  0%{transform:translateY(16px) scale(.98);opacity:.15;}
+  60%{transform:translateY(-3px) scale(1.01);opacity:1;}
+  100%{transform:translateY(0) scale(1);opacity:1;}
+}
+</style>
 {% endblock %}
   
