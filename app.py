@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import shutil
+import threading
 import base64
 import hashlib
 import hmac
@@ -50,7 +51,7 @@ if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
@@ -351,14 +352,26 @@ class ConnectionManager:
             self.connections[auction_id].remove(websocket)
 
     async def broadcast(self, auction_id: int, payload: dict) -> None:
-        dead = []
-        for ws in self.connections.get(auction_id, []):
+        # Broadcast não pode travar lance. Envia para todos em paralelo e corta
+        # conexões lentas/travadas rapidamente. Antes, um websocket ruim podia
+        # segurar atualizações em sequência.
+        sockets = list(self.connections.get(auction_id, []))
+        if not sockets:
+            return
+
+        async def _send(ws: WebSocket) -> tuple[WebSocket, bool]:
             try:
-                await ws.send_json(payload)
+                await asyncio.wait_for(ws.send_json(payload), timeout=1.2)
+                return ws, True
             except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.disconnect(auction_id, ws)
+                return ws, False
+
+        results = await asyncio.gather(*(_send(ws) for ws in sockets), return_exceptions=True)
+        for result in results:
+            if isinstance(result, tuple):
+                ws, ok = result
+                if not ok:
+                    self.disconnect(auction_id, ws)
 
 
 app = FastAPI(title=APP_NAME)
@@ -366,7 +379,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
-AUCTION_BID_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
 
 
 @app.middleware("http")
@@ -1146,7 +1159,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
     }
 
 
-def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashback: bool = False, bids_count_override: Optional[int] = None, last_bidder_override: Optional[str] = None, last_bid_id_override: Optional[int] = None, user: Optional[User] = None) -> dict:
+def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashback: bool = False, bids_count_override: Optional[int] = None, last_bidder_override: Optional[str] = None, last_bid_id_override: Optional[int] = None, user: Optional[User] = None, user_turbo_eligible_override: Optional[bool] = None) -> dict:
     """Payload leve para atualizações em tempo real do leilão.
 
     O endpoint de lance precisa ser rápido. O payload completo chama cashback e
@@ -1190,8 +1203,8 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         start_remaining = max(0, int((item.scheduled_start - now).total_seconds()))
 
     level = compute_turbo_level(item)
-    user_turbo_eligible = None
-    if user is not None:
+    user_turbo_eligible = user_turbo_eligible_override
+    if user_turbo_eligible is None and user is not None:
         user_turbo_eligible = user_can_bid_current_phase(db, item, user, level)
     payload = {
         "id": item.id,
@@ -1892,7 +1905,7 @@ async def auction_watcher():
             for auction_id in changed_ids:
                 fresh = db.get(AuctionItem, auction_id)
                 if fresh:
-                    await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db)})
+                    asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db)}))
         finally:
             db.close()
 
@@ -2315,14 +2328,17 @@ def auction_page(request: Request, auction_id: int):
         db.close()
 
 
-@app.post("/api/auction/{auction_id}/bid")
-async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
+def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tuple[dict, int]:
+    """Processa o lance de forma síncrona e curta.
+
+    Esta função roda dentro de asyncio.to_thread(), então o SQLAlchemy síncrono
+    não bloqueia o event loop do FastAPI/WebSocket. O lock fica somente ao redor
+    da escrita crítica do leilão para evitar preço/tempo duplicados.
+    """
     payload = None
     button_cooldown = 0
 
-    # Serializa lances do mesmo leilão dentro deste processo.
-    # Evita clique duplo/race condition gerando preço, relógio e último lance inconsistentes.
-    async with AUCTION_BID_LOCKS[auction_id]:
+    with AUCTION_BID_LOCKS[auction_id]:
         db = SessionLocal()
         try:
             user = require_user(request, db)
@@ -2332,13 +2348,13 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
 
             now = datetime.utcnow()
             if start_auction_if_due(item, now):
-                db.commit()
-                item = db.get(AuctionItem, auction_id)
+                db.flush()
 
             if finish_auction_if_due(item, db, now):
                 db.commit()
                 db.refresh(item)
-                return JSONResponse({"ok": False, "detail": "Este leilão foi encerrado.", "auction": public_auction_live_payload(item, db, user=user)}, status_code=400)
+                payload = public_auction_live_payload(item, db, user=user)
+                raise HTTPException(status_code=400, detail="Este leilão foi encerrado.")
 
             if item.status != "live":
                 raise HTTPException(status_code=400, detail="Leilão não está ao vivo.")
@@ -2347,19 +2363,14 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             if bid_value not in ALLOWED_BIDS:
                 raise HTTPException(status_code=400, detail="Valor de lance inválido.")
 
-            # Modo em vigor ANTES deste lance.
-            # Se este lance cruzar o gatilho do turbo, ele ainda é processado como lance normal;
-            # o turbo passa a valer para os próximos lances. Isso evita misturar regra normal com turbo.
             mode_for_bid = compute_turbo_level(item)
             button_cooldown = bid_button_cooldown_seconds(bid_value, mode_for_bid)
 
-            # Cooldown por botão: só bloqueia novamente o mesmo valor clicado.
-            # Isso evita o travamento de toda a grade de lances.
-            last_user_bid = (
-                db.query(Bid.created_at)
+            # Consultas mínimas para regra de cooldown e elegibilidade.
+            last_user_bid_created_at = (
+                db.query(func.max(Bid.created_at))
                 .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
-                .order_by(desc(Bid.created_at))
-                .first()
+                .scalar()
             )
             prior_user_bid_any = (
                 db.query(Bid.id)
@@ -2370,19 +2381,11 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             if mode_for_bid >= 2 and not prior_user_bid_any:
                 raise HTTPException(status_code=403, detail=turbo_lock_message(mode_for_bid))
 
-            if last_user_bid:
-                elapsed = (now - last_user_bid[0]).total_seconds()
+            if last_user_bid_created_at:
+                elapsed = (now - last_user_bid_created_at).total_seconds()
                 if elapsed < button_cooldown:
                     remaining_cd = math.ceil(button_cooldown - elapsed)
-                    return JSONResponse(
-                        {
-                            "ok": False,
-                            "detail": f"Aguarde {remaining_cd}s para dar outro lance.",
-                            "retry_after": remaining_cd,
-                            "cooldown_scope": "button",
-                        },
-                        status_code=429,
-                    )
+                    raise HTTPException(status_code=429, detail=f"Aguarde {remaining_cd}s para dar outro lance.")
 
             previous_total_bid_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
 
@@ -2395,10 +2398,6 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
             item.total_bid_spent = BR((getattr(item, "total_bid_spent", 0.0) or 0.0) + bid_value)
 
-            # Primeiro soma o lance e só então decide a regra de tempo.
-            # Se este lance cruzar para Turbo 2.0/3.0/4.0, ele já deve abrir a
-            # janela curta do turbo. No turbo, o lance DEFINE o tempo; não soma
-            # nem subtrai como no modo normal.
             turbo_after_bid = compute_turbo_level(item)
             timing_mode_for_bid = turbo_after_bid if turbo_after_bid >= 2 else mode_for_bid
 
@@ -2422,13 +2421,10 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             db.add(bid)
             db.flush()
 
-            turbo = turbo_after_bid
-            item.turbo_level = turbo
+            item.turbo_level = turbo_after_bid
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
 
-            db.commit()
-            db.refresh(item)
-
+            # Monta payload antes do commit usando overrides para não fazer consultas pesadas.
             payload = public_auction_live_payload(
                 item,
                 db,
@@ -2436,6 +2432,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
                 last_bidder_override=public_user_name(user),
                 last_bid_id_override=bid.id,
                 user=user,
+                user_turbo_eligible_override=True,
             )
             payload["button_cooldown"] = button_cooldown
             payload["mode_for_bid"] = timing_mode_for_bid
@@ -2445,9 +2442,36 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             payload["fee_value"] = fee_value
             payload["price_increment"] = increment
             payload["server_time"] = datetime.utcnow().isoformat()
+
+            db.commit()
+            return payload, button_cooldown
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 
+
+@app.post("/api/auction/{auction_id}/bid")
+async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
+    try:
+        payload, button_cooldown = await asyncio.to_thread(_place_bid_sync, request, auction_id, bid_value)
+    except HTTPException as exc:
+        # Quando possível, devolve um estado atualizado para o frontend não ficar preso.
+        retry_after = None
+        msg = str(exc.detail or "")
+        m = re.search(r"Aguarde\s+(\d+)s", msg)
+        if m:
+            retry_after = int(m.group(1))
+        body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
+        if retry_after:
+            body["retry_after"] = retry_after
+        return JSONResponse(body, status_code=exc.status_code)
+
+    # Nunca espera WebSocket para responder o clique. O JSON do POST já atualiza a tela.
     if payload:
         asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
     return JSONResponse({"ok": True, "auction": payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})

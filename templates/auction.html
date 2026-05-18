@@ -781,8 +781,10 @@ window.__AUCTION__ = {{ item | tojson }};
     if(!wsConnected) fetchState("ws-offline", 8000);
   }, 5000);
 
-  // Uma sincronização leve evita drift sem inundar o Railway.
-  setInterval(() => fetchState("slow-sync", 8000), 20000);
+  // Sincronização leve, sem disputar com lances pendentes.
+  setInterval(() => {
+    if(pendingBidCount() === 0) fetchState("slow-sync", 8000);
+  }, 30000);
 
   document.querySelectorAll(".bid-btn").forEach((btn) => {
     btn.dataset.bid = bidKey(btn.dataset.bid);
@@ -796,8 +798,9 @@ window.__AUCTION__ = {{ item | tojson }};
       }
 
       pendingBids[value] = true;
-      // Backend é a fonte única da verdade: não alteramos preço/lances/turbo localmente.
-      // Isso elimina o bug do primeiro lance aparecer e depois voltar.
+      // Não altera preço/lances localmente. O backend é a fonte da verdade.
+      // O botão clicado entra em cooldown visual imediatamente, mas a grade não
+      // fica com contagem falsa nem aplica turbo local antes da confirmação.
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
       setFeedback("Registrando lance...");
 
@@ -806,7 +809,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
       let bidResponse = null;
       try{
-        bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 9000);
+        bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 15000);
         const {res, json} = bidResponse;
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
         setFeedback("");
@@ -815,14 +818,15 @@ window.__AUCTION__ = {{ item | tojson }};
       } catch(err){
         const isTimeout = err?.name === "AbortError";
         const msg = isTimeout
-          ? "Conexão lenta. Aguardando confirmação do servidor..."
+          ? "Servidor demorou para confirmar. Conferindo estado do leilão..."
           : (err?.message || "Não foi possível confirmar o lance agora.");
         setFeedback(msg);
         if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
         if(bidResponse?.json?.auction){
           applyAuctionState(bidResponse.json.auction, "bid-error");
         } else if(isTimeout){
-          setTimeout(() => fetchState("slow-bid-confirm", 9000), 1600);
+          optimisticHoldUntil = 0;
+          setTimeout(() => fetchState("slow-bid-confirm", 9000), 700);
         } else {
           optimisticHoldUntil = 0;
           fetchState("bid-error");
