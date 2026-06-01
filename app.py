@@ -40,6 +40,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker, selectinload
+from sqlalchemy.exc import IntegrityError
 
 
 APP_NAME = "Lanceio Certo"
@@ -168,6 +169,7 @@ class Bid(Base):
     bid_value: Mapped[float] = mapped_column(Float)
     fee_value: Mapped[float] = mapped_column(Float)
     price_increment: Mapped[float] = mapped_column(Float)
+    client_bid_id: Mapped[str] = mapped_column(String(80), default="", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     auction: Mapped[AuctionItem] = relationship(back_populates="bids")
@@ -408,6 +410,17 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
+SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
+SUGGESTION_USER_VOTE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
+WITHDRAWAL_USER_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
+
+
+class AuctionStateHTTPException(HTTPException):
+    def __init__(self, status_code: int, detail: str, auction_payload: Optional[dict] = None, retry_after: Optional[int] = None):
+        super().__init__(status_code=status_code, detail=detail)
+        self.auction_payload = auction_payload
+        self.retry_after = retry_after
+
 
 
 @app.middleware("http")
@@ -1809,6 +1822,11 @@ def ensure_columns() -> None:
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE auction_items ADD COLUMN {name} {ddl}"))
 
+        if inspector.has_table("bids"):
+            cols = {c["name"] for c in inspector.get_columns("bids")}
+            if "client_bid_id" not in cols:
+                conn.execute(text("ALTER TABLE bids ADD COLUMN client_bid_id VARCHAR(80) DEFAULT ''"))
+
         if inspector.has_table("winner_orders"):
             cols = {c["name"] for c in inspector.get_columns("winner_orders")}
             for name, ddl in {
@@ -1830,6 +1848,8 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_created ON bids (auction_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bids_user ON bids (user_id)",
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_created ON bids (auction_id, user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_client_bid_id ON bids (client_bid_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_bids_auction_user_client_bid ON bids (auction_id, user_id, client_bid_id) WHERE client_bid_id <> ''",
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_user_status_created ON winner_orders (user_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_auction_created ON winner_orders (auction_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_user_created ON wallet_transactions (user_id, created_at)",
@@ -1837,6 +1857,10 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_support_tickets_user_created ON support_tickets (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_key ON product_suggestion_votes (product_key)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_suggestion_vote_user_day ON product_suggestion_votes (user_id, date(created_at))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_suggestion_nomination_week_user ON product_suggestion_nominations (week_start, user_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_suggestion_nomination_week_product ON product_suggestion_nominations (week_start, product_key)",
+            "CREATE INDEX IF NOT EXISTS ix_suggestion_nomination_week ON product_suggestion_nominations (week_start)",
             "CREATE INDEX IF NOT EXISTS ix_cashback_events_auction ON cashback_events (auction_id)",
         ]:
             try:
@@ -2158,34 +2182,48 @@ def nominate_product_suggestion(request: Request, product_key: str = Form(...)):
             raise HTTPException(status_code=400, detail="Produto inválido para indicação.")
 
         week_start = current_week_start_utc()
-        if user_week_nomination(db, user):
-            return RedirectResponse("/?indicacao=ja-indicou", status_code=303)
+        lock_key = week_start.isoformat()
 
-        current_count = db.query(ProductSuggestionNomination).filter(ProductSuggestionNomination.week_start == week_start).count()
-        if current_count >= SUGGESTION_WEEK_LIMIT:
-            return RedirectResponse("/?indicacao=lista-cheia", status_code=303)
+        # Trava de aplicação + índices únicos no banco. A trava evita passar do limite
+        # de 20 indicações quando várias pessoas clicam no mesmo segundo; os índices
+        # únicos impedem produto repetido e segunda indicação do mesmo usuário.
+        with SUGGESTION_WEEK_LOCKS[lock_key]:
+            if user_week_nomination(db, user):
+                return RedirectResponse("/?indicacao=ja-indicou", status_code=303)
 
-        duplicate = (
-            db.query(ProductSuggestionNomination)
-            .filter(ProductSuggestionNomination.week_start == week_start, ProductSuggestionNomination.product_key == product_key)
-            .first()
-        )
-        if duplicate:
-            return RedirectResponse("/?indicacao=repetido", status_code=303)
+            current_count = db.query(ProductSuggestionNomination).filter(ProductSuggestionNomination.week_start == week_start).count()
+            if current_count >= SUGGESTION_WEEK_LIMIT:
+                return RedirectResponse("/?indicacao=lista-cheia", status_code=303)
 
-        db.add(ProductSuggestionNomination(
-            user_id=user.id,
-            product_key=product["key"],
-            product_name=product["name"],
-            category=product["category"],
-            price_level=product["price_level"],
-            week_start=week_start,
-        ))
-        db.commit()
+            duplicate = (
+                db.query(ProductSuggestionNomination)
+                .filter(ProductSuggestionNomination.week_start == week_start, ProductSuggestionNomination.product_key == product_key)
+                .first()
+            )
+            if duplicate:
+                return RedirectResponse("/?indicacao=repetido", status_code=303)
+
+            db.add(ProductSuggestionNomination(
+                user_id=user.id,
+                product_key=product["key"],
+                product_name=product["name"],
+                category=product["category"],
+                price_level=product["price_level"],
+                week_start=week_start,
+            ))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                # Se duas requisições empatarem, o banco decide. Aqui só traduzimos
+                # para uma resposta amigável sem deixar duplicar.
+                if user_week_nomination(db, user):
+                    return RedirectResponse("/?indicacao=ja-indicou", status_code=303)
+                return RedirectResponse("/?indicacao=repetido", status_code=303)
+
         return RedirectResponse("/?indicacao=indicou", status_code=303)
     finally:
         db.close()
-
 
 @app.post("/indicacao/votar")
 def vote_product_suggestion(request: Request, product_key: str = Form(...)):
@@ -2193,26 +2231,35 @@ def vote_product_suggestion(request: Request, product_key: str = Form(...)):
     try:
         user = require_user(request, db)
         week_start = current_week_start_utc()
-        nominated = (
-            db.query(ProductSuggestionNomination)
-            .filter(ProductSuggestionNomination.week_start == week_start, ProductSuggestionNomination.product_key == product_key)
-            .first()
-        )
-        if not nominated:
-            raise HTTPException(status_code=400, detail="Produto não está na votação desta semana.")
+        today_key = f"{user.id}:{datetime.utcnow().date().isoformat()}"
 
-        if user_today_suggestion_vote(db, user):
-            return RedirectResponse("/?indicacao=ja-votou", status_code=303)
+        # Trava por usuário/dia para impedir dois votos simultâneos em abas diferentes.
+        # O índice único diário é criado em ensure_columns() como segunda camada.
+        with SUGGESTION_USER_VOTE_LOCKS[today_key]:
+            nominated = (
+                db.query(ProductSuggestionNomination)
+                .filter(ProductSuggestionNomination.week_start == week_start, ProductSuggestionNomination.product_key == product_key)
+                .first()
+            )
+            if not nominated:
+                raise HTTPException(status_code=400, detail="Produto não está na votação desta semana.")
 
-        if user_today_nomination(db, user):
-            return RedirectResponse("/?indicacao=indicou-hoje", status_code=303)
+            if user_today_suggestion_vote(db, user):
+                return RedirectResponse("/?indicacao=ja-votou", status_code=303)
 
-        db.add(ProductSuggestionVote(user_id=user.id, product_key=product_key))
-        db.commit()
+            if user_today_nomination(db, user):
+                return RedirectResponse("/?indicacao=indicou-hoje", status_code=303)
+
+            db.add(ProductSuggestionVote(user_id=user.id, product_key=product_key))
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                return RedirectResponse("/?indicacao=ja-votou", status_code=303)
+
         return RedirectResponse("/?indicacao=ok", status_code=303)
     finally:
         db.close()
-
 
 @app.get("/termos-de-uso", response_class=HTMLResponse)
 def terms_page(request: Request):
@@ -2585,15 +2632,23 @@ def auction_page(request: Request, auction_id: int):
         db.close()
 
 
-def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tuple[dict, int]:
-    """Processa o lance de forma síncrona e curta.
+def _normalize_client_bid_id(value: str) -> str:
+    value = (value or "").strip()
+    value = re.sub(r"[^a-zA-Z0-9_.:-]", "", value)
+    return value[:80]
 
-    Esta função roda dentro de asyncio.to_thread(), então o SQLAlchemy síncrono
-    não bloqueia o event loop do FastAPI/WebSocket. O lock fica somente ao redor
-    da escrita crítica do leilão para evitar preço/tempo duplicados.
+
+def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_bid_id: str = "") -> tuple[dict, dict, int]:
+    """Processa o lance com proteção real contra duplicidade.
+
+    Camadas de segurança:
+    - lock por leilão para serializar preço/tempo;
+    - client_bid_id para idempotência do mesmo clique;
+    - índice único no banco para impedir duplicidade mesmo sob corrida;
+    - payload privado para quem clicou e payload público separado para websocket.
     """
-    payload = None
     button_cooldown = 0
+    client_bid_id = _normalize_client_bid_id(client_bid_id)
 
     with AUCTION_BID_LOCKS[auction_id]:
         db = SessionLocal()
@@ -2610,25 +2665,46 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tupl
             if finish_auction_if_due(item, db, now):
                 db.commit()
                 db.refresh(item)
-                payload = public_auction_live_payload(item, db, user=user)
-                raise HTTPException(status_code=400, detail="Este leilão foi encerrado.")
+                private_payload = public_auction_live_payload(item, db, include_cashback=True, user=user)
+                public_payload = public_auction_live_payload(item, db, include_cashback=True, user_turbo_eligible_override=None)
+                raise AuctionStateHTTPException(
+                    status_code=400,
+                    detail="Este leilão foi encerrado.",
+                    auction_payload=private_payload,
+                )
 
             if item.status != "live":
-                raise HTTPException(status_code=400, detail="Leilão não está ao vivo.")
+                private_payload = public_auction_live_payload(item, db, user=user)
+                raise AuctionStateHTTPException(status_code=400, detail="Leilão não está ao vivo.", auction_payload=private_payload)
 
             bid_value = BR(bid_value)
             if bid_value not in ALLOWED_BIDS:
                 raise HTTPException(status_code=400, detail="Valor de lance inválido.")
 
+            # Idempotência: se o mesmo clique chegou novamente, devolve o estado oficial
+            # sem criar novo lance nem aplicar cooldown/tempo outra vez.
+            if client_bid_id:
+                existing_bid = (
+                    db.query(Bid)
+                    .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.client_bid_id == client_bid_id)
+                    .first()
+                )
+                if existing_bid:
+                    private_payload = public_auction_live_payload(
+                        item,
+                        db,
+                        last_bid_id_override=existing_bid.id,
+                        user=user,
+                    )
+                    private_payload["idempotent"] = True
+                    private_payload["client_bid_id"] = client_bid_id
+                    public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
+                    public_payload["idempotent"] = True
+                    return private_payload, public_payload, 0
+
             mode_for_bid = compute_turbo_level(item)
             button_cooldown = bid_button_cooldown_seconds(bid_value, mode_for_bid)
 
-            # Consultas mínimas para regra de cooldown e elegibilidade.
-            last_user_bid_created_at = (
-                db.query(func.max(Bid.created_at))
-                .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
-                .scalar()
-            )
             prior_user_bid_any = (
                 db.query(Bid.id)
                 .filter(Bid.auction_id == item.id, Bid.user_id == user.id)
@@ -2636,13 +2712,26 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tupl
             )
 
             if mode_for_bid >= 2 and not prior_user_bid_any:
-                raise HTTPException(status_code=403, detail=turbo_lock_message(mode_for_bid))
+                private_payload = public_auction_live_payload(item, db, user=user)
+                raise AuctionStateHTTPException(status_code=403, detail=turbo_lock_message(mode_for_bid), auction_payload=private_payload)
 
+            # Cooldown operacional existente: por botão/valor, não global.
+            last_user_bid_created_at = (
+                db.query(func.max(Bid.created_at))
+                .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
+                .scalar()
+            )
             if last_user_bid_created_at:
                 elapsed = (now - last_user_bid_created_at).total_seconds()
                 if elapsed < button_cooldown:
                     remaining_cd = math.ceil(button_cooldown - elapsed)
-                    raise HTTPException(status_code=429, detail=f"Aguarde {remaining_cd}s para dar outro lance.")
+                    private_payload = public_auction_live_payload(item, db, user=user)
+                    raise AuctionStateHTTPException(
+                        status_code=429,
+                        detail=f"Aguarde {remaining_cd}s para dar outro lance.",
+                        auction_payload=private_payload,
+                        retry_after=remaining_cd,
+                    )
 
             previous_total_bid_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
 
@@ -2650,6 +2739,38 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tupl
                 bid_value,
                 getattr(item, "bid_fee_percent", DEFAULT_BID_FEE_PERCENT),
             )
+
+            # Desconto robusto do saldo: o banco só atualiza se ainda houver saldo suficiente.
+            # Isso evita que duas abas/requisições gastem o mesmo saldo ao mesmo tempo.
+            updated_wallet = (
+                db.query(User)
+                .filter(
+                    User.id == user.id,
+                    User.wallet_balance >= bid_value,
+                )
+                .update(
+                    {User.wallet_balance: User.wallet_balance - bid_value},
+                    synchronize_session=False,
+                )
+            )
+            if updated_wallet == 0:
+                db.rollback()
+                private_payload = public_auction_live_payload(item, db, user=user)
+                private_payload["wallet_balance"] = BR(getattr(user, "wallet_balance", 0.0) or 0.0)
+                raise AuctionStateHTTPException(
+                    status_code=402,
+                    detail="Saldo insuficiente para dar este lance.",
+                    auction_payload=private_payload,
+                )
+
+            db.add(WalletTransaction(
+                user_id=user.id,
+                amount=-bid_value,
+                kind="bid_spent",
+                note=f"Lance no leilão #{item.id}",
+            ))
+            db.flush()
+            db.refresh(user)
 
             item.current_price = BR((item.current_price or 0.0) + increment)
             item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
@@ -2674,6 +2795,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tupl
                 bid_value=bid_value,
                 fee_value=fee_value,
                 price_increment=increment,
+                client_bid_id=client_bid_id,
             )
             db.add(bid)
             db.flush()
@@ -2681,8 +2803,11 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tupl
             item.turbo_level = turbo_after_bid
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
 
-            # Monta payload antes do commit usando overrides para não fazer consultas pesadas.
-            payload = public_auction_live_payload(
+            db.commit()
+            db.refresh(item)
+
+            # Payload privado: volta apenas para quem clicou. Pode conter elegibilidade personalizada.
+            private_payload = public_auction_live_payload(
                 item,
                 db,
                 bids_count_override=previous_total_bid_count + 1,
@@ -2691,17 +2816,40 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tupl
                 user=user,
                 user_turbo_eligible_override=True,
             )
-            payload["button_cooldown"] = button_cooldown
-            payload["mode_for_bid"] = timing_mode_for_bid
-            payload["mode_before_bid"] = mode_for_bid
-            payload["cooldown_scope"] = "button"
-            payload["bid_value"] = bid_value
-            payload["fee_value"] = fee_value
-            payload["price_increment"] = increment
-            payload["server_time"] = datetime.utcnow().isoformat()
+            private_payload.update({
+                "button_cooldown": button_cooldown,
+                "mode_for_bid": timing_mode_for_bid,
+                "mode_before_bid": mode_for_bid,
+                "cooldown_scope": "button",
+                "bid_value": bid_value,
+                "fee_value": fee_value,
+                "price_increment": increment,
+                "client_bid_id": client_bid_id,
+                "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0),
+                "server_time": datetime.utcnow().isoformat(),
+            })
 
-            db.commit()
-            return payload, button_cooldown
+            # Payload público: enviado por websocket para todos. Nunca carrega elegibilidade privada.
+            public_payload = public_auction_live_payload(
+                item,
+                db,
+                bids_count_override=previous_total_bid_count + 1,
+                last_bidder_override=public_user_name(user),
+                last_bid_id_override=bid.id,
+                user_turbo_eligible_override=None,
+            )
+            public_payload.update({
+                "button_cooldown": button_cooldown,
+                "mode_for_bid": timing_mode_for_bid,
+                "mode_before_bid": mode_for_bid,
+                "cooldown_scope": "button",
+                "bid_value": bid_value,
+                "fee_value": fee_value,
+                "price_increment": increment,
+                "server_time": private_payload["server_time"],
+            })
+
+            return private_payload, public_payload, button_cooldown
         except HTTPException:
             db.rollback()
             raise
@@ -2713,11 +2861,24 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float) -> tupl
 
 
 @app.post("/api/auction/{auction_id}/bid")
-async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...)):
+async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...), client_bid_id: str = Form("")):
+    public_payload = None
     try:
-        payload, button_cooldown = await asyncio.to_thread(_place_bid_sync, request, auction_id, bid_value)
+        private_payload, public_payload, button_cooldown = await asyncio.to_thread(
+            _place_bid_sync,
+            request,
+            auction_id,
+            bid_value,
+            client_bid_id,
+        )
+    except AuctionStateHTTPException as exc:
+        body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
+        if exc.retry_after:
+            body["retry_after"] = exc.retry_after
+        if exc.auction_payload:
+            body["auction"] = exc.auction_payload
+        return JSONResponse(body, status_code=exc.status_code)
     except HTTPException as exc:
-        # Quando possível, devolve um estado atualizado para o frontend não ficar preso.
         retry_after = None
         msg = str(exc.detail or "")
         m = re.search(r"Aguarde\s+(\d+)s", msg)
@@ -2729,9 +2890,9 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
         return JSONResponse(body, status_code=exc.status_code)
 
     # Nunca espera WebSocket para responder o clique. O JSON do POST já atualiza a tela.
-    if payload:
-        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
-    return JSONResponse({"ok": True, "auction": payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
+    if public_payload:
+        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
+    return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
 @app.get("/api/auction/{auction_id}/state")
 async def auction_state(request: Request, auction_id: int):
@@ -3670,29 +3831,44 @@ def account_request_withdrawal(request: Request, amount: float = Form(...), pix_
         user = require_user(request, db)
         if not user_is_verified(user):
             raise HTTPException(status_code=403, detail="Para solicitar saque, envie seus documentos e aguarde a confirmação da conta.")
+
         amount = BR(amount)
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Valor inválido.")
-        if user.wallet_balance < amount:
-            raise HTTPException(status_code=400, detail="Saldo insuficiente para solicitar saque.")
-        # Reserva imediata do saque:
-        # o valor sai do saldo do usuário no ato da solicitação e passa a aparecer
-        # no caixa/admin como "saque pendente" para execução manual.
-        user.wallet_balance = BR(user.wallet_balance - amount)
-        req = WithdrawalRequest(user_id=user.id, amount=amount, pix_key=pix_key.strip(), status="pending")
-        db.add(req)
-        db.add(WalletTransaction(
-            user_id=user.id,
-            amount=-amount,
-            kind="withdrawal_reserved",
-            note=f"Saque solicitado e reservado no caixa para pagamento manual via Pix: {pix_key.strip()}",
-        ))
-        audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Valor reservado para saque: R$ {fmt_money(amount)}")
-        db.commit()
+
+        pix_key_clean = (pix_key or "").strip()
+        if not pix_key_clean:
+            raise HTTPException(status_code=400, detail="Informe uma chave Pix válida.")
+
+        # Desconto atômico: o banco só reduz o saldo se ainda houver saldo suficiente
+        # no exato momento do UPDATE. Isso blinda duas abas/duplo envio simultâneo.
+        with WITHDRAWAL_USER_LOCKS[user.id]:
+            result = db.execute(
+                text("""
+                    UPDATE users
+                    SET wallet_balance = wallet_balance - :amount
+                    WHERE id = :user_id AND wallet_balance >= :amount
+                """),
+                {"amount": amount, "user_id": user.id},
+            )
+            if result.rowcount != 1:
+                db.rollback()
+                raise HTTPException(status_code=400, detail="Saldo insuficiente para solicitar saque.")
+
+            req = WithdrawalRequest(user_id=user.id, amount=amount, pix_key=pix_key_clean, status="pending")
+            db.add(req)
+            db.add(WalletTransaction(
+                user_id=user.id,
+                amount=-amount,
+                kind="withdrawal_reserved",
+                note=f"Saque solicitado e reservado no caixa para pagamento manual via Pix: {pix_key_clean}",
+            ))
+            audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Valor reservado para saque: R$ {fmt_money(amount)}")
+            db.commit()
+
         return RedirectResponse("/minha-conta#account-balance-panel", status_code=303)
     finally:
         db.close()
-
 
 @app.post("/minha-conta/chamado")
 async def account_open_ticket(request: Request, subject: str = Form(...), message: str = Form(...), order_id: int = Form(0), proof_file: UploadFile | None = File(None)):

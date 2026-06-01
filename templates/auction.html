@@ -408,6 +408,10 @@ window.__AUCTION__ = {{ item | tojson }};
   const pendingBids = Object.create(null);
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
+  function makeClientBidId(){
+    if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return `bid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
   function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
   function status(){ return String(auction.status || "").toLowerCase(); }
   function isScheduled(s){ return s === "scheduled" || s === "relisted"; }
@@ -882,8 +886,10 @@ window.__AUCTION__ = {{ item | tojson }};
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
       setFeedback("Lance enviado. Confirmando...");
 
+      const clientBidId = makeClientBidId();
       const form = new FormData();
       form.append("bid_value", value);
+      form.append("client_bid_id", clientBidId);
 
       let bidResponse = null;
       try{
