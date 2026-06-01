@@ -2559,6 +2559,10 @@ def login_page(request: Request, created: int = 0, email_pending: int = 0, email
 @app.post("/login")
 def login(request: Request, login_identifier: str = Form(...), password: str = Form(...)):
     db = SessionLocal()
+    wants_json = (
+        request.headers.get("x-requested-with", "").lower() == "xmlhttprequest"
+        or "application/json" in request.headers.get("accept", "").lower()
+    )
     try:
         identifier = (login_identifier or "").strip().lower()
         cpf_digits = re.sub(r"\D", "", identifier)
@@ -2569,6 +2573,8 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
             user = db.query(User).filter(User.cpf == cpf_digits).first()
 
         if not user or not verify_password(password.strip(), user.password):
+            if wants_json:
+                return JSONResponse({"ok": False, "detail": "E-mail/CPF ou senha inválidos."}, status_code=401)
             return templates.TemplateResponse("login.html", {
                 "request": request,
                 "error": "E-mail/CPF ou senha inválidos.",
@@ -2578,7 +2584,20 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
         token = secrets.token_urlsafe(24)
         SESSIONS[token] = user.id
 
-        response = RedirectResponse("/minha-conta", status_code=303)
+        if wants_json:
+            response = JSONResponse({
+                "ok": True,
+                "redirect_url": "/minha-conta",
+                "user": {
+                    "id": user.id,
+                    "name": public_user_name(user),
+                    "wallet_balance": BR(user.wallet_balance or 0.0),
+                    "is_admin": bool(user.is_admin),
+                },
+            })
+        else:
+            response = RedirectResponse("/minha-conta", status_code=303)
+
         response.set_cookie("session_token", token, httponly=True, samesite="lax")
         return response
     finally:
