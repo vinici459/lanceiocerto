@@ -150,6 +150,7 @@ class AuctionItem(Base):
     cashback_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     total_bid_fees: Mapped[float] = mapped_column(Float, default=0.0)
     total_bid_spent: Mapped[float] = mapped_column(Float, default=0.0)
+    bids_count_cached: Mapped[int] = mapped_column(Integer, default=0)
     is_featured: Mapped[bool] = mapped_column(Boolean, default=True)
     chat_paused: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -1086,6 +1087,7 @@ def reset_relisted_public_history(db: Session, item: AuctionItem) -> None:
     item.start_price = 0.0
     item.total_bid_fees = 0.0
     item.total_bid_spent = 0.0
+    item.bids_count_cached = 0
     item.turbo_level = 0
     item.winner_user_id = None
     item.winner_deadline = None
@@ -1215,7 +1217,8 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         last_bidder = None
         last_bid_id = 0
     else:
-        bids_count = db.query(Bid).filter(Bid.auction_id == item.id).count()
+        cached_count = getattr(item, "bids_count_cached", None)
+        bids_count = int(cached_count or 0) if cached_count is not None else db.query(Bid).filter(Bid.auction_id == item.id).count()
         last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
         last_bidder = public_user_name(last_bid.user) if last_bid else None
         last_bid_id = int(last_bid.id if last_bid else 0)
@@ -1289,7 +1292,8 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         last_bidder = None
     else:
         if bids_count_override is None:
-            bids_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
+            cached_count = getattr(item, "bids_count_cached", None)
+            bids_count = int(cached_count or 0) if cached_count is not None else (db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0)
         else:
             bids_count = int(bids_count_override or 0)
 
@@ -1939,9 +1943,23 @@ def ensure_columns() -> None:
                 "target_profit_percent": "FLOAT DEFAULT 10",
                 "turbo_base_value": "FLOAT DEFAULT 0",
                 "cashback_enabled": "BOOLEAN DEFAULT 0",
+                "bids_count_cached": "INTEGER DEFAULT 0",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE auction_items ADD COLUMN {name} {ddl}"))
+
+            # Cache do total de lances por leilão: evita COUNT(*) a cada clique.
+            # Backfill seguro para bancos já existentes.
+            try:
+                conn.execute(text("""
+                    UPDATE auction_items ai
+                    SET bids_count_cached = COALESCE((
+                        SELECT COUNT(*) FROM bids b WHERE b.auction_id = ai.id
+                    ), 0)
+                    WHERE ai.bids_count_cached IS NULL
+                """))
+            except Exception:
+                pass
 
         if inspector.has_table("bids"):
             cols = {c["name"] for c in inspector.get_columns("bids")}
@@ -1969,6 +1987,7 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_created ON bids (auction_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bids_user ON bids (user_id)",
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_created ON bids (auction_id, user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_value_created ON bids (auction_id, user_id, bid_value, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bids_client_bid_id ON bids (client_bid_id)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_bids_auction_user_client_bid ON bids (auction_id, user_id, client_bid_id) WHERE client_bid_id <> ''",
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_user_status_created ON winner_orders (user_id, status, created_at)",
@@ -2894,7 +2913,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                         retry_after=remaining_cd,
                     )
 
-            previous_total_bid_count = db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0
+            previous_total_bid_count = int(getattr(item, "bids_count_cached", 0) or 0)
 
             fee_value, increment = split_bid_amount(
                 bid_value,
@@ -2925,6 +2944,9 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     auction_payload=private_payload,
                 )
 
+            # Mantém o objeto em memória alinhado sem fazer SELECT extra.
+            user.wallet_balance = BR((getattr(user, "wallet_balance", 0.0) or 0.0) - bid_value)
+
             db.add(WalletTransaction(
                 user_id=user.id,
                 amount=-bid_value,
@@ -2932,7 +2954,6 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                 note=f"Lance no leilão #{item.id}",
             ))
             db.flush()
-            db.refresh(user)
 
             item.current_price = BR((item.current_price or 0.0) + increment)
             item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
@@ -3002,11 +3023,12 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                 raise
 
             item.turbo_level = turbo_after_bid
+            item.bids_count_cached = int(previous_total_bid_count or 0) + 1
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
 
             db.commit()
 
-            accepted_count = int(previous_total_bid_count or 0) + 1
+            accepted_count = int(getattr(item, "bids_count_cached", 0) or (int(previous_total_bid_count or 0) + 1))
             accepted_bidder = public_user_name(user)
             wallet_after_bid = BR(getattr(user, "wallet_balance", 0.0) or 0.0)
 
