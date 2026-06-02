@@ -469,6 +469,27 @@ window.__AUCTION__ = {{ item | tojson }};
     if(h > 0) return `${h}h ${String(m).padStart(2,"0")}m ${String(s).padStart(2,"0")}s`;
     return `${m}m ${String(s).padStart(2,"0")}s`;
   }
+
+  function secondsFromIso(value){
+    if(!value) return null;
+    const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
+    const ms = Date.parse(normalized);
+    if(Number.isNaN(ms)) return null;
+    return Math.max(0, Math.ceil((ms - Date.now()) / 1000));
+  }
+
+  function currentClockSeconds(){
+    const s = status();
+    if(isScheduled(s)){
+      const byDate = secondsFromIso(auction.scheduled_start);
+      return byDate === null ? Number(auction.start_remaining || 0) : byDate;
+    }
+    if(isLive(s)){
+      const byDate = secondsFromIso(auction.ends_at);
+      return byDate === null ? Number(auction.remaining_seconds || 0) : byDate;
+    }
+    return 0;
+  }
   function cooldownForBid(value){
     const level = Number(auction.turbo_level || 0);
     if(level >= 4) return 40;
@@ -724,7 +745,7 @@ window.__AUCTION__ = {{ item | tojson }};
     }
     const s = status();
 
-    remaining = Number(isScheduled(s) ? auction.start_remaining : isLive(s) ? auction.remaining_seconds : 0);
+    remaining = currentClockSeconds();
     lastZeroSyncAt = 0;
 
     if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
@@ -787,7 +808,7 @@ window.__AUCTION__ = {{ item | tojson }};
     const s = status();
 
     if(isScheduled(s) || isLive(s)){
-      remaining = Math.max(0, remaining - 1);
+      remaining = currentClockSeconds();
       if(els.countdown) els.countdown.textContent = timeLabel(remaining);
 
       if(remaining <= 0){

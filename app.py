@@ -1096,7 +1096,14 @@ def start_auction_if_due(item: AuctionItem, now: Optional[datetime] = None) -> b
     if item and item.status in {"scheduled", "relisted"} and item.scheduled_start and item.scheduled_start <= now:
         item.status = "live"
         duration = getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS) or DEFAULT_INITIAL_DURATION_SECONDS
-        item.ends_at = now + timedelta(seconds=min(MAX_INITIAL_DURATION_SECONDS, duration))
+
+        # Regra importante para alinhar home e página do leilão:
+        # o tempo do leilão deve contar a partir do horário agendado, não do momento
+        # em que alguém abre a página. Antes, se a home mostrava "começa agora" e
+        # o usuário entrava depois, a página reiniciava o tempo completo.
+        logical_start = item.scheduled_start or now
+        item.ends_at = logical_start + timedelta(seconds=min(MAX_INITIAL_DURATION_SECONDS, duration))
+
         item.chat_paused = False
         return True
     return False
@@ -1161,6 +1168,33 @@ def finish_auction_if_due(item: AuctionItem, db: Session, now: Optional[datetime
         ensure_cashback_event(item, db, now)
 
     return True
+
+
+def sync_due_auction_states(db: Session, now: Optional[datetime] = None, limit: int = 80) -> bool:
+    """Sincroniza leilões vencidos/iniciados antes de montar páginas públicas.
+
+    Sem isso, a home pode mostrar "próximo" ou um cronômetro diferente enquanto
+    a página interna já muda para "ao vivo" ou encerrado. A sincronização é leve
+    e limitada para não pesar no Railway.
+    """
+    now = now or datetime.utcnow()
+    changed = False
+
+    due_items = (
+        db.query(AuctionItem)
+        .filter(AuctionItem.status.in_(["scheduled", "relisted", "live"]))
+        .order_by(AuctionItem.scheduled_start.asc())
+        .limit(limit)
+        .all()
+    )
+
+    for item in due_items:
+        if start_auction_if_due(item, now):
+            changed = True
+        if finish_auction_if_due(item, db, now):
+            changed = True
+
+    return changed
 
 
 def clamp_initial_duration(minutes: int | float | None) -> int:
@@ -1357,6 +1391,7 @@ def public_auction_card_payload(item: AuctionItem) -> dict:
         "source_price": BR(item.source_price),
         "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
         "start_remaining": start_remaining,
+        "ends_at": item.ends_at.isoformat() if item.ends_at else None,
         "remaining_seconds": remaining,
         "winner_name": public_user_name(item.winner) if item.winner else None,
         "image_url": safe_image_url(item.image_url),
@@ -2143,6 +2178,13 @@ def home(request: Request):
     db = SessionLocal()
     try:
         user = current_user(request, db)
+
+        # Mantém os cronômetros da vitrine alinhados com a página interna.
+        # Inicia/finaliza leilões que já passaram do horário antes de separar
+        # "Ao vivo", "Próximos" e "Encerrados".
+        if sync_due_auction_states(db):
+            db.commit()
+
         # A vitrine não precisa carregar o histórico completo de todos os leilões.
         # Limitar os cards evita travamentos quando o banco cresce.
         live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(12).all()
@@ -2623,9 +2665,12 @@ def auction_page(request: Request, auction_id: int):
         if not item:
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
 
-        changed = start_auction_if_due(item)
+        now = datetime.utcnow()
+        changed = start_auction_if_due(item, now)
+        changed = finish_auction_if_due(item, db, now) or changed
         if changed:
             db.commit()
+            db.refresh(item)
 
         messages = (
             db.query(ChatMessage)
@@ -2673,14 +2718,18 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
         db = SessionLocal()
         try:
             user = require_user(request, db)
-            # Trava a linha do leilão no banco durante o processamento.
-            # O threading.Lock protege uma réplica; o FOR UPDATE protege também se houver mais réplicas/processos.
-            item = (
-                db.query(AuctionItem)
-                .filter(AuctionItem.id == auction_id)
-                .with_for_update()
-                .first()
-            )
+            # Trava a linha do leilão no PostgreSQL durante o processamento do lance.
+            # O lock em memória protege dentro de uma réplica; o FOR UPDATE protege
+            # caso Railway rode mais de um processo/réplica.
+            if DATABASE_URL.startswith("sqlite"):
+                item = db.get(AuctionItem, auction_id)
+            else:
+                item = (
+                    db.query(AuctionItem)
+                    .filter(AuctionItem.id == auction_id)
+                    .with_for_update()
+                    .first()
+                )
             if not item:
                 raise HTTPException(status_code=404, detail="Leilão não encontrado.")
 
@@ -2724,7 +2773,6 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     )
                     private_payload["idempotent"] = True
                     private_payload["client_bid_id"] = client_bid_id
-                    private_payload["wallet_balance"] = BR(getattr(user, "wallet_balance", 0.0) or 0.0)
                     public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
                     public_payload["idempotent"] = True
                     return private_payload, public_payload, 0
@@ -2799,10 +2847,6 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             ))
             db.flush()
             db.refresh(user)
-            # Evita saldo visualmente negativo por resíduo de ponto flutuante (ex.: -0.00000001).
-            if -0.004 < float(user.wallet_balance or 0.0) < 0:
-                user.wallet_balance = 0.0
-                db.flush()
 
             item.current_price = BR((item.current_price or 0.0) + increment)
             item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
@@ -2979,10 +3023,9 @@ async def auction_state(request: Request, auction_id: int):
         if changed:
             db.commit()
             db.refresh(item)
-            private_payload = public_auction_live_payload(item, db, user=user)
-            public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
-            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
-            return JSONResponse({"ok": True, "auction": private_payload})
+            payload = public_auction_live_payload(item, db, user=user)
+            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
+            return JSONResponse({"ok": True, "auction": payload})
         return JSONResponse({"ok": True, "auction": public_auction_live_payload(item, db, user=user)})
     finally:
         db.close()

@@ -92,7 +92,7 @@
 
             <div class="timer-line">
               <span>Tempo restante</span>
-              <strong class="countdown" data-seconds="{{ item.remaining_seconds }}">--</strong>
+              <strong class="countdown" data-seconds="{{ item.remaining_seconds }}" data-end-at="{{ item.ends_at or '' }}">--</strong>
             </div>
 
             <a href="/auction/{{ item.id }}" class="btn full">Participar</a>
@@ -141,7 +141,7 @@
             <div class="timer-line">
               {% if item.start_remaining <= 86400 %}
                 <span>Começa em</span>
-                <strong class="countdown" data-seconds="{{ item.start_remaining }}">--</strong>
+                <strong class="countdown" data-seconds="{{ item.start_remaining }}" data-start-at="{{ item.scheduled_start or '' }}">--</strong>
               {% else %}
                 <span>Início</span>
                 <strong>{{ item.scheduled_start[:16].replace('T', ' ') }}</strong>
@@ -209,26 +209,12 @@
 
   <div id="home-suggestions" class="home-tab-panel">
     <section class="auction-lane suggestion-lane suggestion-pro-lane">
-      <div class="lane-head suggestion-head-pro suggestion-head-compact">
+      <div class="lane-head suggestion-head-pro">
         <div>
-          <h3>Produtos indicados para votação</h3>
-          <p>Ranking público da semana. Cada conta pode votar 1 vez por dia.</p>
+          <h3>Indicação de produtos da semana</h3>
+          <p>Todo usuário pode indicar 1 produto por semana. A votação é pública, zera toda semana e cada conta pode votar 1 vez por dia.</p>
         </div>
-        <div class="suggestion-head-actions">
-          <span class="lane-count scheduled">{{ suggestion_week_count if suggestion_week_count is defined else 0 }}/{{ suggestion_week_limit if suggestion_week_limit is defined else 20 }}</span>
-          {% if user %}
-            {% set suggestion_blocked = user_week_nomination or (suggestion_week_count >= suggestion_week_limit) %}
-            <button id="openSuggestionPicker" class="btn small suggestion-open-btn" type="button" {% if suggestion_blocked %}disabled{% endif %}>
-              {% if user_week_nomination %}
-                Indicação já feita
-              {% elif suggestion_week_count >= suggestion_week_limit %}
-                Lista cheia
-              {% else %}
-                Indicar produto
-              {% endif %}
-            </button>
-          {% endif %}
-        </div>
+        <span class="lane-count scheduled">{{ suggestion_week_count if suggestion_week_count is defined else 0 }}/{{ suggestion_week_limit if suggestion_week_limit is defined else 20 }}</span>
       </div>
 
       {% set msg = request.query_params.get('indicacao') %}
@@ -249,86 +235,88 @@
       {% endif %}
 
       {% if user %}
-        {% if user_week_nomination %}
-          <div class="suggestion-mini-status">
-            <strong>Sua indicação da semana:</strong>
-            <span>{{ user_week_nomination.product_name }}</span>
-          </div>
-        {% endif %}
-
-        <div class="cards lc-auction-grid suggestion-grid suggestion-vote-grid suggestion-vote-priority">
-          {% for product in suggestion_products %}
-          <article class="card lc-auction-card suggestion-card suggestion-public-card">
-            <div class="card-body">
-              <div class="suggestion-card-top">
-                <span class="suggestion-category">{{ product.category }}</span>
-                <span class="suggestion-votes-pill">{{ product.votes }} voto{{ 's' if product.votes != 1 else '' }}</span>
-              </div>
-              <h3>{{ product.name }}</h3>
-              <p class="suggestion-indicated-by">Indicado por <strong>@{{ product.indicated_by }}</strong></p>
-              <div class="price-line">
-                <div><span>Faixa</span><strong>{{ product.price_level }}</strong></div>
-                <div><span>Semana</span><strong>{{ product.percent }}%</strong></div>
-              </div>
-              <div class="suggestion-progress"><span style="width: {{ product.percent if product.percent <= 100 else 100 }}%"></span></div>
-              <form method="post" action="/indicacao/votar">
-                <input type="hidden" name="product_key" value="{{ product.key }}">
-                <button class="btn full" type="submit" {% if today_suggestion_vote or today_suggestion_nomination %}disabled{% endif %}>
-                  {% if today_suggestion_vote %}Voto diário usado{% elif today_suggestion_nomination %}Você indicou hoje{% else %}Votar neste produto{% endif %}
-                </button>
-              </form>
-            </div>
-          </article>
+      <div class="suggestion-interactive-panel">
+        <div class="suggestion-panel-copy">
+          <span class="eyebrow">Participação pública</span>
+          <h3>Indicar produto para votação</h3>
+          {% if user_week_nomination %}
+            <p>Você já indicou nesta semana: <strong>{{ user_week_nomination.product_name }}</strong>. Volte na próxima semana para indicar outro.</p>
+          {% elif suggestion_week_count >= suggestion_week_limit %}
+            <p>A lista desta semana já atingiu o limite de {{ suggestion_week_limit }} produtos.</p>
           {% else %}
-          <div class="empty-state suggestion-message suggestion-empty-vote">
-            <strong>Nenhum produto indicado ainda.</strong>
-            <span>Use o botão “Indicar produto” para abrir a primeira sugestão da semana.</span>
-          </div>
-          {% endfor %}
+            <p>Selecione um produto do catálogo. Não precisa digitar nada e o sistema impede repetição na semana.</p>
+          {% endif %}
         </div>
 
-        <div class="suggestion-rules-grid suggestion-rules-compact">
-          <div><strong>1 indicação por semana</strong><span>Cada conta só pode colocar um produto na lista semanal.</span></div>
-          <div><strong>20 produtos por semana</strong><span>Quando chegar a 20 indicações, a lista fecha até a próxima semana.</span></div>
-          <div><strong>1 voto por dia</strong><span>Quem indicou hoje só começa a votar amanhã.</span></div>
-        </div>
-
-        <div id="suggestionPickerPanel" class="suggestion-interactive-panel suggestion-picker-collapsed" hidden>
-          <div class="suggestion-panel-copy">
-            <span class="eyebrow">Indicação semanal</span>
-            <h3>Escolha um produto do catálogo</h3>
-            <p>Primeiro escolha a categoria. Depois selecione um produto em card. Não existe campo de digitação e o sistema impede produto repetido na semana.</p>
-          </div>
-
-          <form method="post" action="/indicacao/indicar" class="suggestion-picker-form" id="suggestionPickerForm">
-            <input type="hidden" name="product_key" id="suggestionProductKey" required>
-
-            <div class="suggestion-step-box">
-              <div class="suggestion-step-title"><span>1</span><div><strong>Categoria</strong><small>Escolha uma categoria para carregar os produtos.</small></div></div>
-              <div class="suggestion-category-buttons" id="suggestionCategoryButtons">
-                {% for cat in suggestion_categories %}
-                <button type="button" class="suggestion-category-btn" data-category="{{ cat }}">{{ cat }}</button>
-                {% endfor %}
-              </div>
-            </div>
-
-            <div class="suggestion-step-box">
-              <div class="suggestion-step-title"><span>2</span><div><strong>Produto</strong><small id="suggestionProductHelp">Selecione uma categoria para ver os produtos disponíveis.</small></div></div>
-              <div class="suggestion-product-grid" id="suggestionProductGrid">
-                <div class="suggestion-product-empty">Escolha uma categoria acima para ver os produtos.</div>
+        <form method="post" action="/indicacao/indicar" class="suggestion-picker-form">
+          <div class="suggestion-picker-grid">
+            <label>Categoria
+              <select id="suggestionCategoryFilter">
+                <option value="">Todas as categorias</option>
+                {% for cat in suggestion_categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>Buscar produto
+              <input id="suggestionSearchInput" type="search" placeholder="Ex: fone, air fryer, notebook...">
+            </label>
+            <label>Produto para indicar
+              <select name="product_key" id="suggestionProductSelect" required {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>
+                <option value="">Selecione um produto</option>
                 {% for product in suggestion_catalog %}
-                <button type="button" class="suggestion-product-card" data-category="{{ product.category }}" data-key="{{ product.key }}" hidden>
-                  <strong>{{ product.name }}</strong>
-                  <span>{{ product.category }} • {{ product.price_level }}</span>
-                </button>
+                  <option value="{{ product.key }}" data-category="{{ product.category }}" data-search="{{ (product.name ~ ' ' ~ product.category ~ ' ' ~ product.price_level)|lower }}">
+                    {{ product.name }} — {{ product.category }} — {{ product.price_level }}
+                  </option>
                 {% endfor %}
-              </div>
-            </div>
+              </select>
+            </label>
+          </div>
+          <button class="btn full" type="submit" {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>Indicar produto para votação</button>
+        </form>
+      </div>
 
-            <div class="suggestion-selected-box" id="suggestionSelectedBox">Nenhum produto selecionado.</div>
-            <button class="btn full" id="suggestionSubmitBtn" type="submit" disabled>Indicar produto para votação</button>
-          </form>
+      <div class="suggestion-rules-grid">
+        <div><strong>1 indicação por semana</strong><span>Cada conta só pode colocar um produto na lista semanal.</span></div>
+        <div><strong>20 produtos por semana</strong><span>Após preencher 20 indicações, a lista fecha até a próxima semana.</span></div>
+        <div><strong>1 voto por dia</strong><span>Quem indicou hoje só começa a votar amanhã.</span></div>
+      </div>
+
+      <div class="suggestion-week-title">
+        <div>
+          <h3>Produtos indicados para votação</h3>
+          <p>Ranking transparente dos produtos mais votados da semana.</p>
         </div>
+      </div>
+
+      <div class="cards lc-auction-grid suggestion-grid suggestion-vote-grid">
+        {% for product in suggestion_products %}
+        <article class="card lc-auction-card suggestion-card suggestion-public-card">
+          <div class="card-body">
+            <div class="suggestion-card-top">
+              <span class="suggestion-category">{{ product.category }}</span>
+              <span class="suggestion-votes-pill">{{ product.votes }} voto{{ 's' if product.votes != 1 else '' }}</span>
+            </div>
+            <h3>{{ product.name }}</h3>
+            <p class="suggestion-indicated-by">Indicado por <strong>@{{ product.indicated_by }}</strong></p>
+            <div class="price-line">
+              <div><span>Faixa</span><strong>{{ product.price_level }}</strong></div>
+              <div><span>Semana</span><strong>{{ product.percent }}%</strong></div>
+            </div>
+            <div class="suggestion-progress"><span style="width: {{ product.percent if product.percent <= 100 else 100 }}%"></span></div>
+            <form method="post" action="/indicacao/votar">
+              <input type="hidden" name="product_key" value="{{ product.key }}">
+              <button class="btn full" type="submit" {% if today_suggestion_vote or today_suggestion_nomination %}disabled{% endif %}>
+                {% if today_suggestion_vote %}Voto diário usado{% elif today_suggestion_nomination %}Você indicou hoje{% else %}Votar neste produto{% endif %}
+              </button>
+            </form>
+          </div>
+        </article>
+        {% else %}
+        <div class="empty-state suggestion-message">
+          <strong>Nenhum produto indicado ainda.</strong>
+          <span>Seja o primeiro da semana a indicar um produto para votação.</span>
+        </div>
+        {% endfor %}
+      </div>
       {% else %}
         <div class="empty-state suggestion-message">
           <strong>Entre na conta para indicar e votar.</strong>
@@ -338,8 +326,7 @@
     </section>
   </div>
 
-  
-<div id="noSearchResults" class="empty-state search-empty" style="display:none;">
+  <div id="noSearchResults" class="empty-state search-empty" style="display:none;">
     <strong>Nenhum produto encontrado.</strong>
     <span>Tente buscar por outro nome.</span>
   </div>
@@ -446,53 +433,27 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
 
-  const openSuggestionPicker = document.getElementById("openSuggestionPicker");
-  const suggestionPickerPanel = document.getElementById("suggestionPickerPanel");
-  const suggestionCategoryButtons = document.getElementById("suggestionCategoryButtons");
-  const suggestionProductGrid = document.getElementById("suggestionProductGrid");
-  const suggestionProductKey = document.getElementById("suggestionProductKey");
-  const suggestionSelectedBox = document.getElementById("suggestionSelectedBox");
-  const suggestionSubmitBtn = document.getElementById("suggestionSubmitBtn");
-  const suggestionProductHelp = document.getElementById("suggestionProductHelp");
+  const suggestionCategoryFilter = document.getElementById("suggestionCategoryFilter");
+  const suggestionSearchInput = document.getElementById("suggestionSearchInput");
+  const suggestionProductSelect = document.getElementById("suggestionProductSelect");
 
-  openSuggestionPicker?.addEventListener("click", () => {
-    if (!suggestionPickerPanel) return;
-    const willOpen = suggestionPickerPanel.hasAttribute("hidden");
-    suggestionPickerPanel.toggleAttribute("hidden", !willOpen);
-    openSuggestionPicker.textContent = willOpen ? "Fechar indicação" : "Indicar produto";
-    if (willOpen) suggestionPickerPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-
-  suggestionCategoryButtons?.addEventListener("click", (event) => {
-    const btn = event.target.closest(".suggestion-category-btn");
-    if (!btn || !suggestionProductGrid) return;
-    const category = btn.dataset.category || "";
-    suggestionCategoryButtons.querySelectorAll(".suggestion-category-btn").forEach((item) => item.classList.remove("active"));
-    btn.classList.add("active");
-    suggestionProductKey.value = "";
-    if (suggestionSelectedBox) suggestionSelectedBox.textContent = "Nenhum produto selecionado.";
-    if (suggestionSubmitBtn) suggestionSubmitBtn.disabled = true;
-    if (suggestionProductHelp) suggestionProductHelp.textContent = `Produtos disponíveis em ${category}.`;
-    let visible = 0;
-    suggestionProductGrid.querySelectorAll(".suggestion-product-card").forEach((card) => {
-      const match = card.dataset.category === category;
-      card.hidden = !match;
-      card.classList.remove("active");
-      if (match) visible += 1;
+  function filterSuggestionProducts() {
+    if (!suggestionProductSelect) return;
+    const category = (suggestionCategoryFilter?.value || "").toLowerCase();
+    const term = (suggestionSearchInput?.value || "").trim().toLowerCase();
+    Array.from(suggestionProductSelect.options).forEach((option) => {
+      if (!option.value) return;
+      const optionCategory = (option.dataset.category || "").toLowerCase();
+      const text = (option.dataset.search || option.textContent || "").toLowerCase();
+      const visible = (!category || optionCategory === category) && (!term || text.includes(term));
+      option.hidden = !visible;
     });
-    const empty = suggestionProductGrid.querySelector(".suggestion-product-empty");
-    if (empty) empty.style.display = visible ? "none" : "grid";
-  });
+    const selected = suggestionProductSelect.selectedOptions[0];
+    if (selected && selected.hidden) suggestionProductSelect.value = "";
+  }
 
-  suggestionProductGrid?.addEventListener("click", (event) => {
-    const card = event.target.closest(".suggestion-product-card");
-    if (!card || card.hidden) return;
-    suggestionProductGrid.querySelectorAll(".suggestion-product-card").forEach((item) => item.classList.remove("active"));
-    card.classList.add("active");
-    if (suggestionProductKey) suggestionProductKey.value = card.dataset.key || "";
-    if (suggestionSelectedBox) suggestionSelectedBox.textContent = `Produto selecionado: ${card.querySelector("strong")?.textContent || ""}`;
-    if (suggestionSubmitBtn) suggestionSubmitBtn.disabled = !suggestionProductKey?.value;
-  });
+  suggestionCategoryFilter?.addEventListener("change", filterSuggestionProducts);
+  suggestionSearchInput?.addEventListener("input", filterSuggestionProducts);
 
   function formatTime(totalSeconds) {
     let seconds = Math.max(0, parseInt(totalSeconds || 0, 10));
@@ -507,9 +468,23 @@ document.addEventListener("DOMContentLoaded", function () {
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
   }
 
+  function secondsFromIso(value) {
+    if (!value) return null;
+    const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
+    const ms = Date.parse(normalized);
+    if (Number.isNaN(ms)) return null;
+    return Math.max(0, Math.ceil((ms - Date.now()) / 1000));
+  }
+
   function tickCountdowns() {
     document.querySelectorAll(".countdown[data-seconds]").forEach((el) => {
-      const current = parseInt(el.getAttribute("data-seconds") || "0", 10);
+      const startAt = el.getAttribute("data-start-at");
+      const endAt = el.getAttribute("data-end-at");
+
+      let current = secondsFromIso(endAt);
+      if (current === null) current = secondsFromIso(startAt);
+      if (current === null) current = parseInt(el.getAttribute("data-seconds") || "0", 10);
+
       el.textContent = formatTime(current);
       el.setAttribute("data-seconds", Math.max(0, current - 1));
     });
@@ -1021,185 +996,6 @@ document.addEventListener("DOMContentLoaded", function () {
   .price-line {
     grid-template-columns: 1fr;
   }
-}
-
-
-/* Indicações: votação em primeiro plano e indicação compacta */
-.suggestion-head-compact {
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.suggestion-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.suggestion-open-btn:disabled,
-#suggestionSubmitBtn:disabled {
-  opacity: .55;
-  cursor: not-allowed;
-  filter: grayscale(.25);
-}
-
-.suggestion-mini-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 10px 0 16px;
-  padding: 11px 13px;
-  border: 1px solid rgba(96,165,250,.24);
-  background: rgba(59,130,246,.10);
-  border-radius: 16px;
-  color: #dbeafe;
-}
-
-.suggestion-vote-priority {
-  margin-top: 8px;
-}
-
-.suggestion-empty-vote {
-  grid-column: 1 / -1;
-  min-height: 120px;
-}
-
-.suggestion-rules-compact {
-  margin-top: 18px;
-  margin-bottom: 12px;
-}
-
-.suggestion-picker-collapsed {
-  margin-top: 14px;
-  border: 1px solid rgba(96,165,250,.24);
-  background: rgba(15,23,42,.72);
-  border-radius: 22px;
-  padding: 18px;
-}
-
-.suggestion-picker-collapsed[hidden] {
-  display: none !important;
-}
-
-.suggestion-step-box {
-  border: 1px solid rgba(148,163,184,.18);
-  background: rgba(255,255,255,.035);
-  border-radius: 18px;
-  padding: 14px;
-  margin-top: 12px;
-}
-
-.suggestion-step-title {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.suggestion-step-title > span {
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, #2563eb, #3b82f6);
-  color: #fff;
-  font-weight: 900;
-  flex: 0 0 auto;
-}
-
-.suggestion-step-title strong {
-  display: block;
-  color: #fff;
-  font-size: 15px;
-}
-
-.suggestion-step-title small {
-  display: block;
-  color: #b7c6e6;
-  margin-top: 2px;
-}
-
-.suggestion-category-buttons {
-  display: flex;
-  gap: 9px;
-  flex-wrap: wrap;
-}
-
-.suggestion-category-btn {
-  border: 1px solid rgba(148,163,184,.18);
-  background: rgba(255,255,255,.055);
-  color: #dbeafe;
-  border-radius: 999px;
-  padding: 10px 13px;
-  font-weight: 900;
-  cursor: pointer;
-  transition: .18s ease;
-}
-
-.suggestion-category-btn:hover,
-.suggestion-category-btn.active {
-  background: rgba(59,130,246,.22);
-  border-color: rgba(96,165,250,.42);
-  color: #fff;
-}
-
-.suggestion-product-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
-}
-
-.suggestion-product-empty {
-  grid-column: 1 / -1;
-  min-height: 90px;
-  display: grid;
-  place-items: center;
-  border: 1px dashed rgba(148,163,184,.25);
-  border-radius: 16px;
-  color: #b7c6e6;
-}
-
-.suggestion-product-card {
-  text-align: left;
-  border: 1px solid rgba(148,163,184,.18);
-  background: rgba(255,255,255,.055);
-  color: #fff;
-  border-radius: 16px;
-  padding: 13px;
-  cursor: pointer;
-  transition: .18s ease;
-}
-
-.suggestion-product-card:hover,
-.suggestion-product-card.active {
-  background: rgba(59,130,246,.20);
-  border-color: rgba(96,165,250,.48);
-  transform: translateY(-1px);
-}
-
-.suggestion-product-card strong,
-.suggestion-product-card span {
-  display: block;
-}
-
-.suggestion-product-card span {
-  margin-top: 5px;
-  color: #b7c6e6;
-  font-size: 13px;
-}
-
-.suggestion-selected-box {
-  margin: 12px 0;
-  padding: 12px 14px;
-  border: 1px solid rgba(96,165,250,.24);
-  border-radius: 15px;
-  background: rgba(59,130,246,.10);
-  color: #dbeafe;
-  font-weight: 800;
 }
 </style>
 {% endblock %}
