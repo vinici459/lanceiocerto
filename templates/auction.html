@@ -406,8 +406,6 @@ window.__AUCTION__ = {{ item | tojson }};
   let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
-  let bidConfirmationLocked = false;
-  let pendingAcceptedBaseId = 0;
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
   function makeClientBidId(){
@@ -425,7 +423,7 @@ window.__AUCTION__ = {{ item | tojson }};
   function isLive(s){ return s === "live"; }
   function isClosed(s){ return ["ended", "finished", "closed", "expired", "pending_payment"].includes(s); }
   function show(el, visible, mode="block"){ if(el) el.style.display = visible ? mode : "none"; }
-  function pendingBidCount(){ return Object.keys(pendingBids).length + (bidConfirmationLocked ? 1 : 0); }
+  function pendingBidCount(){ return Object.keys(pendingBids).length; }
   function isTurboLockedForUser(){
     return Number(auction.turbo_level || 0) >= 2 && auction.user_turbo_eligible === false;
   }
@@ -557,7 +555,7 @@ window.__AUCTION__ = {{ item | tojson }};
   function renderButton(btn){
     const key = bidKey(btn.dataset.bid);
     const cd = Math.max(Number(cooldowns[key] || 0));
-    const busy = Boolean(pendingBids[key]) || bidConfirmationLocked;
+    const busy = Boolean(pendingBids[key]);
     const canBid = isLive(status());
     const turboLocked = isTurboLockedForUser();
 
@@ -744,15 +742,6 @@ window.__AUCTION__ = {{ item | tojson }};
     if(source === "bid" || incomingAcceptedId > previousAcceptedId){
       optimisticHoldUntil = 0;
     }
-
-    // Se o websocket ou /state já trouxe um lance novo enquanto o POST ainda
-    // está pendente, a tela não precisa continuar presa em "Enviando...".
-    if(bidConfirmationLocked && pendingAcceptedBaseId > 0 && incomingAcceptedId > pendingAcceptedBaseId){
-      Object.keys(pendingBids).forEach((key) => delete pendingBids[key]);
-      bidConfirmationLocked = false;
-      pendingAcceptedBaseId = 0;
-      setFeedback("");
-    }
     const s = status();
 
     remaining = currentClockSeconds();
@@ -871,7 +860,7 @@ window.__AUCTION__ = {{ item | tojson }};
     btn.dataset.bid = bidKey(btn.dataset.bid);
     btn.addEventListener("click", async () => {
       const value = bidKey(btn.dataset.bid);
-      if(btn.disabled || bidConfirmationLocked || pendingBidCount() > 0) return;
+      if(btn.disabled || pendingBids[value]) return;
       if(isTurboLockedForUser()){
         setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
         renderButtons();
@@ -879,8 +868,6 @@ window.__AUCTION__ = {{ item | tojson }};
       }
 
       pendingBids[value] = true;
-      bidConfirmationLocked = true;
-      pendingAcceptedBaseId = Number(auction.last_bid_id || auction.state_version || lastAcceptedBidId || 0);
       renderButtons();
       setFeedback("Confirmando lance...");
 
@@ -895,9 +882,8 @@ window.__AUCTION__ = {{ item | tojson }};
         bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 15000);
         const {res, json} = bidResponse;
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
-        setFeedback("Lance confirmado.");
+        setFeedback("");
         applyAuctionState(json.auction, "bid");
-        setTimeout(() => { if(els.feedback?.textContent === "Lance confirmado.") setFeedback(""); }, 900);
         updateHeaderWalletBalance(json.auction?.wallet_balance);
         applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(value), json.cooldown_scope || json.auction?.cooldown_scope || "button");
       } catch(err){
@@ -921,8 +907,6 @@ window.__AUCTION__ = {{ item | tojson }};
           setTimeout(async () => {
             await fetchState("slow-bid-confirm", 9000);
             delete pendingBids[value];
-            bidConfirmationLocked = false;
-            pendingAcceptedBaseId = 0;
             renderButtons();
           }, 700);
         } else {
@@ -931,8 +915,6 @@ window.__AUCTION__ = {{ item | tojson }};
       } finally {
         if(!keepLockedForStateCheck){
           delete pendingBids[value];
-          bidConfirmationLocked = false;
-          pendingAcceptedBaseId = 0;
           renderButtons();
         }
       }

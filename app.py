@@ -1217,8 +1217,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         last_bidder = None
         last_bid_id = 0
     else:
-        cached_count = getattr(item, "bids_count_cached", None)
-        bids_count = int(cached_count or 0) if cached_count is not None else db.query(Bid).filter(Bid.auction_id == item.id).count()
+        bids_count = int(getattr(item, "bids_count_cached", 0) or 0)
         last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
         last_bidder = public_user_name(last_bid.user) if last_bid else None
         last_bid_id = int(last_bid.id if last_bid else 0)
@@ -1292,8 +1291,7 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         last_bidder = None
     else:
         if bids_count_override is None:
-            cached_count = getattr(item, "bids_count_cached", None)
-            bids_count = int(cached_count or 0) if cached_count is not None else (db.query(func.count(Bid.id)).filter(Bid.auction_id == item.id).scalar() or 0)
+            bids_count = int(getattr(item, "bids_count_cached", 0) or 0)
         else:
             bids_count = int(bids_count_override or 0)
 
@@ -1947,19 +1945,14 @@ def ensure_columns() -> None:
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE auction_items ADD COLUMN {name} {ddl}"))
-
-            # Cache do total de lances por leilão: evita COUNT(*) a cada clique.
-            # Backfill seguro para bancos já existentes.
-            try:
+            if "bids_count_cached" in {c["name"] for c in inspector.get_columns("auction_items")}:
                 conn.execute(text("""
-                    UPDATE auction_items ai
+                    UPDATE auction_items
                     SET bids_count_cached = COALESCE((
-                        SELECT COUNT(*) FROM bids b WHERE b.auction_id = ai.id
+                        SELECT COUNT(*) FROM bids WHERE bids.auction_id = auction_items.id
                     ), 0)
-                    WHERE ai.bids_count_cached IS NULL
+                    WHERE bids_count_cached IS NULL
                 """))
-            except Exception:
-                pass
 
         if inspector.has_table("bids"):
             cols = {c["name"] for c in inspector.get_columns("bids")}
@@ -1987,7 +1980,7 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_created ON bids (auction_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bids_user ON bids (user_id)",
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_created ON bids (auction_id, user_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_value_created ON bids (auction_id, user_id, bid_value, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_value_created ON bids (auction_id, user_id, bid_value, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS ix_bids_client_bid_id ON bids (client_bid_id)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_bids_auction_user_client_bid ON bids (auction_id, user_id, client_bid_id) WHERE client_bid_id <> ''",
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_user_status_created ON winner_orders (user_id, status, created_at)",
@@ -2885,20 +2878,25 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             mode_for_bid = compute_turbo_level(item)
             button_cooldown = bid_button_cooldown_seconds(bid_value, mode_for_bid)
 
-            prior_user_bid_any = (
-                db.query(Bid.id)
-                .filter(Bid.auction_id == item.id, Bid.user_id == user.id)
-                .first()
-            )
-
-            if mode_for_bid >= 2 and not prior_user_bid_any:
-                private_payload = public_auction_live_payload(item, db, user=user)
-                raise AuctionStateHTTPException(status_code=403, detail=turbo_lock_message(mode_for_bid), auction_payload=private_payload)
+            # Só consulta histórico do usuário quando o leilão já está em modo Turbo.
+            # No modo normal, essa consulta era feita em todo clique sem necessidade e
+            # aumentava a latência percebida do lance.
+            if mode_for_bid >= 2:
+                prior_user_bid_any = (
+                    db.query(Bid.id)
+                    .filter(Bid.auction_id == item.id, Bid.user_id == user.id)
+                    .first()
+                )
+                if not prior_user_bid_any:
+                    private_payload = public_auction_live_payload(item, db, user=user)
+                    raise AuctionStateHTTPException(status_code=403, detail=turbo_lock_message(mode_for_bid), auction_payload=private_payload)
 
             # Cooldown operacional existente: por botão/valor, não global.
             last_user_bid_created_at = (
-                db.query(func.max(Bid.created_at))
+                db.query(Bid.created_at)
                 .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.bid_value == bid_value)
+                .order_by(desc(Bid.created_at))
+                .limit(1)
                 .scalar()
             )
             if last_user_bid_created_at:
@@ -2913,26 +2911,42 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                         retry_after=remaining_cd,
                     )
 
-            previous_total_bid_count = int(getattr(item, "bids_count_cached", 0) or 0)
+            previous_total_bid_count = int(getattr(item, 'bids_count_cached', 0) or 0)
 
             fee_value, increment = split_bid_amount(
                 bid_value,
                 getattr(item, "bid_fee_percent", DEFAULT_BID_FEE_PERCENT),
             )
 
-            # Desconto robusto do saldo: o banco só atualiza se ainda houver saldo suficiente.
-            # Isso evita que duas abas/requisições gastem o mesmo saldo ao mesmo tempo.
-            updated_wallet = (
-                db.query(User)
-                .filter(
-                    User.id == user.id,
-                    User.wallet_balance >= (bid_value - 0.000001),
+            # Desconto atômico e rápido do saldo.
+            # Em PostgreSQL usamos RETURNING para já obter o saldo final sem db.refresh().
+            wallet_after_bid = None
+            if not DATABASE_URL.startswith("sqlite"):
+                row = db.execute(
+                    text("""
+                        UPDATE users
+                        SET wallet_balance = wallet_balance - :bid_value
+                        WHERE id = :user_id
+                          AND wallet_balance >= :min_balance
+                        RETURNING wallet_balance
+                    """),
+                    {
+                        "bid_value": bid_value,
+                        "min_balance": bid_value - 0.000001,
+                        "user_id": user.id,
+                    },
+                ).first()
+                if row:
+                    wallet_after_bid = BR(row[0] or 0.0)
+                updated_wallet = 1 if row else 0
+            else:
+                updated_wallet = (
+                    db.query(User)
+                    .filter(User.id == user.id, User.wallet_balance >= (bid_value - 0.000001))
+                    .update({User.wallet_balance: User.wallet_balance - bid_value}, synchronize_session=False)
                 )
-                .update(
-                    {User.wallet_balance: User.wallet_balance - bid_value},
-                    synchronize_session=False,
-                )
-            )
+                wallet_after_bid = BR((getattr(user, "wallet_balance", 0.0) or 0.0) - bid_value) if updated_wallet else None
+
             if updated_wallet == 0:
                 db.rollback()
                 fresh_user = db.get(User, user.id) or user
@@ -2944,20 +2958,18 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     auction_payload=private_payload,
                 )
 
-            # Mantém o objeto em memória alinhado sem fazer SELECT extra.
-            user.wallet_balance = BR((getattr(user, "wallet_balance", 0.0) or 0.0) - bid_value)
-
             db.add(WalletTransaction(
                 user_id=user.id,
                 amount=-bid_value,
                 kind="bid_spent",
                 note=f"Lance no leilão #{item.id}",
             ))
-            db.flush()
 
             item.current_price = BR((item.current_price or 0.0) + increment)
             item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
             item.total_bid_spent = BR((getattr(item, "total_bid_spent", 0.0) or 0.0) + bid_value)
+            accepted_count = int(previous_total_bid_count or 0) + 1
+            item.bids_count_cached = accepted_count
 
             turbo_after_bid = compute_turbo_level(item)
             timing_mode_for_bid = turbo_after_bid if turbo_after_bid >= 2 else mode_for_bid
@@ -3023,14 +3035,11 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                 raise
 
             item.turbo_level = turbo_after_bid
-            item.bids_count_cached = int(previous_total_bid_count or 0) + 1
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
 
             db.commit()
 
-            accepted_count = int(getattr(item, "bids_count_cached", 0) or (int(previous_total_bid_count or 0) + 1))
             accepted_bidder = public_user_name(user)
-            wallet_after_bid = BR(getattr(user, "wallet_balance", 0.0) or 0.0)
 
             # Payload rápido: evita consultas extras logo após o commit.
             # O /state continua como sincronização completa, mas o clique retorna rápido.
