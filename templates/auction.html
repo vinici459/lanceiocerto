@@ -415,12 +415,15 @@ window.__AUCTION__ = {{ item | tojson }};
     return `bid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
   function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
+  function setHeaderWalletBalanceText(value){
+    const el = document.querySelector(".user-balance");
+    if(el) el.textContent = "Saldo: " + moneyBR(value);
+  }
   function updateHeaderWalletBalance(value){
     if(typeof value === "undefined" || value === null || Number.isNaN(Number(value))) return;
     localWalletBalance = Number(value || 0);
     walletPendingReserve = 0;
-    const el = document.querySelector(".user-balance");
-    if(el) el.textContent = "Saldo: " + moneyBR(value);
+    setHeaderWalletBalanceText(localWalletBalance);
   }
   function status(){ return String(auction.status || "").toLowerCase(); }
   function isScheduled(s){ return s === "scheduled" || s === "relisted"; }
@@ -550,6 +553,25 @@ window.__AUCTION__ = {{ item | tojson }};
     fetchState("confirm-local-start", 9000);
   }
 
+  function renderAll(){
+    const s = status();
+    if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
+    if(els.countdown) els.countdown.textContent = isClosed(s) ? (s === "pending_payment" ? "Aguardando" : "Encerrado") : timeLabel(remaining);
+    if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
+    if(els.adminTotalBidFees) els.adminTotalBidFees.textContent = moneyBR(auction.total_bid_fees);
+    if(els.adminCashReserved) els.adminCashReserved.textContent = moneyBR(auction.cash_reserved_before_payment ?? auction.collected_total);
+    if(els.adminTotalIfPaid) els.adminTotalIfPaid.textContent = moneyBR(auction.total_if_paid);
+    if(els.adminExpectedProfit) els.adminExpectedProfit.textContent = moneyBR(auction.expected_profit_if_paid);
+    if(els.status){
+      els.status.textContent = labelStatus(s);
+      els.status.className = "status " + s;
+    }
+    renderMeta(s);
+    renderControls(s);
+    renderChat();
+    renderButtons();
+  }
+
   function applyOptimisticBid(value){
     // Resposta instantânea segura: a tela reserva o saldo localmente e mostra o novo
     // preço/contador no mesmo clique. O backend continua sendo a fonte oficial e
@@ -583,8 +605,13 @@ window.__AUCTION__ = {{ item | tojson }};
       remaining = Math.max(1, remaining + normalTimeDelta(value));
     }
 
+    if(isLive(status())){
+      auction.ends_at = new Date(Date.now() + Math.max(1, remaining) * 1000).toISOString();
+      auction.remaining_seconds = Math.max(1, Math.ceil(remaining));
+    }
+
     walletPendingReserve = Math.round((walletPendingReserve + gross) * 100) / 100;
-    updateHeaderWalletBalance(Math.max(0, localWalletBalance - gross));
+    setHeaderWalletBalanceText(Math.max(0, Number(localWalletBalance || 0) - walletPendingReserve));
     optimisticHoldUntil = Date.now() + 2200;
     renderAll();
   }
@@ -919,7 +946,7 @@ window.__AUCTION__ = {{ item | tojson }};
       pendingBids[value] = true;
       applyOptimisticBid(value);
       renderButtons();
-      setFeedback("Lance enviado. Confirmando...");
+      setFeedback("Lance aplicado. Confirmando servidor...");
 
       const clientBidId = makeClientBidId();
       const form = new FormData();
