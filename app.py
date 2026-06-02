@@ -2673,7 +2673,14 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
         db = SessionLocal()
         try:
             user = require_user(request, db)
-            item = db.get(AuctionItem, auction_id)
+            # Trava a linha do leilão no banco durante o processamento.
+            # O threading.Lock protege uma réplica; o FOR UPDATE protege também se houver mais réplicas/processos.
+            item = (
+                db.query(AuctionItem)
+                .filter(AuctionItem.id == auction_id)
+                .with_for_update()
+                .first()
+            )
             if not item:
                 raise HTTPException(status_code=404, detail="Leilão não encontrado.")
 
@@ -2717,6 +2724,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     )
                     private_payload["idempotent"] = True
                     private_payload["client_bid_id"] = client_bid_id
+                    private_payload["wallet_balance"] = BR(getattr(user, "wallet_balance", 0.0) or 0.0)
                     public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
                     public_payload["idempotent"] = True
                     return private_payload, public_payload, 0
@@ -2765,7 +2773,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                 db.query(User)
                 .filter(
                     User.id == user.id,
-                    User.wallet_balance >= bid_value,
+                    User.wallet_balance >= (bid_value - 0.000001),
                 )
                 .update(
                     {User.wallet_balance: User.wallet_balance - bid_value},
@@ -2774,8 +2782,9 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             )
             if updated_wallet == 0:
                 db.rollback()
-                private_payload = public_auction_live_payload(item, db, user=user)
-                private_payload["wallet_balance"] = BR(getattr(user, "wallet_balance", 0.0) or 0.0)
+                fresh_user = db.get(User, user.id) or user
+                private_payload = public_auction_live_payload(item, db, user=fresh_user)
+                private_payload["wallet_balance"] = BR(getattr(fresh_user, "wallet_balance", 0.0) or 0.0)
                 raise AuctionStateHTTPException(
                     status_code=402,
                     detail="Saldo insuficiente para dar este lance.",
@@ -2790,6 +2799,10 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             ))
             db.flush()
             db.refresh(user)
+            # Evita saldo visualmente negativo por resíduo de ponto flutuante (ex.: -0.00000001).
+            if -0.004 < float(user.wallet_balance or 0.0) < 0:
+                user.wallet_balance = 0.0
+                db.flush()
 
             item.current_price = BR((item.current_price or 0.0) + increment)
             item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
@@ -2817,7 +2830,46 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                 client_bid_id=client_bid_id,
             )
             db.add(bid)
-            db.flush()
+            try:
+                db.flush()
+            except IntegrityError:
+                # Outro processo pode ter registrado o mesmo client_bid_id primeiro.
+                # Rollback desfaz também o desconto de saldo desta tentativa e devolve
+                # o estado oficial do lance já aceito, sem duplicar cobrança.
+                db.rollback()
+                confirm_db = SessionLocal()
+                try:
+                    existing_bid = (
+                        confirm_db.query(Bid)
+                        .filter(Bid.auction_id == auction_id, Bid.user_id == user.id, Bid.client_bid_id == client_bid_id)
+                        .first()
+                    )
+                    item_confirmed = confirm_db.get(AuctionItem, auction_id)
+                    user_confirmed = confirm_db.get(User, user.id)
+                    if existing_bid and item_confirmed and user_confirmed:
+                        private_payload = public_auction_live_payload(
+                            item_confirmed,
+                            confirm_db,
+                            last_bid_id_override=existing_bid.id,
+                            user=user_confirmed,
+                        )
+                        private_payload.update({
+                            "idempotent": True,
+                            "client_bid_id": client_bid_id,
+                            "wallet_balance": BR(getattr(user_confirmed, "wallet_balance", 0.0) or 0.0),
+                            "server_time": datetime.utcnow().isoformat(),
+                        })
+                        public_payload = public_auction_live_payload(
+                            item_confirmed,
+                            confirm_db,
+                            last_bid_id_override=existing_bid.id,
+                            user_turbo_eligible_override=None,
+                        )
+                        public_payload["idempotent"] = True
+                        return private_payload, public_payload, 0
+                finally:
+                    confirm_db.close()
+                raise
 
             item.turbo_level = turbo_after_bid
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
@@ -2927,9 +2979,10 @@ async def auction_state(request: Request, auction_id: int):
         if changed:
             db.commit()
             db.refresh(item)
-            payload = public_auction_live_payload(item, db, user=user)
-            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
-            return JSONResponse({"ok": True, "auction": payload})
+            private_payload = public_auction_live_payload(item, db, user=user)
+            public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
+            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
+            return JSONResponse({"ok": True, "auction": private_payload})
         return JSONResponse({"ok": True, "auction": public_auction_live_payload(item, db, user=user)})
     finally:
         db.close()

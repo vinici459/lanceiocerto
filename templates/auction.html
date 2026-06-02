@@ -84,7 +84,7 @@
             <strong id="model-value">Aguardando pagamento</strong>
           {% else %}
             <span id="model-label">Modelo</span>
-            <strong id="model-value">Lance sem débito</strong>
+            <strong id="model-value">Lance com saldo</strong>
           {% endif %}
         </div>
       </div>
@@ -127,7 +127,7 @@
         </form>
 
         <p id="bid-note" class="muted" {% if item.status != 'live' %}style="display:none"{% endif %}>
-          Os lances aumentam o preço atual e não debitam saldo. O pagamento acontece somente se você vencer o produto.
+          Cada lance desconta saldo imediatamente. O preço e o contador só atualizam após confirmação do servidor.
         </p>
 
         <div id="bid-feedback" class="bid-feedback" aria-live="polite"></div>
@@ -406,6 +406,7 @@ window.__AUCTION__ = {{ item | tojson }};
   let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
+  let bidConfirmationLocked = false;
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
   function makeClientBidId(){
@@ -413,12 +414,17 @@ window.__AUCTION__ = {{ item | tojson }};
     return `bid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
   function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
+  function updateHeaderWalletBalance(value){
+    if(typeof value === "undefined" || value === null || Number.isNaN(Number(value))) return;
+    const el = document.querySelector(".user-balance");
+    if(el) el.textContent = "Saldo: " + moneyBR(value);
+  }
   function status(){ return String(auction.status || "").toLowerCase(); }
   function isScheduled(s){ return s === "scheduled" || s === "relisted"; }
   function isLive(s){ return s === "live"; }
   function isClosed(s){ return ["ended", "finished", "closed", "expired", "pending_payment"].includes(s); }
   function show(el, visible, mode="block"){ if(el) el.style.display = visible ? mode : "none"; }
-  function pendingBidCount(){ return Object.keys(pendingBids).length; }
+  function pendingBidCount(){ return Object.keys(pendingBids).length + (bidConfirmationLocked ? 1 : 0); }
   function isTurboLockedForUser(){
     return Number(auction.turbo_level || 0) >= 2 && auction.user_turbo_eligible === false;
   }
@@ -521,51 +527,15 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   function applyOptimisticBid(value){
-    const gross = Number(value || 0);
-    const feePercent = Math.max(0, Math.min(100, Number(auction.bid_fee_percent ?? 10)));
-    const fee = Math.round((gross * feePercent / 100) * 100) / 100;
-    const increment = Math.round((gross - fee) * 100) / 100;
-    const levelBeforeBid = Number(auction.turbo_level || 0);
-
-    auction = {
-      ...auction,
-      current_price: Number(auction.current_price || 0) + increment,
-      total_bid_fees: Number(auction.total_bid_fees || 0) + fee,
-      collected_total: Number(auction.collected_total || 0) + gross,
-      bids_count: Number(auction.bids_count || 0) + 1,
-      last_bidder: "Você"
-    };
-
-    if(auction.source_price > 0){
-      auction.progress_percent = Math.round(((Number(auction.current_price || 0) + Number(auction.total_bid_fees || 0)) / Number(auction.source_price || 1)) * 10000) / 100;
-    }
-
-    const nextLevel = localTurboLevelFromProgress(auction.progress_percent);
-    const timingLevel = nextLevel >= 2 ? nextLevel : levelBeforeBid;
-
-    if(timingLevel >= 2){
-      // No turbo, o lance define a janela curta. Não soma/subtrai tempo normal.
-      remaining = turboTimeSeconds(value, timingLevel);
-    } else {
-      remaining = Math.max(1, remaining + normalTimeDelta(value));
-    }
-
-    if(nextLevel > Number(auction.turbo_level || 0)){
-      auction.turbo_level = nextLevel;
-      auction.turbo_label = nextLevel === 4 ? "Turbo 4.0" : nextLevel === 3 ? "Turbo 3.0" : "Turbo 2.0";
-      // Quem acabou de dar lance continua habilitado para os próximos lances no turbo.
-      auction.user_turbo_eligible = true;
-    }
-
-    auction.remaining_seconds = remaining;
-    optimisticHoldUntil = Date.now() + 6000;
-    applyAuctionState(auction, "optimistic-bid");
+    // Modelo com saldo real: não simula preço/contador antes do servidor confirmar.
+    // Mantida como no-op para evitar erro caso algum trecho antigo chame a função.
+    return;
   }
 
   function renderButton(btn){
     const key = bidKey(btn.dataset.bid);
     const cd = Math.max(Number(cooldowns[key] || 0));
-    const busy = Boolean(pendingBids[key]);
+    const busy = Boolean(pendingBids[key]) || bidConfirmationLocked;
     const canBid = isLive(status());
     const turboLocked = isTurboLockedForUser();
 
@@ -627,7 +597,7 @@ window.__AUCTION__ = {{ item | tojson }};
         els.modelValue.textContent = "Aguardando pagamento";
       } else {
         els.modelLabel.textContent = "Modelo";
-        els.modelValue.textContent = "Lance sem débito";
+        els.modelValue.textContent = "Lance com saldo";
       }
     }
   }
@@ -870,21 +840,17 @@ window.__AUCTION__ = {{ item | tojson }};
     btn.dataset.bid = bidKey(btn.dataset.bid);
     btn.addEventListener("click", async () => {
       const value = bidKey(btn.dataset.bid);
-      if(btn.disabled || pendingBids[value]) return;
+      if(btn.disabled || bidConfirmationLocked || pendingBidCount() > 0) return;
       if(isTurboLockedForUser()){
         setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
         renderButtons();
         return;
       }
 
-      const previousAuction = {...auction};
-      const previousRemaining = remaining;
       pendingBids[value] = true;
-
-      // Lance visual imediato: a tela responde no mesmo clique e o backend confirma/corrige logo depois.
-      applyOptimisticBid(value);
-      applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
-      setFeedback("Lance enviado. Confirmando...");
+      bidConfirmationLocked = true;
+      renderButtons();
+      setFeedback("Enviando lance para confirmação do servidor...");
 
       const clientBidId = makeClientBidId();
       const form = new FormData();
@@ -892,35 +858,48 @@ window.__AUCTION__ = {{ item | tojson }};
       form.append("client_bid_id", clientBidId);
 
       let bidResponse = null;
+      let keepLockedForStateCheck = false;
       try{
         bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 15000);
         const {res, json} = bidResponse;
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
         setFeedback("");
         applyAuctionState(json.auction, "bid");
+        updateHeaderWalletBalance(json.auction?.wallet_balance);
         applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(value), json.cooldown_scope || json.auction?.cooldown_scope || "button");
       } catch(err){
         const isTimeout = err?.name === "AbortError";
         const msg = isTimeout
-          ? "Servidor demorou para confirmar. Conferindo estado do leilão..."
+          ? "Servidor demorou para confirmar. Conferindo se o lance entrou antes de liberar novo clique..."
           : (err?.message || "Não foi possível confirmar o lance agora.");
         setFeedback(msg);
-        if(bidResponse?.json?.retry_after) applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
+
+        // Só aplica cooldown em rejeição de cooldown real do backend (429/retry_after).
+        // Saldo insuficiente e outros erros não travam o botão.
+        if(bidResponse?.json?.retry_after){
+          applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
+        }
+
         if(bidResponse?.json?.auction){
           applyAuctionState(bidResponse.json.auction, "bid-error");
+          updateHeaderWalletBalance(bidResponse.json.auction?.wallet_balance);
         } else if(isTimeout){
-          optimisticHoldUntil = 0;
-          setTimeout(() => fetchState("slow-bid-confirm", 9000), 700);
+          keepLockedForStateCheck = true;
+          setTimeout(async () => {
+            await fetchState("slow-bid-confirm", 9000);
+            delete pendingBids[value];
+            bidConfirmationLocked = false;
+            renderButtons();
+          }, 700);
         } else {
-          optimisticHoldUntil = 0;
-          auction = previousAuction;
-          remaining = previousRemaining;
-          applyAuctionState(auction, "bid-error");
           fetchState("bid-error");
         }
       } finally {
-        delete pendingBids[value];
-        renderButtons();
+        if(!keepLockedForStateCheck){
+          delete pendingBids[value];
+          bidConfirmationLocked = false;
+          renderButtons();
+        }
       }
     });
   });
