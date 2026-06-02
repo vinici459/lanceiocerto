@@ -1112,7 +1112,7 @@ def start_auction_if_due(item: AuctionItem, now: Optional[datetime] = None) -> b
     return False
 
 
-def finish_auction_if_due(item: AuctionItem, db: Session, now: Optional[datetime] = None) -> bool:
+def finish_auction_if_due(item: AuctionItem, db: Session, now: Optional[datetime] = None, create_side_effects: bool = True) -> bool:
     """Finaliza imediatamente um leilão live cujo relógio chegou a zero.
 
     Essa função é chamada pelo watcher, pelo endpoint /state e antes de aceitar lances.
@@ -1143,34 +1143,98 @@ def finish_auction_if_due(item: AuctionItem, db: Session, now: Optional[datetime
     item.ends_at = None
     item.chat_paused = True
 
-    existing = db.query(WinnerOrder).filter(
-        WinnerOrder.auction_id == item.id,
-        WinnerOrder.status.in_(["pending_payment", "paid", "processing", "purchased", "sent", "delivered"]),
-    ).first()
-    if not existing:
-        winner = db.get(User, last_bid.user_id)
-        order = WinnerOrder(
-            auction_id=item.id,
-            user_id=last_bid.user_id,
-            final_price=BR(item.current_price),
-            status="pending_payment",
-            payment_deadline=item.winner_deadline,
-            pix_code=f"PIX-LANCEIOCERTO-{item.id}-{last_bid.user_id}",
-            payment_link=f"/minha-conta/pagamentos/{item.id}",
-            delivery_name=getattr(winner, "full_name", "") if winner else "",
-            delivery_cep=getattr(winner, "cep", "") if winner else "",
-            delivery_street=getattr(winner, "street", "") if winner else "",
-            delivery_number=getattr(winner, "number", "") if winner else "",
-            delivery_district=getattr(winner, "district", "") if winner else "",
-            delivery_city=getattr(winner, "city", "") if winner else "",
-            delivery_state=getattr(winner, "state", "") if winner else "",
-        )
-        db.add(order)
+    if create_side_effects:
+        existing = db.query(WinnerOrder).filter(
+            WinnerOrder.auction_id == item.id,
+            WinnerOrder.status.in_(["pending_payment", "paid", "processing", "purchased", "sent", "delivered"]),
+        ).first()
+        if not existing:
+            winner = db.get(User, last_bid.user_id)
+            order = WinnerOrder(
+                auction_id=item.id,
+                user_id=last_bid.user_id,
+                final_price=BR(item.current_price),
+                status="pending_payment",
+                payment_deadline=item.winner_deadline,
+                pix_code=f"PIX-LANCEIOCERTO-{item.id}-{last_bid.user_id}",
+                payment_link=f"/minha-conta/pagamentos/{item.id}",
+                delivery_name=getattr(winner, "full_name", "") if winner else "",
+                delivery_cep=getattr(winner, "cep", "") if winner else "",
+                delivery_street=getattr(winner, "street", "") if winner else "",
+                delivery_number=getattr(winner, "number", "") if winner else "",
+                delivery_district=getattr(winner, "district", "") if winner else "",
+                delivery_city=getattr(winner, "city", "") if winner else "",
+                delivery_state=getattr(winner, "state", "") if winner else "",
+            )
+            db.add(order)
 
-    if ENABLE_CASHBACK_DRAW and getattr(item, "cashback_enabled", False):
-        ensure_cashback_event(item, db, now)
+        if ENABLE_CASHBACK_DRAW and getattr(item, "cashback_enabled", False):
+            ensure_cashback_event(item, db, now)
 
     return True
+
+
+def ensure_finished_auction_side_effects(auction_id: int) -> None:
+    """Cria pedido/cashback após o fechamento visual rápido.
+
+    O endpoint /state precisa responder imediatamente quando o cronômetro chega a
+    zero. Por isso ele só muda o status e devolve o payload. Esta função roda logo
+    depois em segundo plano para criar WinnerOrder e cashback sem segurar a tela.
+    """
+    db = SessionLocal()
+    try:
+        item = db.get(AuctionItem, auction_id)
+        if not item or item.status not in {"pending_payment", "ended"}:
+            return
+
+        last_bid = (
+            db.query(Bid)
+            .filter(Bid.auction_id == auction_id)
+            .order_by(desc(Bid.created_at))
+            .first()
+        )
+        if not last_bid:
+            db.commit()
+            return
+
+        if item.status == "pending_payment":
+            if not item.winner_user_id:
+                item.winner_user_id = last_bid.user_id
+            if not item.winner_deadline:
+                item.winner_deadline = datetime.utcnow() + timedelta(minutes=PAYMENT_DEADLINE_MINUTES)
+
+            existing = db.query(WinnerOrder).filter(
+                WinnerOrder.auction_id == item.id,
+                WinnerOrder.status.in_(["pending_payment", "paid", "processing", "purchased", "sent", "delivered"]),
+            ).first()
+            if not existing:
+                winner = db.get(User, last_bid.user_id)
+                db.add(WinnerOrder(
+                    auction_id=item.id,
+                    user_id=last_bid.user_id,
+                    final_price=BR(item.current_price),
+                    status="pending_payment",
+                    payment_deadline=item.winner_deadline,
+                    pix_code=f"PIX-LANCEIOCERTO-{item.id}-{last_bid.user_id}",
+                    payment_link=f"/minha-conta/pagamentos/{item.id}",
+                    delivery_name=getattr(winner, "full_name", "") if winner else "",
+                    delivery_cep=getattr(winner, "cep", "") if winner else "",
+                    delivery_street=getattr(winner, "street", "") if winner else "",
+                    delivery_number=getattr(winner, "number", "") if winner else "",
+                    delivery_district=getattr(winner, "district", "") if winner else "",
+                    delivery_city=getattr(winner, "city", "") if winner else "",
+                    delivery_state=getattr(winner, "state", "") if winner else "",
+                ))
+
+        if ENABLE_CASHBACK_DRAW and getattr(item, "cashback_enabled", False):
+            ensure_cashback_event(item, db, datetime.utcnow())
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def sync_due_auction_states(db: Session, now: Optional[datetime] = None, limit: int = 80) -> bool:
@@ -1270,11 +1334,11 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "last_bid_id": last_bid_id,
         "state_version": int(last_bid_id),
         "user_turbo_eligible": user_turbo_eligible,
-        "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "last_bidder": last_bidder,
         "image_url": safe_image_url(item.image_url),
         "chat_paused": item.chat_paused,
         "chat_open": auction_chat_is_open(item),
+        "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "cashback": cashback_payload(item, db),
     }
 
@@ -1361,11 +1425,11 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "last_bid_id": last_bid_id,
         "state_version": int(last_bid_id),
         "user_turbo_eligible": user_turbo_eligible,
-        "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "last_bidder": last_bidder,
         "image_url": safe_image_url(item.image_url),
         "chat_paused": item.chat_paused,
         "chat_open": auction_chat_is_open(item),
+        "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "button_cooldown": bid_button_cooldown_seconds(0.10, level),
     }
     if include_cashback:
@@ -3173,13 +3237,16 @@ async def auction_state(request: Request, auction_id: int):
             raise HTTPException(status_code=404, detail="Leilão não encontrado.")
         now = datetime.utcnow()
         changed = start_auction_if_due(item, now)
-        changed = finish_auction_if_due(item, db, now) or changed
+        finished_now = finish_auction_if_due(item, db, now, create_side_effects=False)
+        changed = finished_now or changed
         if changed:
             db.commit()
-            db.refresh(item)
-            payload = public_auction_live_payload(item, db, user=user)
-            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": payload}))
-            return JSONResponse({"ok": True, "auction": payload})
+            private_payload = public_auction_live_payload(item, db, user=user)
+            public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
+            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
+            if finished_now:
+                asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
+            return JSONResponse({"ok": True, "auction": private_payload})
         return JSONResponse({"ok": True, "auction": public_auction_live_payload(item, db, user=user)})
     finally:
         db.close()

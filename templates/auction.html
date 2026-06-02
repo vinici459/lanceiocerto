@@ -127,7 +127,7 @@
         </form>
 
         <p id="bid-note" class="muted" {% if item.status != 'live' %}style="display:none"{% endif %}>
-          Cada lance desconta saldo imediatamente. O preço e o contador só atualizam após confirmação do servidor.
+          Cada lance desconta saldo imediatamente. A tela responde na hora e o servidor confirma em seguida.
         </p>
 
         <div id="bid-feedback" class="bid-feedback" aria-live="polite"></div>
@@ -408,6 +408,7 @@ window.__AUCTION__ = {{ item | tojson }};
   const pendingBids = Object.create(null);
   let localWalletBalance = Number(auction.wallet_balance ?? 0);
   let walletPendingReserve = 0;
+  let localFinishTriggered = false;
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
   function makeClientBidId(){
@@ -814,6 +815,7 @@ window.__AUCTION__ = {{ item | tojson }};
       optimisticHoldUntil = 0;
     }
     const s = status();
+    localFinishTriggered = isClosed(s);
 
     remaining = currentClockSeconds();
     lastZeroSyncAt = 0;
@@ -874,6 +876,24 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
+  function closeAuctionLocally(){
+    if(localFinishTriggered || !isLive(status())) return;
+    localFinishTriggered = true;
+    const hasBid = Number(auction.bids_count || 0) > 0 || Boolean(auction.last_bidder);
+    auction = {
+      ...auction,
+      status: hasBid ? "pending_payment" : "ended",
+      winner_name: hasBid ? (auction.winner_name || auction.last_bidder || "—") : null,
+      remaining_seconds: 0,
+      ends_at: null,
+      chat_open: false,
+      chat_paused: true
+    };
+    remaining = 0;
+    applyAuctionState(auction, "local-finish");
+    fetchState("confirm-local-finish", 9000);
+  }
+
   function tick(){
     const s = status();
 
@@ -885,19 +905,7 @@ window.__AUCTION__ = {{ item | tojson }};
         if(isScheduled(s)){
           activateLiveLocally();
         } else {
-          if(els.countdown) els.countdown.textContent = "Encerrando...";
-          show(els.bidForm, false);
-          show(els.bidNote, false);
-          if(els.stateAlert){
-            show(els.stateAlert, true);
-            els.stateAlert.textContent = "Leilão encerrando. Confirmando vencedor e abrindo cashback, se estiver ativo...";
-          }
-          document.querySelectorAll(".bid-btn").forEach((btn) => { btn.disabled = true; btn.classList.add("cooling"); });
-          const nowMs = Date.now();
-          if(nowMs - lastZeroSyncAt >= 1000){
-            lastZeroSyncAt = nowMs;
-            fetchState("end-zero-retry", 9000);
-          }
+          closeAuctionLocally();
         }
       }
     }
@@ -934,6 +942,12 @@ window.__AUCTION__ = {{ item | tojson }};
       if(btn.disabled || pendingBids[value]) return;
       if(isTurboLockedForUser()){
         setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
+        renderButtons();
+        return;
+      }
+      const availableBalance = Number(localWalletBalance || 0) - Number(walletPendingReserve || 0);
+      if(Number(value) > availableBalance + 0.000001){
+        setFeedback("Saldo insuficiente para este lance.");
         renderButtons();
         return;
       }
