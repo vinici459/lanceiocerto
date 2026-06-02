@@ -1368,6 +1368,92 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
     return payload
 
 
+
+def fast_bid_auction_payload(
+    item: AuctionItem,
+    *,
+    bids_count: int,
+    last_bidder: str,
+    last_bid_id: int,
+    user_turbo_eligible: Optional[bool],
+    button_cooldown: int,
+    mode_for_bid: int,
+    mode_before_bid: int,
+    bid_value: float,
+    fee_value: float,
+    price_increment: float,
+    client_bid_id: str = "",
+    wallet_balance: Optional[float] = None,
+) -> dict:
+    """Payload rápido para resposta de lance.
+
+    Evita consultas extras logo depois do commit. O /state continua existindo
+    para sincronização completa, mas o clique precisa voltar o mais rápido possível.
+    """
+    now = datetime.utcnow()
+    status = (getattr(item, "status", "") or "").lower()
+    remaining = 0
+    if status == "live" and item.ends_at:
+        remaining = max(0, int((item.ends_at - now).total_seconds()))
+    start_remaining = 0
+    if status in {"scheduled", "relisted"} and item.scheduled_start:
+        start_remaining = max(0, int((item.scheduled_start - now).total_seconds()))
+
+    level = compute_turbo_level(item)
+    payload = {
+        "id": item.id,
+        "title": item.title,
+        "description": item.description,
+        "status": item.status,
+        "current_price": BR(item.current_price),
+        "start_price": BR(item.start_price),
+        "source_price": BR(item.source_price),
+        "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
+        "start_remaining": start_remaining,
+        "ends_at": item.ends_at.isoformat() if item.ends_at else None,
+        "remaining_seconds": remaining,
+        "winner_name": public_user_name(item.winner) if item.winner else None,
+        "winner_deadline": item.winner_deadline.isoformat() if item.winner_deadline else None,
+        "turbo_level": level,
+        "turbo_label": turbo_label(level),
+        "progress_percent": auction_progress_percent(item),
+        "collected_total": auction_collected_total(item),
+        "turbo_trigger_percent": getattr(item, "turbo_trigger_percent", 60.0),
+        "turbo_level_3_percent": getattr(item, "turbo_level_3_percent", 65.0),
+        "turbo_level_4_percent": getattr(item, "turbo_level_4_percent", 70.0),
+        "turbo_start_amount": BR(item.source_price * (getattr(item, "turbo_trigger_percent", 60.0) / 100.0)),
+        "turbo_level_3_amount": BR(item.source_price * (getattr(item, "turbo_level_3_percent", 65.0) / 100.0)),
+        "turbo_level_4_amount": BR(item.source_price * (getattr(item, "turbo_level_4_percent", 70.0) / 100.0)),
+        "bid_fee_percent": getattr(item, "bid_fee_percent", DEFAULT_BID_FEE_PERCENT),
+        "total_bid_fees": BR(getattr(item, "total_bid_fees", 0.0) or 0.0),
+        "cash_reserved_before_payment": auction_cash_reserved_before_payment(item),
+        "total_if_paid": auction_total_if_paid(item),
+        "expected_profit_if_paid": auction_expected_profit_if_paid(item),
+        "turbo_base_value": turbo_base_amount(item),
+        "initial_duration_seconds": getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS),
+        "bids_count": int(bids_count or 0),
+        "last_bid_id": int(last_bid_id or 0),
+        "state_version": int(last_bid_id or 0),
+        "user_turbo_eligible": user_turbo_eligible,
+        "last_bidder": last_bidder,
+        "image_url": safe_image_url(item.image_url),
+        "chat_paused": item.chat_paused,
+        "chat_open": auction_chat_is_open(item),
+        "button_cooldown": button_cooldown,
+        "mode_for_bid": mode_for_bid,
+        "mode_before_bid": mode_before_bid,
+        "cooldown_scope": "button",
+        "bid_value": bid_value,
+        "fee_value": fee_value,
+        "price_increment": price_increment,
+        "client_bid_id": client_bid_id,
+        "server_time": datetime.utcnow().isoformat(),
+    }
+    if wallet_balance is not None:
+        payload["wallet_balance"] = BR(wallet_balance or 0.0)
+    return payload
+
+
 def public_auction_card_payload(item: AuctionItem) -> dict:
     """Payload leve para a vitrine/home.
 
@@ -2919,50 +3005,45 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
 
             db.commit()
-            db.refresh(item)
 
-            # Payload privado: volta apenas para quem clicou. Pode conter elegibilidade personalizada.
-            private_payload = public_auction_live_payload(
-                item,
-                db,
-                bids_count_override=previous_total_bid_count + 1,
-                last_bidder_override=public_user_name(user),
-                last_bid_id_override=bid.id,
-                user=user,
-                user_turbo_eligible_override=True,
-            )
-            private_payload.update({
-                "button_cooldown": button_cooldown,
-                "mode_for_bid": timing_mode_for_bid,
-                "mode_before_bid": mode_for_bid,
-                "cooldown_scope": "button",
-                "bid_value": bid_value,
-                "fee_value": fee_value,
-                "price_increment": increment,
-                "client_bid_id": client_bid_id,
-                "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0),
-                "server_time": datetime.utcnow().isoformat(),
-            })
+            accepted_count = int(previous_total_bid_count or 0) + 1
+            accepted_bidder = public_user_name(user)
+            wallet_after_bid = BR(getattr(user, "wallet_balance", 0.0) or 0.0)
 
-            # Payload público: enviado por websocket para todos. Nunca carrega elegibilidade privada.
-            public_payload = public_auction_live_payload(
+            # Payload rápido: evita consultas extras logo após o commit.
+            # O /state continua como sincronização completa, mas o clique retorna rápido.
+            private_payload = fast_bid_auction_payload(
                 item,
-                db,
-                bids_count_override=previous_total_bid_count + 1,
-                last_bidder_override=public_user_name(user),
-                last_bid_id_override=bid.id,
-                user_turbo_eligible_override=None,
+                bids_count=accepted_count,
+                last_bidder=accepted_bidder,
+                last_bid_id=bid.id,
+                user_turbo_eligible=True,
+                button_cooldown=button_cooldown,
+                mode_for_bid=timing_mode_for_bid,
+                mode_before_bid=mode_for_bid,
+                bid_value=bid_value,
+                fee_value=fee_value,
+                price_increment=increment,
+                client_bid_id=client_bid_id,
+                wallet_balance=wallet_after_bid,
             )
-            public_payload.update({
-                "button_cooldown": button_cooldown,
-                "mode_for_bid": timing_mode_for_bid,
-                "mode_before_bid": mode_for_bid,
-                "cooldown_scope": "button",
-                "bid_value": bid_value,
-                "fee_value": fee_value,
-                "price_increment": increment,
-                "server_time": private_payload["server_time"],
-            })
+
+            # Payload público: enviado por websocket para todos. Nunca carrega saldo/elegibilidade privada.
+            public_payload = fast_bid_auction_payload(
+                item,
+                bids_count=accepted_count,
+                last_bidder=accepted_bidder,
+                last_bid_id=bid.id,
+                user_turbo_eligible=None,
+                button_cooldown=button_cooldown,
+                mode_for_bid=timing_mode_for_bid,
+                mode_before_bid=mode_for_bid,
+                bid_value=bid_value,
+                fee_value=fee_value,
+                price_increment=increment,
+                client_bid_id="",
+                wallet_balance=None,
+            )
 
             return private_payload, public_payload, button_cooldown
         except HTTPException:

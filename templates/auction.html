@@ -407,6 +407,7 @@ window.__AUCTION__ = {{ item | tojson }};
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
   let bidConfirmationLocked = false;
+  let pendingAcceptedBaseId = 0;
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
   function makeClientBidId(){
@@ -743,6 +744,15 @@ window.__AUCTION__ = {{ item | tojson }};
     if(source === "bid" || incomingAcceptedId > previousAcceptedId){
       optimisticHoldUntil = 0;
     }
+
+    // Se o websocket ou /state já trouxe um lance novo enquanto o POST ainda
+    // está pendente, a tela não precisa continuar presa em "Enviando...".
+    if(bidConfirmationLocked && pendingAcceptedBaseId > 0 && incomingAcceptedId > pendingAcceptedBaseId){
+      Object.keys(pendingBids).forEach((key) => delete pendingBids[key]);
+      bidConfirmationLocked = false;
+      pendingAcceptedBaseId = 0;
+      setFeedback("");
+    }
     const s = status();
 
     remaining = currentClockSeconds();
@@ -870,8 +880,9 @@ window.__AUCTION__ = {{ item | tojson }};
 
       pendingBids[value] = true;
       bidConfirmationLocked = true;
+      pendingAcceptedBaseId = Number(auction.last_bid_id || auction.state_version || lastAcceptedBidId || 0);
       renderButtons();
-      setFeedback("Enviando lance para confirmação do servidor...");
+      setFeedback("Confirmando lance...");
 
       const clientBidId = makeClientBidId();
       const form = new FormData();
@@ -884,8 +895,9 @@ window.__AUCTION__ = {{ item | tojson }};
         bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 15000);
         const {res, json} = bidResponse;
         if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
-        setFeedback("");
+        setFeedback("Lance confirmado.");
         applyAuctionState(json.auction, "bid");
+        setTimeout(() => { if(els.feedback?.textContent === "Lance confirmado.") setFeedback(""); }, 900);
         updateHeaderWalletBalance(json.auction?.wallet_balance);
         applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(value), json.cooldown_scope || json.auction?.cooldown_scope || "button");
       } catch(err){
@@ -910,6 +922,7 @@ window.__AUCTION__ = {{ item | tojson }};
             await fetchState("slow-bid-confirm", 9000);
             delete pendingBids[value];
             bidConfirmationLocked = false;
+            pendingAcceptedBaseId = 0;
             renderButtons();
           }, 700);
         } else {
@@ -919,6 +932,7 @@ window.__AUCTION__ = {{ item | tojson }};
         if(!keepLockedForStateCheck){
           delete pendingBids[value];
           bidConfirmationLocked = false;
+          pendingAcceptedBaseId = 0;
           renderButtons();
         }
       }
