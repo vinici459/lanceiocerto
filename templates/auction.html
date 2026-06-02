@@ -288,7 +288,6 @@
 .strategy-card p{margin:10px 0 0;color:#b7c6e6;line-height:1.45}
 .bid-feedback{min-height:22px;margin-top:8px;font-weight:800;color:#fbbf24}
 .bid-btn.cooling{opacity:.55;cursor:not-allowed;filter:grayscale(.15)}
-.bid-btn.no-balance{opacity:.38;cursor:not-allowed;filter:grayscale(.35)}
 .chat-note{margin-top:-8px;color:#b7c6e6;font-size:13px}
 .scheduled-alert{border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.09)}
 .turbo-announcement{
@@ -395,7 +394,6 @@ window.__AUCTION__ = {{ item | tojson }};
   };
 
   let auction = window.__AUCTION__ || {};
-  let localWalletBalance = Number(auction.wallet_balance ?? 0);
   let remaining = Number(auction.start_remaining || auction.remaining_seconds || 0);
   let cashbackRemaining = Number(els.cashbackCountdown?.dataset.seconds || 0);
   let lastTurbo = Number(auction.turbo_level || 0);
@@ -408,6 +406,8 @@ window.__AUCTION__ = {{ item | tojson }};
   let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
+  let localWalletBalance = Number(auction.wallet_balance ?? 0);
+  let walletPendingReserve = 0;
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
   function makeClientBidId(){
@@ -418,6 +418,7 @@ window.__AUCTION__ = {{ item | tojson }};
   function updateHeaderWalletBalance(value){
     if(typeof value === "undefined" || value === null || Number.isNaN(Number(value))) return;
     localWalletBalance = Number(value || 0);
+    walletPendingReserve = 0;
     const el = document.querySelector(".user-balance");
     if(el) el.textContent = "Saldo: " + moneyBR(value);
   }
@@ -550,13 +551,42 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   function applyOptimisticBid(value){
-    // Modelo com saldo real: não simula preço/contador antes do servidor confirmar.
-    // Mantida como no-op para evitar erro caso algum trecho antigo chame a função.
-    return;
-  }
+    // Resposta instantânea segura: a tela reserva o saldo localmente e mostra o novo
+    // preço/contador no mesmo clique. O backend continua sendo a fonte oficial e
+    // corrige/volta o estado se negar o lance.
+    const gross = Number(value || 0);
+    const feePct = Number(auction.bid_fee_percent ?? 10);
+    const fee = Math.round((gross * feePct / 100) * 100) / 100;
+    const increment = Math.round((gross - fee) * 100) / 100;
+    const levelBefore = Number(auction.turbo_level || 0);
+    const predictedProgress = Number(auction.source_price || 0) > 0
+      ? (((Number(auction.current_price || 0) + increment) + (Number(auction.total_bid_fees || 0) + fee)) / Number(auction.source_price || 1)) * 100
+      : Number(auction.progress_percent || 0);
+    const predictedLevel = localTurboLevelFromProgress(predictedProgress);
+    const timingLevel = predictedLevel >= 2 ? predictedLevel : levelBefore;
 
-  function hasLocalBalanceFor(value){
-    return Number(localWalletBalance || 0) + 0.000001 >= Number(value || 0);
+    auction = {
+      ...auction,
+      current_price: Math.round((Number(auction.current_price || 0) + increment) * 100) / 100,
+      total_bid_fees: Math.round((Number(auction.total_bid_fees || 0) + fee) * 100) / 100,
+      total_bid_spent: Math.round((Number(auction.total_bid_spent || 0) + gross) * 100) / 100,
+      bids_count: Number(auction.bids_count || 0) + 1,
+      last_bidder: "Você",
+      progress_percent: Math.round(predictedProgress * 100) / 100,
+      turbo_level: predictedLevel,
+      turbo_label: predictedLevel >= 2 ? `Turbo ${predictedLevel}.0` : "Modo Normal"
+    };
+
+    if(timingLevel >= 2){
+      remaining = turboTimeSeconds(value, timingLevel);
+    } else {
+      remaining = Math.max(1, remaining + normalTimeDelta(value));
+    }
+
+    walletPendingReserve = Math.round((walletPendingReserve + gross) * 100) / 100;
+    updateHeaderWalletBalance(Math.max(0, localWalletBalance - gross));
+    optimisticHoldUntil = Date.now() + 2200;
+    renderAll();
   }
 
   function renderButton(btn){
@@ -565,12 +595,11 @@ window.__AUCTION__ = {{ item | tojson }};
     const busy = Boolean(pendingBids[key]);
     const canBid = isLive(status());
     const turboLocked = isTurboLockedForUser();
-    const insufficient = !hasLocalBalanceFor(key);
+    const insufficientBalance = Number(key) > (Number(localWalletBalance || 0) - Number(walletPendingReserve || 0) + 0.000001);
 
-    btn.disabled = !canBid || turboLocked || insufficient || busy || cd > 0;
+    btn.disabled = !canBid || turboLocked || insufficientBalance || busy || cd > 0;
     btn.classList.toggle("cooling", btn.disabled);
-    btn.classList.toggle("no-balance", insufficient && canBid && !turboLocked && !busy && cd <= 0);
-    btn.title = insufficient ? "Saldo insuficiente para este valor" : "";
+    btn.title = insufficientBalance ? "Saldo insuficiente para este lance" : "";
     btn.textContent = cd > 0 ? `${moneyBR(key)} • ${cd}s` : moneyBR(key);
   }
   function renderButtons(){
@@ -745,8 +774,9 @@ window.__AUCTION__ = {{ item | tojson }};
     if(!shouldAcceptIncomingState(data, source)) return;
 
     auction = data;
-    if(typeof auction.wallet_balance !== "undefined" && auction.wallet_balance !== null){
-      localWalletBalance = Number(auction.wallet_balance || 0);
+    if(typeof data.wallet_balance !== "undefined" && data.wallet_balance !== null){
+      localWalletBalance = Number(data.wallet_balance || 0);
+      walletPendingReserve = 0;
       updateHeaderWalletBalance(localWalletBalance);
     }
     const incomingAcceptedId = Number(auction.last_bid_id || auction.state_version || 0);
@@ -880,15 +910,16 @@ window.__AUCTION__ = {{ item | tojson }};
         renderButtons();
         return;
       }
-      if(!hasLocalBalanceFor(value)){
-        setFeedback(`Saldo insuficiente para lance de ${moneyBR(value)}.`);
-        renderButtons();
-        return;
-      }
+
+      const previousAuction = {...auction};
+      const previousRemaining = remaining;
+      const previousWalletBalance = localWalletBalance;
+      const previousWalletReserve = walletPendingReserve;
 
       pendingBids[value] = true;
+      applyOptimisticBid(value);
       renderButtons();
-      setFeedback("Confirmando lance...");
+      setFeedback("Lance enviado. Confirmando...");
 
       const clientBidId = makeClientBidId();
       const form = new FormData();
@@ -929,6 +960,12 @@ window.__AUCTION__ = {{ item | tojson }};
             renderButtons();
           }, 700);
         } else {
+          auction = previousAuction;
+          remaining = previousRemaining;
+          localWalletBalance = previousWalletBalance;
+          walletPendingReserve = previousWalletReserve;
+          applyAuctionState(auction, "bid-error");
+          updateHeaderWalletBalance(localWalletBalance);
           fetchState("bid-error");
         }
       } finally {

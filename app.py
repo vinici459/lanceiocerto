@@ -411,14 +411,10 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
-# Cooldown operacional em memória: evita consultar a tabela bids a cada clique.
-# Em produção atual com 1 réplica no Railway, isso corta uma viagem ao banco no caminho quente.
-# O banco continua sendo a fonte de verdade para saldo, idempotência e lance aceito.
-BID_COOLDOWN_UNTIL: dict[str, datetime] = {}
-BID_COOLDOWN_LOCK = threading.Lock()
 SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 SUGGESTION_USER_VOTE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 WITHDRAWAL_USER_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
+BID_COOLDOWN_MEMORY: dict[str, datetime] = {}
 
 
 class AuctionStateHTTPException(HTTPException):
@@ -1278,7 +1274,6 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "image_url": safe_image_url(item.image_url),
         "chat_paused": item.chat_paused,
         "chat_open": auction_chat_is_open(item),
-        "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "cashback": cashback_payload(item, db),
     }
 
@@ -1369,7 +1364,6 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "image_url": safe_image_url(item.image_url),
         "chat_paused": item.chat_paused,
         "chat_open": auction_chat_is_open(item),
-        "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "button_cooldown": bid_button_cooldown_seconds(0.10, level),
     }
     if include_cashback:
@@ -2807,6 +2801,28 @@ def _normalize_client_bid_id(value: str) -> str:
     return value[:80]
 
 
+def _bid_cooldown_key(auction_id: int, user_id: int, bid_value: float) -> str:
+    return f"{auction_id}:{user_id}:{BR(bid_value):.2f}"
+
+
+def _get_fast_cooldown_remaining(auction_id: int, user_id: int, bid_value: float, now: datetime) -> int:
+    key = _bid_cooldown_key(auction_id, user_id, bid_value)
+    until = BID_COOLDOWN_MEMORY.get(key)
+    if not until:
+        return 0
+    remaining = math.ceil((until - now).total_seconds())
+    if remaining <= 0:
+        BID_COOLDOWN_MEMORY.pop(key, None)
+        return 0
+    return remaining
+
+
+def _set_fast_cooldown(auction_id: int, user_id: int, bid_value: float, seconds: int, now: datetime) -> None:
+    if seconds <= 0:
+        return
+    BID_COOLDOWN_MEMORY[_bid_cooldown_key(auction_id, user_id, bid_value)] = now + timedelta(seconds=seconds)
+
+
 def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_bid_id: str = "") -> tuple[dict, dict, int]:
     """Processa o lance com proteção real contra duplicidade.
 
@@ -2818,26 +2834,11 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
     """
     button_cooldown = 0
     client_bid_id = _normalize_client_bid_id(client_bid_id)
-    bid_value = BR(bid_value)
-    if bid_value not in ALLOWED_BIDS:
-        raise HTTPException(status_code=400, detail="Valor de lance inválido.")
-
-    # Autenticação fora do lock do leilão. Antes, a fila do leilão ficava segurando
-    # até consultas simples de sessão/usuário. Aqui pegamos somente o necessário.
-    pre_db = SessionLocal()
-    try:
-        pre_user = require_user(request, pre_db)
-        user_id = pre_user.id
-        accepted_bidder_name = public_user_name(pre_user)
-    finally:
-        pre_db.close()
 
     with AUCTION_BID_LOCKS[auction_id]:
         db = SessionLocal()
         try:
-            user = db.get(User, user_id)
-            if not user or user.is_banned:
-                raise HTTPException(status_code=403, detail="Conta bloqueada.")
+            user = require_user(request, db)
             # Trava a linha do leilão no PostgreSQL durante o processamento do lance.
             # O lock em memória protege dentro de uma réplica; o FOR UPDATE protege
             # caso Railway rode mais de um processo/réplica.
@@ -2871,6 +2872,10 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             if item.status != "live":
                 private_payload = public_auction_live_payload(item, db, user=user)
                 raise AuctionStateHTTPException(status_code=400, detail="Leilão não está ao vivo.", auction_payload=private_payload)
+
+            bid_value = BR(bid_value)
+            if bid_value not in ALLOWED_BIDS:
+                raise HTTPException(status_code=400, detail="Valor de lance inválido.")
 
             # Idempotência: se o mesmo clique chegou novamente, devolve o estado oficial
             # sem criar novo lance nem aplicar cooldown/tempo outra vez.
@@ -2909,23 +2914,32 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     private_payload = public_auction_live_payload(item, db, user=user)
                     raise AuctionStateHTTPException(status_code=403, detail=turbo_lock_message(mode_for_bid), auction_payload=private_payload)
 
-            # Cooldown operacional em memória: por botão/valor, não global.
-            # Evita a consulta ORDER BY em bids a cada lance. O cooldown não é fonte
-            # financeira; a segurança real continua no desconto atômico e no client_bid_id.
-            cooldown_key = f"{item.id}:{user.id}:{bid_value:.2f}"
-            with BID_COOLDOWN_LOCK:
-                cooldown_until = BID_COOLDOWN_UNTIL.get(cooldown_key)
-                if cooldown_until and cooldown_until > now:
-                    remaining_cd = math.ceil((cooldown_until - now).total_seconds())
-                    private_payload = public_auction_live_payload(item, db, user=user)
-                    raise AuctionStateHTTPException(
-                        status_code=429,
-                        detail=f"Aguarde {remaining_cd}s para dar outro lance.",
-                        auction_payload=private_payload,
-                        retry_after=remaining_cd,
-                    )
-                if cooldown_until and cooldown_until <= now:
-                    BID_COOLDOWN_UNTIL.pop(cooldown_key, None)
+            # Cooldown operacional por botão/valor no caminho quente.
+            # Antes era consultado em bids a cada clique. Em produção com 1 réplica,
+            # o cache em memória elimina uma ida ao banco sem enfraquecer saldo/idempotência.
+            remaining_cd = _get_fast_cooldown_remaining(item.id, user.id, bid_value, now)
+            if remaining_cd > 0:
+                private_payload = fast_bid_auction_payload(
+                    item,
+                    bids_count=int(getattr(item, "bids_count_cached", 0) or 0),
+                    last_bidder=public_user_name(user),
+                    last_bid_id=auction_last_bid_id(db, item.id),
+                    user_turbo_eligible=True,
+                    button_cooldown=remaining_cd,
+                    mode_for_bid=mode_for_bid,
+                    mode_before_bid=mode_for_bid,
+                    bid_value=bid_value,
+                    fee_value=0,
+                    price_increment=0,
+                    client_bid_id=client_bid_id,
+                    wallet_balance=BR(getattr(user, "wallet_balance", 0.0) or 0.0),
+                )
+                raise AuctionStateHTTPException(
+                    status_code=429,
+                    detail=f"Aguarde {remaining_cd}s para dar outro lance.",
+                    auction_payload=private_payload,
+                    retry_after=remaining_cd,
+                )
 
             previous_total_bid_count = int(getattr(item, 'bids_count_cached', 0) or 0)
 
@@ -2974,12 +2988,21 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     auction_payload=private_payload,
                 )
 
-            db.add(WalletTransaction(
-                user_id=user.id,
-                amount=-bid_value,
-                kind="bid_spent",
-                note=f"Lance no leilão #{item.id}",
-            ))
+            # Extrato financeiro mantido dentro da mesma transação, mas com INSERT direto
+            # para reduzir overhead de ORM no clique.
+            db.execute(
+                text("""
+                    INSERT INTO wallet_transactions (user_id, amount, kind, note, created_at)
+                    VALUES (:user_id, :amount, :kind, :note, :created_at)
+                """),
+                {
+                    "user_id": user.id,
+                    "amount": -bid_value,
+                    "kind": "bid_spent",
+                    "note": f"Lance no leilão #{item.id}",
+                    "created_at": now,
+                },
+            )
 
             item.current_price = BR((item.current_price or 0.0) + increment)
             item.total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
@@ -3054,11 +3077,9 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
 
             db.commit()
+            _set_fast_cooldown(item.id, user.id, bid_value, button_cooldown, now)
 
-            with BID_COOLDOWN_LOCK:
-                BID_COOLDOWN_UNTIL[cooldown_key] = datetime.utcnow() + timedelta(seconds=button_cooldown)
-
-            accepted_bidder = accepted_bidder_name
+            accepted_bidder = public_user_name(user)
 
             # Payload rápido: evita consultas extras logo após o commit.
             # O /state continua como sincronização completa, mas o clique retorna rápido.
