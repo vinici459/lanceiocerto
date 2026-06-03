@@ -5,7 +5,7 @@
     <img class="auction-image" src="{{ item.image_url }}" alt="{{ entity.title }}" loading="eager" fetchpriority="high" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
     <div class="auction-panel">
       <div class="status-row">
-        <span class="status {{ item.status }}" id="auction-status">{% if item.status in ['scheduled', 'relisted'] %}PRÓXIMO{% elif item.status == 'live' %}AO VIVO{% elif item.status == 'pending_payment' %}AGUARDANDO PAGAMENTO{% elif item.status == 'ended' %}ENCERRADO{% else %}{{ item.status|upper }}{% endif %}</span>
+        <span class="status {{ item.status }}" id="auction-status">{% if item.status in ['scheduled', 'relisted'] %}PRÓXIMO{% elif item.status == 'live' %}AO VIVO{% elif item.status == 'pending_payment' %}ENCERRADO{% elif item.status == 'ended' %}ENCERRADO{% else %}{{ item.status|upper }}{% endif %}</span>
         {% if user and user.is_admin %}<span class="admin-chip">ADMIN</span>{% endif %}
       </div>
 
@@ -33,7 +33,7 @@
 
           {% elif item.status == 'pending_payment' %}
             <span>Status</span>
-            <strong>Aguardando</strong>
+            <strong>Encerrado</strong>
 
           {% else %}
             <span id="countdown-label">
@@ -81,7 +81,7 @@
             <strong id="model-value">{{ item.payment_status if item.payment_status else 'Encerrado' }}</strong>
           {% elif item.status == 'pending_payment' %}
             <span id="model-label">Status</span>
-            <strong id="model-value">Aguardando pagamento</strong>
+            <strong id="model-value">Encerrado</strong>
           {% else %}
             <span id="model-label">Modelo</span>
             <strong id="model-value">Lance com saldo</strong>
@@ -136,7 +136,7 @@
           {% if item.status in ['scheduled', 'relisted'] %}
             Este leilão ainda não começou. A contagem regressiva está acima.
           {% elif item.status == 'pending_payment' %}
-            Este leilão está aguardando pagamento do vencedor.
+            Este leilão foi encerrado.
           {% elif item.status == 'ended' %}
             Este leilão foi encerrado.
           {% else %}
@@ -198,7 +198,7 @@
         {% if entity.status == 'ended' %}
         <p class="muted admin-ended-note">Leilão encerrado. O chat fica bloqueado automaticamente.</p>
         {% elif entity.status == 'pending_payment' %}
-        <p class="muted admin-ended-note">Leilão aguardando pagamento. O chat do produto fica bloqueado automaticamente.</p>
+        <p class="muted admin-ended-note">Leilão encerrado. O pagamento aparece somente para o vencedor em Minha Conta.</p>
         {% endif %}
       </div>
       {% endif %}
@@ -213,7 +213,7 @@
       {% if entity.status in ['scheduled', 'relisted'] %}
         O chat será liberado próximo ao início do leilão.
       {% elif entity.status == 'pending_payment' %}
-        O chat foi encerrado porque este leilão está aguardando pagamento.
+        O chat foi encerrado porque este leilão terminou.
       {% elif entity.status == 'ended' %}
         O chat foi encerrado porque este leilão terminou.
       {% else %}
@@ -464,7 +464,7 @@ window.__AUCTION__ = {{ item | tojson }};
   function labelStatus(s){
     if(isScheduled(s)) return "PRÓXIMO";
     if(s === "live") return "AO VIVO";
-    if(s === "pending_payment") return "AGUARDANDO PAGAMENTO";
+    if(s === "pending_payment") return "ENCERRADO";
     if(s === "ended") return "ENCERRADO";
     return String(s || "").toUpperCase();
   }
@@ -543,11 +543,16 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function activateLiveLocally(){
     if(!isScheduled(status())) return;
+    const initialSeconds = Math.max(1, Number(auction.initial_duration_seconds || auction.remaining_seconds || 1800));
+    const localEndsAt = new Date(Date.now() + initialSeconds * 1000).toISOString();
+    localFinishTriggered = false;
+    remaining = initialSeconds;
     auction = {
       ...auction,
       status: "live",
       start_remaining: 0,
-      remaining_seconds: Number(auction.initial_duration_seconds || auction.remaining_seconds || 1800),
+      remaining_seconds: initialSeconds,
+      ends_at: localEndsAt,
       chat_open: true
     };
     applyAuctionState(auction, "local-start");
@@ -557,7 +562,7 @@ window.__AUCTION__ = {{ item | tojson }};
   function renderAll(){
     const s = status();
     if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
-    if(els.countdown) els.countdown.textContent = isClosed(s) ? (s === "pending_payment" ? "Aguardando" : "Encerrado") : timeLabel(remaining);
+    if(els.countdown) els.countdown.textContent = isClosed(s) ? "Encerrado" : timeLabel(remaining);
     if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
     if(els.adminTotalBidFees) els.adminTotalBidFees.textContent = moneyBR(auction.total_bid_fees);
     if(els.adminCashReserved) els.adminCashReserved.textContent = moneyBR(auction.cash_reserved_before_payment ?? auction.collected_total);
@@ -663,7 +668,7 @@ window.__AUCTION__ = {{ item | tojson }};
       if(s === "ended"){
         els.lastBidderLabel.textContent = "Vencedor";
         els.lastBidder.textContent = auction.winner_name || auction.last_bidder || "Sem vencedor";
-      } else if(s === "pending_payment"){
+       } else if(s === "pending_payment"){
         els.lastBidderLabel.textContent = "Vencedor";
         els.lastBidder.textContent = auction.winner_name || auction.last_bidder || "—";
       } else if(isScheduled(s)){
@@ -679,9 +684,9 @@ window.__AUCTION__ = {{ item | tojson }};
       if(s === "ended"){
         els.modelLabel.textContent = "Status";
         els.modelValue.textContent = auction.payment_status || "Encerrado";
-      } else if(s === "pending_payment"){
+       } else if(s === "pending_payment"){
         els.modelLabel.textContent = "Status";
-        els.modelValue.textContent = "Aguardando pagamento";
+        els.modelValue.textContent = "Encerrado";
       } else {
         els.modelLabel.textContent = "Modelo";
         els.modelValue.textContent = "Lance com saldo";
@@ -700,7 +705,7 @@ window.__AUCTION__ = {{ item | tojson }};
       show(els.stateAlert, !live);
       els.stateAlert.classList.toggle("scheduled-alert", scheduled);
       if(scheduled) els.stateAlert.textContent = "Este leilão ainda não começou. A contagem regressiva está acima.";
-      else if(s === "pending_payment") els.stateAlert.textContent = "Este leilão está aguardando pagamento do vencedor.";
+      else if(s === "pending_payment") els.stateAlert.textContent = `Este leilão foi encerrado.${auction.winner_name || auction.last_bidder ? " Vencedor: " + (auction.winner_name || auction.last_bidder) + "." : ""}`;
       else if(s === "ended") els.stateAlert.textContent = "Este leilão foi encerrado.";
       else els.stateAlert.textContent = "Este leilão não está em andamento neste momento.";
     }
@@ -821,7 +826,7 @@ window.__AUCTION__ = {{ item | tojson }};
     lastZeroSyncAt = 0;
 
     if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
-    if(els.countdown) els.countdown.textContent = isClosed(s) ? (s === "pending_payment" ? "Aguardando" : "Encerrado") : timeLabel(remaining);
+    if(els.countdown) els.countdown.textContent = isClosed(s) ? "Encerrado" : timeLabel(remaining);
     if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
     if(els.adminTotalBidFees) els.adminTotalBidFees.textContent = moneyBR(auction.total_bid_fees);
     if(els.adminCashReserved) els.adminCashReserved.textContent = moneyBR(auction.cash_reserved_before_payment ?? auction.collected_total);
@@ -882,7 +887,7 @@ window.__AUCTION__ = {{ item | tojson }};
     const hasBid = Number(auction.bids_count || 0) > 0 || Boolean(auction.last_bidder);
     auction = {
       ...auction,
-      status: hasBid ? "pending_payment" : "ended",
+      status: "ended",
       winner_name: hasBid ? (auction.winner_name || auction.last_bidder || "—") : null,
       remaining_seconds: 0,
       ends_at: null,
@@ -959,8 +964,9 @@ window.__AUCTION__ = {{ item | tojson }};
 
       pendingBids[value] = true;
       applyOptimisticBid(value);
+      applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
       renderButtons();
-      setFeedback("Lance aplicado. Confirmando servidor...");
+      setFeedback("Lance enviado.");
 
       const clientBidId = makeClientBidId();
       const form = new FormData();
@@ -1001,6 +1007,7 @@ window.__AUCTION__ = {{ item | tojson }};
             renderButtons();
           }, 700);
         } else {
+          delete cooldowns[value];
           auction = previousAuction;
           remaining = previousRemaining;
           localWalletBalance = previousWalletBalance;

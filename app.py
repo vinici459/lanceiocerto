@@ -623,6 +623,17 @@ def fmt_money(v: float) -> str:
     return f"{BR(v):.2f}".replace(".", ",")
 
 
+def public_display_status(status: str) -> str:
+    """Status público do leilão.
+
+    Internamente o banco mantém pending_payment para o vencedor pagar na área
+    "Minha Conta". Publicamente, porém, o leilão já terminou e deve aparecer
+    apenas como encerrado, com o vencedor.
+    """
+    value = (status or "").strip().lower()
+    return "ended" if value == "pending_payment" else value
+
+
 STATIC_FALLBACK_IMAGE = "/static/lanceio_hero_slide_01.png"
 
 
@@ -1300,7 +1311,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "id": item.id,
         "title": item.title,
         "description": item.description,
-        "status": item.status,
+        "status": public_display_status(item.status),
         "current_price": BR(item.current_price),
         "start_price": BR(item.start_price),
         "source_price": BR(item.source_price),
@@ -1394,7 +1405,7 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "id": item.id,
         "title": item.title,
         "description": item.description,
-        "status": item.status,
+        "status": public_display_status(item.status),
         "current_price": BR(item.current_price),
         "start_price": BR(item.start_price),
         "source_price": BR(item.source_price),
@@ -1473,7 +1484,7 @@ def fast_bid_auction_payload(
         "id": item.id,
         "title": item.title,
         "description": item.description,
-        "status": item.status,
+        "status": public_display_status(item.status),
         "current_price": BR(item.current_price),
         "start_price": BR(item.start_price),
         "source_price": BR(item.source_price),
@@ -1541,7 +1552,7 @@ def public_auction_card_payload(item: AuctionItem) -> dict:
     return {
         "id": item.id,
         "title": item.title,
-        "status": item.status,
+        "status": public_display_status(item.status),
         "current_price": BR(item.current_price),
         "source_price": BR(item.source_price),
         "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
@@ -3448,7 +3459,7 @@ def my_participations(request: Request):
                     "auction_id": aid,
                     "title": item.title,
                     "image_url": safe_image_url(item.image_url),
-                    "status": item.status,
+                    "status": public_display_status(item.status),
                     "total_bids": 0,
                     "total_spent": 0.0,
                     "won": item.winner_user_id == user.id,
