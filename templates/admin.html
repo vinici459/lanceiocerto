@@ -50,10 +50,12 @@
         </div>
 
         <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
-          <div class="stat finance-card positive"><span>Taxas arrecadadas</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita gerada pelos lances</small></div>
+          <div class="stat finance-card positive"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Total bruto que saiu do saldo dos usuários nos leilões</small></div>
+          <div class="stat finance-card positive"><span>Taxas arrecadadas</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que é taxa/receita</small></div>
           <div class="stat finance-card"><span>Pagamentos recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Valores pagos por vencedores</small></div>
           <div class="stat finance-card warning"><span>Saldo dos usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong><small>Valor em custódia dos clientes</small></div>
-          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Compra/envio de produtos</small></div>
+          <div class="stat finance-card"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Entradas operacionais menos saídas/reservas</small></div>
+          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Compra/envio de produtos e saques pendentes</small></div>
           <div class="stat finance-card"><span>Lucro estimado</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit if finance is defined and finance.estimated_profit is defined else 0)|replace('.', ',') }}</strong><small>Resultado operacional estimado</small></div>
           <div class="stat finance-card danger"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Produtos vendidos abaixo do equilíbrio</small></div>
         </div>
@@ -89,10 +91,13 @@
         </div>
 
         <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
-          <div class="stat"><span>Total de entradas</span><strong>R$ {{ '%.2f'|format(finance.total_income if finance is defined and finance.total_income is defined else 0)|replace('.', ',') }}</strong><small>Taxas + pagamentos</small></div>
-          <div class="stat"><span>Total de saídas</span><strong>R$ {{ '%.2f'|format(finance.total_outgoing if finance is defined and finance.total_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Compras, envios e ajustes</small></div>
-          <div class="stat"><span>Taxas de lance</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita da plataforma</small></div>
-          <div class="stat"><span>Resultado líquido</span><strong>R$ {{ '%.2f'|format(finance.net_result if finance is defined and finance.net_result is defined else 0)|replace('.', ',') }}</strong><small>Entradas - saídas</small></div>
+          <div class="stat"><span>Total de entradas</span><strong>R$ {{ '%.2f'|format(finance.total_income if finance is defined and finance.total_income is defined else 0)|replace('.', ',') }}</strong><small>Lances recebidos + pagamentos dos vencedores</small></div>
+          <div class="stat"><span>Total de saídas</span><strong>R$ {{ '%.2f'|format(finance.total_outgoing if finance is defined and finance.total_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Produtos comprados/enviados, saques pagos e estornos</small></div>
+          <div class="stat"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Disponível após saídas e saques pendentes</small></div>
+          <div class="stat"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Entrada bruta dos leilões</small></div>
+          <div class="stat"><span>Taxas de lance</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita separada por taxa</small></div>
+          <div class="stat"><span>Caixa dos lances p/ produto</span><strong>R$ {{ '%.2f'|format(finance.bid_product_cash if finance is defined and finance.bid_product_cash is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe o valor do leilão</small></div>
+          <div class="stat"><span>Pagamentos de vencedores</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Entradas após vitória</small></div>
           <div class="stat"><span>Saques pendentes</span><strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong><small>Dinheiro solicitado pelos usuários</small></div>
         </div>
 
@@ -104,12 +109,12 @@
               <tbody>
                 {% for m in cashflow_movements if cashflow_movements is defined %}
                 <tr>
-                  <td>{{ m.created_at.strftime('%d/%m/%Y %H:%M') if m.created_at else '—' }}</td>
+                  <td>{{ fmt_br_datetime(m.created_at) }}</td>
                   <td>{{ m.type }}</td>
                   <td>{{ m.description }}</td>
                   <td>{% if m.amount > 0 %}R$ {{ '%.2f'|format(m.amount)|replace('.', ',') }}{% else %}—{% endif %}</td>
                   <td>{% if m.amount < 0 %}R$ {{ '%.2f'|format((m.amount * -1))|replace('.', ',') }}{% else %}—{% endif %}</td>
-                  <td>R$ {{ '%.2f'|format(m.balance_after if m.balance_after is defined else 0)|replace('.', ',') }}</td>
+                  <td>{% if m.balance_after is not none %}R$ {{ '%.2f'|format(m.balance_after)|replace('.', ',') }}{% else %}—{% endif %}</td>
                   <td>{{ m.status }}</td>
                 </tr>
                 {% else %}
@@ -124,20 +129,23 @@
           <div class="card-title-row"><h2>Resultado por leilão</h2><span class="pill-soft">Produto a produto</span></div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Produto</th><th>Preço original</th><th>Valor pago pelo vencedor</th><th>Taxas arrecadadas</th><th>Complemento do site</th><th>Resultado</th><th>Situação</th></tr></thead>
+              <thead><tr><th>Produto</th><th>Preço original</th><th>Lances recebidos</th><th>Taxas</th><th>Caixa dos lances</th><th>Pago pelo vencedor</th><th>Saída produto</th><th>Complemento</th><th>Resultado</th><th>Situação</th></tr></thead>
               <tbody>
                 {% for r in auction_results if auction_results is defined %}
                 <tr>
                   <td>{{ r.title }}</td>
                   <td>R$ {{ '%.2f'|format(r.source_price)|replace('.', ',') }}</td>
-                  <td>R$ {{ '%.2f'|format(r.final_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.gross_bids if r.gross_bids is defined else 0)|replace('.', ',') }}</td>
                   <td>R$ {{ '%.2f'|format(r.fees_total)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.product_cash if r.product_cash is defined else 0)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.final_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.outgoing if r.outgoing is defined else 0)|replace('.', ',') }}</td>
                   <td>R$ {{ '%.2f'|format(r.site_complement)|replace('.', ',') }}</td>
                   <td class="{% if r.result >= 0 %}positive-text{% else %}danger-text{% endif %}">R$ {{ '%.2f'|format(r.result)|replace('.', ',') }}</td>
                   <td>{{ r.status_label }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="7">Nenhum resultado por leilão disponível ainda.</td></tr>
+                <tr><td colspan="10">Nenhum resultado por leilão disponível ainda.</td></tr>
                 {% endfor %}
               </tbody>
             </table>

@@ -543,9 +543,35 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function activateLiveLocally(){
     if(!isScheduled(status())) return;
-    const initialSeconds = Math.max(1, Number(auction.initial_duration_seconds || auction.remaining_seconds || 1800));
-    const localEndsAt = new Date(Date.now() + initialSeconds * 1000).toISOString();
+
+    // O backend inicia o leilão contando a partir do scheduled_start, não do
+    // momento em que a página percebeu o zero. A versão anterior usava
+    // Date.now()+duração e por alguns segundos mostrava um cronômetro maior
+    // que o real, causando o bug no começo do leilão.
+    const duration = Math.max(1, Number(auction.initial_duration_seconds || auction.remaining_seconds || 1800));
+    const startMs = Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(String(auction.scheduled_start || "")) ? auction.scheduled_start : `${auction.scheduled_start}Z`);
+    const logicalStartMs = Number.isNaN(startMs) ? Date.now() : startMs;
+    const logicalEndMs = logicalStartMs + duration * 1000;
+    const initialSeconds = Math.max(0, Math.ceil((logicalEndMs - Date.now()) / 1000));
+
     localFinishTriggered = false;
+
+    if(initialSeconds <= 0){
+      auction = {
+        ...auction,
+        status: "live",
+        start_remaining: 0,
+        remaining_seconds: 0,
+        ends_at: new Date(Date.now()).toISOString(),
+        chat_open: true
+      };
+      applyAuctionState(auction, "local-start");
+      closeAuctionLocally();
+      fetchState("confirm-local-start-ended", 5000);
+      return;
+    }
+
+    const localEndsAt = new Date(logicalEndMs).toISOString();
     remaining = initialSeconds;
     auction = {
       ...auction,
@@ -556,7 +582,7 @@ window.__AUCTION__ = {{ item | tojson }};
       chat_open: true
     };
     applyAuctionState(auction, "local-start");
-    fetchState("confirm-local-start", 9000);
+    fetchState("confirm-local-start", 5000);
   }
 
   function renderAll(){
@@ -683,7 +709,7 @@ window.__AUCTION__ = {{ item | tojson }};
     if(els.modelLabel && els.modelValue){
       if(s === "ended"){
         els.modelLabel.textContent = "Status";
-        els.modelValue.textContent = auction.payment_status || "Encerrado";
+        els.modelValue.textContent = "Encerrado";
        } else if(s === "pending_payment"){
         els.modelLabel.textContent = "Status";
         els.modelValue.textContent = "Encerrado";
@@ -881,6 +907,10 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
+  function nextPaint(){
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
   function closeAuctionLocally(){
     if(localFinishTriggered || !isLive(status())) return;
     localFinishTriggered = true;
@@ -967,6 +997,11 @@ window.__AUCTION__ = {{ item | tojson }};
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
       renderButtons();
       setFeedback("Lance enviado.");
+
+      // Entrega um frame para o navegador pintar preço, cronômetro, saldo e
+      // contagem do botão antes de iniciar o POST. Sem isso, em alguns Chrome/PCs
+      // a rede começa antes do repaint e parece que o botão demorou para contar.
+      await nextPaint();
 
       const clientBidId = makeClientBidId();
       const form = new FormData();
@@ -1091,7 +1126,7 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   applyAuctionState(auction, "initial");
-  if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero", 9000);
+  if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero", 5000);
 })();
 </script>
 

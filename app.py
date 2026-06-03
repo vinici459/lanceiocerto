@@ -623,6 +623,51 @@ def fmt_money(v: float) -> str:
     return f"{BR(v):.2f}".replace(".", ",")
 
 
+def br_time(dt: Optional[datetime]) -> Optional[datetime]:
+    """Converte datas gravadas em UTC para horário de Brasília na exibição."""
+    if not dt:
+        return None
+    return dt - timedelta(hours=3)
+
+
+def fmt_br_datetime(dt: Optional[datetime]) -> str:
+    local = br_time(dt)
+    return local.strftime("%d/%m/%Y %H:%M") if local else "—"
+
+
+def platform_product_outgoing_exists(db: Session, order_id: int) -> bool:
+    marker = f"Pedido #{order_id}"
+    return bool(
+        db.query(WalletTransaction.id)
+        .filter(WalletTransaction.kind == "product_outgoing", WalletTransaction.note.like(f"%{marker}%"))
+        .first()
+    )
+
+
+def register_product_outgoing_if_needed(db: Session, order: WinnerOrder, now: Optional[datetime] = None) -> None:
+    """Registra a saída real do caixa quando o produto é comprado/enviado.
+
+    O saldo do usuário não é alterado aqui. Esta movimentação é contábil do
+    caixa operacional da plataforma, para que o admin veja a saída do produto.
+    """
+    if not order or platform_product_outgoing_exists(db, order.id):
+        return
+    item = db.get(AuctionItem, order.auction_id)
+    cost = BR(getattr(item, "source_price", 0.0) or 0.0)
+    if cost <= 0:
+        return
+    db.add(WalletTransaction(
+        user_id=order.user_id,
+        amount=-cost,
+        kind="product_outgoing",
+        note=f"Saída compra/envio do produto • Pedido #{order.id} • Leilão #{order.auction_id} • {getattr(item, 'title', '')}",
+        created_at=now or datetime.utcnow(),
+    ))
+
+
+
+templates.env.globals["fmt_br_datetime"] = fmt_br_datetime
+templates.env.globals["br_time"] = br_time
 def public_display_status(status: str) -> str:
     """Status público do leilão.
 
@@ -1637,107 +1682,182 @@ def _sum_scalar(db: Session, expr, *filters) -> float:
 
 
 def build_finance_dashboard(db: Session) -> dict:
-    # Agregações direto no banco: evita carregar todos os produtos, usuários e pedidos em memória.
+    """Indicadores de caixa da plataforma.
+
+    Regra importante:
+    - Bid.bid_value é dinheiro que saiu da carteira do usuário e entrou no caixa do site.
+    - Bid.fee_value é a parte desse lance que é taxa/receita da plataforma.
+    - Bid.price_increment é a parte que forma o valor/preço do leilão.
+    - WinnerOrder.final_price entra no caixa quando o vencedor paga.
+    - product_outgoing registra a saída real quando o admin compra/envia o produto.
+    """
     paid_statuses = ["paid", "processing", "purchased", "sent", "delivered"]
-    outgoing_statuses = ["paid", "processing", "purchased"]
 
-    # Usa a tabela de lances como fonte principal, para não depender de campos acumulados
-    # que podem ter ficado desatualizados em versões anteriores.
-    total_fees_from_bids = _sum_scalar(db, Bid.fee_value)
-    total_fees_from_items = _sum_scalar(db, AuctionItem.total_bid_fees)
-    total_fees = BR(max(total_fees_from_bids, total_fees_from_items))
-    total_bid_spent_from_bids = _sum_scalar(db, Bid.bid_value)
-    total_bid_spent_from_items = _sum_scalar(db, AuctionItem.total_bid_spent)
-    total_bid_spent = BR(max(total_bid_spent_from_bids, total_bid_spent_from_items))
+    total_bid_spent = _sum_scalar(db, Bid.bid_value)
+    total_fees = _sum_scalar(db, Bid.fee_value)
+    bid_product_cash = _sum_scalar(db, Bid.price_increment)
     total_payments = _sum_scalar(db, WinnerOrder.final_price, WinnerOrder.status.in_(paid_statuses))
-    user_wallet_total = _sum_scalar(db, User.wallet_balance)
-    pending_withdrawals = _sum_scalar(db, WithdrawalRequest.amount, WithdrawalRequest.status == "pending")
 
-    expected_products = BR(
+    product_outgoing = abs(_sum_scalar(db, WalletTransaction.amount, WalletTransaction.kind == "product_outgoing"))
+    refunds = abs(_sum_scalar(db, WalletTransaction.amount, WalletTransaction.kind == "refund"))
+    paid_withdrawals = _sum_scalar(db, WithdrawalRequest.amount, WithdrawalRequest.status == "paid")
+    pending_withdrawals = _sum_scalar(db, WithdrawalRequest.amount, WithdrawalRequest.status == "pending")
+    user_wallet_total = _sum_scalar(db, User.wallet_balance)
+
+    # Saídas previstas: pedidos pagos que ainda não tiveram saída de compra/envio registrada.
+    recorded_order_ids = set()
+    outgoing_txs = db.query(WalletTransaction.note).filter(WalletTransaction.kind == "product_outgoing").all()
+    for (note,) in outgoing_txs:
+        m = re.search(r"Pedido #(\d+)", note or "")
+        if m:
+            recorded_order_ids.add(int(m.group(1)))
+
+    expected_products_query = (
         db.query(func.coalesce(func.sum(AuctionItem.source_price), 0.0))
         .join(WinnerOrder, WinnerOrder.auction_id == AuctionItem.id)
-        .filter(WinnerOrder.status.in_(outgoing_statuses))
-        .scalar()
-        or 0.0
+        .filter(WinnerOrder.status.in_(["paid", "processing", "purchased"]))
     )
+    if recorded_order_ids:
+        expected_products_query = expected_products_query.filter(~WinnerOrder.id.in_(recorded_order_ids))
+    expected_products = BR(expected_products_query.scalar() or 0.0)
+
+    total_income = BR(total_bid_spent + total_payments)
+    total_outgoing = BR(product_outgoing + refunds + paid_withdrawals)
     expected_outgoing = BR(expected_products + pending_withdrawals)
-    # Entrada real/contábil da plataforma: taxas de lance + pagamentos de vencedores.
-    # total_bid_spent é volume bruto de lances e fica separado para auditoria/progresso.
-    total_income = BR(total_fees + total_payments)
-    net_result = BR(total_income - expected_outgoing)
+    available_cash = BR(total_income - total_outgoing - pending_withdrawals)
+    net_result = BR(total_income - total_outgoing)
+    estimated_profit = BR(total_fees + total_payments + bid_product_cash - product_outgoing - refunds)
+
     return {
         "total_fees": total_fees,
         "total_bid_spent": total_bid_spent,
+        "bid_product_cash": bid_product_cash,
         "total_payments": total_payments,
         "user_wallet_total": user_wallet_total,
         "expected_outgoing": expected_outgoing,
         "total_income": total_income,
-        "total_outgoing": expected_outgoing,
+        "total_outgoing": total_outgoing,
         "net_result": net_result,
-        "estimated_profit": net_result,
-        "available_cash": BR(total_income - user_wallet_total),
-        "accumulated_loss": BR(abs(net_result) if net_result < 0 else 0),
+        "estimated_profit": estimated_profit,
+        "available_cash": available_cash,
+        "accumulated_loss": BR(abs(estimated_profit) if estimated_profit < 0 else 0),
         "pending_withdrawals": pending_withdrawals,
+        "product_outgoing": product_outgoing,
+        "expected_products": expected_products,
+        "paid_withdrawals": paid_withdrawals,
+        "refunds": refunds,
     }
 
 
 def build_cashflow_movements(db: Session) -> list[dict]:
-    rows = []
-    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(120).all()
+    """Movimentações do caixa do ponto de vista da plataforma.
+
+    WalletTransaction é originalmente extrato do usuário; aqui normalizamos o
+    sinal para o caixa do site. Ex.: bid_spent é negativo para o usuário, mas
+    positivo para o caixa do leilão.
+    """
+    rows: list[dict] = []
+    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(220).all()
     user_ids = {tx.user_id for tx in transactions if tx.user_id}
     users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+
+    type_labels = {
+        "bid_spent": "lance_recebido",
+        "payment": "pagamento_vencedor",
+        "product_outgoing": "saida_produto",
+        "withdrawal_reserved": "saque_reservado",
+        "withdrawal_reversal": "saque_estornado",
+        "refund": "estorno",
+        "manual_adjustment": "ajuste_manual",
+        "deposit_pending": "deposito_pendente",
+    }
+
     for tx in transactions:
+        raw = BR(tx.amount or 0.0)
+        if tx.kind in {"deposit_pending"} and abs(raw) < 0.00001:
+            continue
         tx_user = users_by_id.get(tx.user_id)
+        cpf = getattr(tx_user, "cpf", "—") or "—"
+        name = public_user_name(tx_user) if tx_user else f"Usuário #{tx.user_id}"
+
+        if tx.kind in {"bid_spent", "payment"}:
+            amount = abs(raw)
+        elif tx.kind in {"withdrawal_reversal"}:
+            # Devolução de saque volta para o saldo do cliente: reduz uma saída reservada.
+            amount = abs(raw)
+        elif tx.kind in {"product_outgoing", "refund", "withdrawal_reserved"}:
+            amount = -abs(raw)
+        else:
+            amount = raw
+
         rows.append({
             "created_at": tx.created_at,
-            "type": tx.kind,
-            "description": f"Usuário #{tx.user_id} • CPF {getattr(tx_user, 'cpf', '—') or '—'} • {tx.note or 'Movimentação'}",
-            "amount": BR(tx.amount or 0.0),
-            "balance_after": 0.0,
+            "type": type_labels.get(tx.kind, tx.kind),
+            "description": f"{name} • CPF {cpf} • {tx.note or 'Movimentação'}",
+            "amount": BR(amount),
+            "balance_after": None,
             "status": "registrado",
         })
 
-    fee_bids = (
-        db.query(Bid)
-        .options(selectinload(Bid.auction), selectinload(Bid.user))
-        .filter(Bid.fee_value > 0)
-        .order_by(desc(Bid.created_at))
-        .limit(120)
-        .all()
-    )
-    for bid in fee_bids:
-        rows.append({
-            "created_at": bid.created_at,
-            "type": "taxa_lance",
-            "description": f"Taxa de lance • {bid.auction.title if bid.auction else 'Leilão'} • {public_user_name(bid.user)}",
-            "amount": BR(bid.fee_value or 0.0),
-            "balance_after": 0.0,
-            "status": "registrado",
-        })
-
+    rows.sort(key=lambda r: r.get("created_at") or datetime.min)
+    running = 0.0
+    for r in rows:
+        running = BR(running + BR(r.get("amount") or 0.0))
+        r["balance_after"] = running
     rows.sort(key=lambda r: r.get("created_at") or datetime.min, reverse=True)
-    return rows[:120]
+    return rows[:160]
 
 
 def build_auction_results(db: Session) -> list[dict]:
     rows = []
-    for item in db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(120).all():
+    items = db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(160).all()
+    item_ids = [i.id for i in items]
+    if not item_ids:
+        return rows
+
+    bid_aggs = {
+        row.auction_id: row for row in db.query(
+            Bid.auction_id.label("auction_id"),
+            func.coalesce(func.sum(Bid.bid_value), 0.0).label("gross_bids"),
+            func.coalesce(func.sum(Bid.fee_value), 0.0).label("fees_total"),
+            func.coalesce(func.sum(Bid.price_increment), 0.0).label("product_cash"),
+        ).filter(Bid.auction_id.in_(item_ids)).group_by(Bid.auction_id).all()
+    }
+
+    orders_by_auction: dict[int, WinnerOrder] = {}
+    for order in db.query(WinnerOrder).filter(WinnerOrder.auction_id.in_(item_ids)).order_by(desc(WinnerOrder.created_at)).all():
+        orders_by_auction.setdefault(order.auction_id, order)
+
+    outgoing_by_order: dict[int, float] = {}
+    for tx in db.query(WalletTransaction).filter(WalletTransaction.kind == "product_outgoing").all():
+        m = re.search(r"Pedido #(\d+)", tx.note or "")
+        if m:
+            outgoing_by_order[int(m.group(1))] = BR(outgoing_by_order.get(int(m.group(1)), 0.0) + abs(tx.amount or 0.0))
+
+    for item in items:
+        agg = bid_aggs.get(item.id)
+        order = orders_by_auction.get(item.id)
         source_price = BR(item.source_price or 0.0)
-        final_price = BR(item.current_price or 0.0)
-        fees_total = BR(item.total_bid_fees or 0.0)
-        total_if_paid = BR(final_price + fees_total + final_price)
-        result = BR(total_if_paid - source_price)
+        gross_bids = BR(getattr(agg, "gross_bids", 0.0) if agg else 0.0)
+        fees_total = BR(getattr(agg, "fees_total", 0.0) if agg else (item.total_bid_fees or 0.0))
+        product_cash = BR(getattr(agg, "product_cash", 0.0) if agg else max(0.0, gross_bids - fees_total))
+        final_price = BR(order.final_price if order and order.status in ["paid", "processing", "purchased", "sent", "delivered"] else 0.0)
+        outgoing = BR(outgoing_by_order.get(order.id, 0.0) if order else 0.0)
+        cash_total = BR(gross_bids + final_price)
+        result = BR(cash_total - outgoing)
         rows.append({
             "title": item.title,
             "source_price": source_price,
             "final_price": final_price,
+            "gross_bids": gross_bids,
             "fees_total": fees_total,
-            "site_complement": BR(max(0.0, source_price - (final_price + fees_total))),
+            "product_cash": product_cash,
+            "site_complement": BR(max(0.0, source_price - cash_total)),
+            "outgoing": outgoing,
             "result": result,
             "status_label": item.status,
         })
     return rows
-
 
 
 def admin_order_finance(order: WinnerOrder) -> dict:
@@ -3942,12 +4062,15 @@ def admin_update_order_control(
         if int(mark_purchased or 0):
             order.status = "purchased"
             order.purchased_at = now
+            register_product_outgoing_if_needed(db, order, now)
         if int(mark_sent or 0):
             order.status = "sent"
             order.sent_at = now
+            register_product_outgoing_if_needed(db, order, now)
         if int(mark_delivered or 0):
             order.status = "delivered"
             order.delivered_at = now
+            register_product_outgoing_if_needed(db, order, now)
         db.commit()
         return RedirectResponse("/admin", status_code=303)
     finally:
@@ -4120,6 +4243,8 @@ def admin_set_tracking(request: Request, order_id: int, tracking_code: str = For
             order.tracking_code = tracking_code.strip()
             if order.status in {"paid", "processing", "purchased"}:
                 order.status = "sent"
+                order.sent_at = datetime.utcnow()
+                register_product_outgoing_if_needed(db, order, order.sent_at)
         if admin_note.strip():
             order.admin_note = admin_note.strip()
         db.commit()
@@ -4139,7 +4264,18 @@ def admin_set_order_status(request: Request, order_id: int, status: str = Form(.
         allowed = {"pending_payment", "paid", "processing", "purchased", "sent", "delivered", "expired"}
         if status not in allowed:
             raise HTTPException(status_code=400, detail="Status inválido.")
+        previous_status = order.status
         order.status = status
+        now = datetime.utcnow()
+        if status == "purchased" and previous_status != "purchased":
+            order.purchased_at = order.purchased_at or now
+            register_product_outgoing_if_needed(db, order, now)
+        if status == "sent" and previous_status != "sent":
+            order.sent_at = order.sent_at or now
+            register_product_outgoing_if_needed(db, order, now)
+        if status == "delivered" and previous_status != "delivered":
+            order.delivered_at = order.delivered_at or now
+            register_product_outgoing_if_needed(db, order, now)
         if admin_note.strip():
             order.admin_note = admin_note.strip()
         item = db.get(AuctionItem, order.auction_id)
