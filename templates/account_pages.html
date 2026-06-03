@@ -656,11 +656,14 @@ document.addEventListener("DOMContentLoaded", function () {
       }
 
       event.preventDefault();
-      panel.classList.toggle("active");
+      panel.classList.add("active");
+      balanceButtons.forEach((item) => item.classList.add("active"));
 
-      if (panel.classList.contains("active")) {
-        panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (window.history && window.location.hash !== `#${target}`) {
+        history.replaceState(null, "", `#${target}`);
       }
+
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 

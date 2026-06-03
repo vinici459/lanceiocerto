@@ -9,26 +9,27 @@
         <p>Gestão profissional de leilões, caixa, usuários e operação.</p>
       </div>
 
-      <button class="side-link admin-link active" data-target="admin-dashboard" type="button">Resumo Geral</button>
-      <button class="side-link admin-link" data-target="admin-cashflow" type="button">Fluxo de Caixa</button>
-      <button class="side-link admin-link" data-target="admin-product" type="button">Cadastrar Produto</button>
+      {% if user.is_superadmin %}<button class="side-link admin-link active" data-target="admin-dashboard" type="button">Resumo Geral</button>{% endif %}
+      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-cashflow" type="button">Fluxo de Caixa</button>{% endif %}
+      <button class="side-link admin-link {% if not user.is_superadmin %}active{% endif %}" data-target="admin-product" type="button">Cadastrar Produto</button>
       <button class="side-link admin-link" data-target="admin-returned" type="button">Produtos Retornados</button>
       <button class="side-link admin-link" data-target="admin-auctions" type="button">Gerenciar Leilões</button>
       <button class="side-link admin-link" data-target="admin-finished" type="button">Leilões Finalizados</button>
-      <button class="side-link admin-link" data-target="admin-pending-payments" type="button">Leilões Pendentes</button>
+      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-pending-payments" type="button">Leilões Pendentes</button>{% endif %}
       <button class="side-link admin-link" data-target="admin-shipping" type="button">Envios Pendentes</button>
-      <button class="side-link admin-link" data-target="admin-users" type="button">Usuários</button>
-      <button class="side-link admin-link" data-target="admin-identity-pending" type="button">Usuários pendentes</button>
-      <button class="side-link admin-link" data-target="admin-withdrawals" type="button">Saques Pendentes</button>
+      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-users" type="button">Usuários</button>{% endif %}
+      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-identity-pending" type="button">Usuários pendentes</button>{% endif %}
+      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-withdrawals" type="button">Saques Pendentes</button>{% endif %}
       <button class="side-link admin-link" data-target="admin-tickets" type="button">Chamados/Disputas</button>
       <button class="side-link admin-link" data-target="admin-suggestions" type="button">Indicações</button>
       <button class="side-link admin-link" data-target="admin-search-orders" type="button">Consulta</button>
-      <button class="side-link admin-link" data-target="admin-audit" type="button">Auditoria Geral</button>
+      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-audit" type="button">Auditoria Geral</button>{% endif %}
       <button class="side-link admin-link" data-target="admin-moderation" type="button">Moderação</button>
     </aside>
 
     <div class="account-content admin-content-clean admin-production-content">
-      <section id="admin-dashboard" class="admin-panel active">
+      {% if user.is_superadmin %}
+<section id="admin-dashboard" class="admin-panel active">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Resumo Geral</h1>
@@ -82,7 +83,10 @@
         </div>
       </section>
 
-      <section id="admin-cashflow" class="admin-panel">
+      {% endif %}
+
+      {% if user.is_superadmin %}
+<section id="admin-cashflow" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Fluxo de Caixa</h1>
@@ -153,7 +157,9 @@
         </div>
       </section>
 
-      <section id="admin-product" class="admin-panel">
+      {% endif %}
+
+      <section id="admin-product" class="admin-panel {% if not user.is_superadmin %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Cadastrar Produto</h1>
@@ -403,7 +409,8 @@
         </div>
       </section>
 
-      <section id="admin-pending-payments" class="admin-panel">
+      {% if user.is_superadmin %}
+<section id="admin-pending-payments" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Leilões Pendentes</h1>
@@ -443,6 +450,8 @@
           </div>
         </div>
       </section>
+
+      {% endif %}
 
       <section id="admin-shipping" class="admin-panel">
         <div class="section-head admin-section-head-pro">
@@ -498,7 +507,8 @@
         </div>
       </section>
 
-      <section id="admin-users" class="admin-panel">
+      {% if user.is_superadmin %}
+<section id="admin-users" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Usuários</h1>
@@ -569,7 +579,10 @@
       </section>
 
 
-      <section id="admin-identity-pending" class="admin-panel">
+      {% endif %}
+
+      {% if user.is_superadmin %}
+<section id="admin-identity-pending" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Usuários pendentes</h1>
@@ -677,7 +690,10 @@
       </section>
 
 
-      <section id="admin-withdrawals" class="admin-panel">
+      {% endif %}
+
+      {% if user.is_superadmin %}
+<section id="admin-withdrawals" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Saques Pendentes</h1>
@@ -753,6 +769,8 @@
       </section>
 
 
+      {% endif %}
+
       <section id="admin-suggestions" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -807,7 +825,7 @@
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Central de Controle de Arremates</h1>
-            <p>Pesquise e abra o painel interno do pedido para controlar compra, pagamento, envio, rastreio e mensagens.</p>
+            <p>Pesquise e abra o painel interno do pedido para controlar compra, envio, rastreio e mensagens. Informações financeiras ficam restritas ao super admin.</p>
           </div>
         </div>
         <div class="panel-card admin-card-pro">
@@ -851,13 +869,14 @@
                       <p><strong>Arrematou:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
                       <p><strong>Pagamento:</strong> {{ o.paid_at.strftime('%d/%m/%Y %H:%M') if o.paid_at else 'Não confirmado' }}</p>
                       <p><strong>Prazo:</strong> {{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</p>
-                      {% if o.status == 'expired' or not o.paid_at %}
+                      {% if user.is_superadmin and (o.status == 'expired' or not o.paid_at) %}
                       <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
                         <input type="number" name="extra_minutes" value="10" min="1">
                         <button class="btn small" type="submit">Dar mais prazo</button>
                       </form>
                       {% endif %}
                     </div>
+{% if user.is_superadmin %}
                     <div class="panel-card mini-detail-card">
                       <h4>Contabilidade</h4>
                       <p><strong>Lances acumulados:</strong> R$ {{ '%.2f'|format(f.bid_pool)|replace('.', ',') }}</p>
@@ -866,6 +885,7 @@
                       <p><strong>Total se pago:</strong> R$ {{ '%.2f'|format(f.total_if_paid)|replace('.', ',') }}</p>
                       <p><strong>Resultado estimado:</strong> R$ {{ '%.2f'|format(f.result_if_paid)|replace('.', ',') }}</p>
                     </div>
+                    {% endif %}
                   </div>
 
                   <div class="panel-card admin-card-pro">
@@ -934,6 +954,7 @@
       </section>
 
 
+{% if user.is_superadmin %}
 <section id="admin-audit" class="admin-panel">
   <div class="section-head admin-section-head-pro">
     <div><h1>Auditoria Geral</h1><p>Registro cronológico de ações sensíveis da plataforma: cadastro, KYC, depósitos pendentes, saques, pagamentos e decisões administrativas.</p></div>
@@ -948,7 +969,9 @@
   </div>
 </section>
 
-<section id="admin-moderation" class="admin-panel">
+{% endif %}
+
+      <section id="admin-moderation" class="admin-panel">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Moderação</h1>
@@ -975,6 +998,36 @@
             </div>
           </div>
         </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Usuários para moderação de chat</h2><span class="pill-soft">Operacional</span></div>
+          <p class="muted">Admins operacionais podem mutar/desmutar chat. Banimento total da conta fica restrito ao super admin.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nome</th><th>Apelido</th><th>E-mail</th><th>Status</th><th>Ação</th></tr></thead>
+              <tbody>
+                {% for u in moderation_users if moderation_users is defined %}
+                <tr>
+                  <td>{{ u.full_name }}</td>
+                  <td>@{{ u.public_name or u.nickname or '—' }}</td>
+                  <td>{{ u.email }}</td>
+                  <td>{% if u.chat_muted %}Chat mutado{% else %}Chat liberado{% endif %}{% if u.is_banned %}<br>Conta banida{% endif %}</td>
+                  <td>
+                    {% if not u.is_superadmin %}
+                      <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
+                      {% if user.is_superadmin %}<form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">{% if u.is_banned %}Desbanir conta{% else %}Banir conta{% endif %}</button></form>{% endif %}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5">Nenhum usuário encontrado para moderação.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
     </div>
   </div>
@@ -986,21 +1039,33 @@ document.addEventListener("DOMContentLoaded", function () {
   const panels = document.querySelectorAll(".admin-panel");
   const openTabButtons = document.querySelectorAll(".admin-open-tab");
 
-  function openPanel(target) {
-    links.forEach((item) => item.classList.remove("active"));
-    panels.forEach((panel) => panel.classList.remove("active"));
-    const link = document.querySelector(`.admin-link[data-target="${target}"]`);
+  function openPanel(target, options = {}) {
+    if (!target) return;
     const selected = document.getElementById(target);
-    if (link) link.classList.add("active");
-    if (selected) selected.classList.add("active");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!selected) return;
+
+    links.forEach((item) => item.classList.toggle("active", item.getAttribute("data-target") === target));
+    panels.forEach((panel) => panel.classList.toggle("active", panel.id === target));
+
+    if (options.updateHash !== false && window.history) {
+      const nextHash = `#${target}`;
+      if (window.location.hash !== nextHash) history.replaceState(null, "", nextHash);
+    }
+
+    if (options.scroll !== false) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }
 
-  links.forEach((link) => link.addEventListener("click", function () { openPanel(this.getAttribute("data-target")); }));
-  openTabButtons.forEach((button) => button.addEventListener("click", function () { openPanel(this.getAttribute("data-target")); }));
+  links.forEach((link) => link.addEventListener("click", function () {
+    openPanel(this.getAttribute("data-target"), { updateHash: true, scroll: true });
+  }));
+  openTabButtons.forEach((button) => button.addEventListener("click", function () {
+    openPanel(this.getAttribute("data-target"), { updateHash: true, scroll: true });
+  }));
 
   const initialHash = (window.location.hash || "").replace("#", "");
-  if (initialHash && document.getElementById(initialHash)) openPanel(initialHash);
+  if (initialHash && document.getElementById(initialHash)) openPanel(initialHash, { updateHash: false, scroll: false });
 
   const scheduleMode = document.getElementById("schedule-mode");
   const minuteField = document.querySelector(".schedule-minutes-field");

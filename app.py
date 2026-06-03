@@ -970,6 +970,17 @@ def require_admin(request: Request, db: Session) -> User:
     return user
 
 
+def require_superadmin(request: Request, db: Session) -> User:
+    user = require_admin(request, db)
+    if not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Acesso restrito ao super admin.")
+    return user
+
+
+def is_superadmin_user(user: Optional[User]) -> bool:
+    return bool(user and getattr(user, "is_superadmin", False))
+
+
 def auction_collected_total(item: AuctionItem) -> float:
     """Total usado para acionar o turbo: preço atual + taxas acumuladas."""
     return BR((getattr(item, "current_price", 0.0) or 0.0) + (getattr(item, "total_bid_fees", 0.0) or 0.0))
@@ -3829,13 +3840,16 @@ def admin_dashboard(request: Request):
         if not admin.is_admin:
             return RedirectResponse("/", status_code=303)
 
+        is_super_admin = bool(admin.is_superadmin)
+
         search = (request.query_params.get("q") or "").strip()
         users_query = db.query(User)
         if search:
             like = f"%{search}%"
             users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-        users = users_query.order_by(desc(User.created_at)).limit(40).all()
-        identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all()
+        users = users_query.order_by(desc(User.created_at)).limit(40).all() if is_super_admin else []
+        moderation_users = users_query.order_by(desc(User.created_at)).limit(80).all()
+        identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all() if is_super_admin else []
         items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(30).all()
         for item in items:
             item.collected_percent = auction_progress_percent(item)
@@ -3846,13 +3860,13 @@ def admin_dashboard(request: Request):
         pending_payment_orders = [o for o in orders if o.status == "pending_payment"]
         shipping_orders = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
         consultation_orders = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
-        withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all()
+        withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all() if is_super_admin else []
         support_tickets = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(25).all()
         admin_order_cards = build_admin_order_cards(db, orders)
         returned_items = build_returned_items(db)
-        finance = build_finance_dashboard(db)
-        cashflow_movements = build_cashflow_movements(db)
-        auction_results = build_auction_results(db)
+        finance = build_finance_dashboard(db) if is_super_admin else {}
+        cashflow_movements = build_cashflow_movements(db) if is_super_admin else []
+        auction_results = build_auction_results(db) if is_super_admin else []
         stats = {
             "users": db.query(User).count(),
             "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
@@ -3873,6 +3887,7 @@ def admin_dashboard(request: Request):
                 "user": admin,
                 "stats": stats,
                 "users": users,
+                "moderation_users": moderation_users,
                 "identity_pending_users": identity_pending_users,
                 "items": items,
                 "orders": orders,
@@ -3882,8 +3897,8 @@ def admin_dashboard(request: Request):
                 "consultation_orders": consultation_orders,
                 "withdrawal_requests": withdrawal_requests,
                 "support_tickets": support_tickets,
-                "user_audit": user_audit_map(db, users),
-                "audit_logs": db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all(),
+                "user_audit": user_audit_map(db, users) if is_super_admin else {},
+                "audit_logs": db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all() if is_super_admin else [],
                 "search": search,
                 "finished_auctions": build_finished_auctions(db),
                 "returned_items": returned_items,
@@ -3894,6 +3909,7 @@ def admin_dashboard(request: Request):
                 "moderation_users": db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all(),
                 "payment_deadline_minutes": PAYMENT_DEADLINE_MINUTES,
                 "suggestion_vote_stats": suggestion_vote_stats(db),
+                "is_super_admin": is_super_admin,
             },
         )
     finally:
@@ -4184,7 +4200,7 @@ def admin_toggle_chat(request: Request, item_id: int):
 def admin_credit_user(request: Request, user_id: int, amount: float = Form(...)):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        require_superadmin(request, db)
         user = db.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
@@ -4201,7 +4217,7 @@ def admin_credit_user(request: Request, user_id: int, amount: float = Form(...))
 def admin_toggle_ban(request: Request, user_id: int):
     db = SessionLocal()
     try:
-        admin = require_admin(request, db)
+        admin = require_superadmin(request, db)
         user = db.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
@@ -4257,13 +4273,15 @@ def admin_set_tracking(request: Request, order_id: int, tracking_code: str = For
 def admin_set_order_status(request: Request, order_id: int, status: str = Form(...), admin_note: str = Form("")):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        admin_user = require_admin(request, db)
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
         allowed = {"pending_payment", "paid", "processing", "purchased", "sent", "delivered", "expired"}
         if status not in allowed:
             raise HTTPException(status_code=400, detail="Status inválido.")
+        if not admin_user.is_superadmin and status in {"pending_payment", "paid", "expired"}:
+            raise HTTPException(status_code=403, detail="Apenas o super admin pode alterar status financeiro do pedido.")
         previous_status = order.status
         order.status = status
         now = datetime.utcnow()
@@ -4378,7 +4396,7 @@ async def account_open_ticket(request: Request, subject: str = Form(...), messag
 def admin_verify_user(request: Request, user_id: int, note: str = Form("")):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        require_superadmin(request, db)
         user = db.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
@@ -4396,7 +4414,7 @@ def admin_verify_user(request: Request, user_id: int, note: str = Form("")):
 def admin_reject_user(request: Request, user_id: int, note: str = Form("")):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        require_superadmin(request, db)
         user = db.get(User, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
@@ -4415,7 +4433,7 @@ def admin_reject_user(request: Request, user_id: int, note: str = Form("")):
 def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: str = Form(...), admin_note: str = Form("")):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        require_superadmin(request, db)
         req = db.get(WithdrawalRequest, withdrawal_id)
         if not req:
             raise HTTPException(status_code=404, detail="Saque não encontrado.")
@@ -4439,7 +4457,7 @@ def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: st
 def admin_extend_payment(request: Request, order_id: int, extra_minutes: int = Form(10)):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        require_superadmin(request, db)
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
@@ -4456,7 +4474,7 @@ def admin_extend_payment(request: Request, order_id: int, extra_minutes: int = F
 def admin_refund_order(request: Request, order_id: int, amount: float = Form(...), admin_note: str = Form("")):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        require_superadmin(request, db)
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")

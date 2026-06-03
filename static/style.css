@@ -197,3 +197,27 @@ img{max-width:100%;}
 /* Correção visual dos selects no painel admin: evita dropdown branco/invisível no tema escuro */
 select option{background:#111827;color:#ffffff;}
 select:focus{border-color:rgba(96,165,250,.55);box-shadow:0 0 0 3px rgba(59,130,246,.16);}
+
+/* Navegação profissional: prefetch + transições leves sem alterar lógica do leilão */
+html{scroll-behavior:smooth;}
+body.page-ready .page-content-shell{animation:lcPageIn .16s ease-out both;}
+body.page-leaving .page-content-shell{opacity:.86;transform:translateY(3px);transition:opacity .12s ease,transform .12s ease;}
+@keyframes lcPageIn{from{opacity:.86;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+.lc-tab,.side-link,.account-side-link,.admin-link,.wallet-action-btn,.wallet-choice-btn,.btn,.card,.panel-card{
+  transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease,opacity .18s ease;
+}
+.card:hover,.panel-card:hover{border-color:rgba(96,165,250,.26);}
+.btn:hover,.lc-tab:hover,.side-link:hover,.account-side-link:hover,.admin-link:hover{transform:translateY(-1px);}
+.btn:active,.lc-tab:active,.side-link:active,.account-side-link:active,.admin-link:active{transform:translateY(0);}
+
+.home-tab-panel,.admin-panel,.wallet-mode-panel,.deposit-panel{animation:lcPanelIn .16s ease-out both;}
+@keyframes lcPanelIn{from{opacity:.55;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+
+.admin-production-sidebar,.account-sidebar{will-change:transform;}
+.countdown{font-variant-numeric:tabular-nums;}
+
+@media (prefers-reduced-motion: reduce){
+  body.page-ready .page-content-shell,.home-tab-panel,.admin-panel,.wallet-mode-panel,.deposit-panel{animation:none!important;}
+  body.page-leaving .page-content-shell{opacity:1!important;transform:none!important;}
+}

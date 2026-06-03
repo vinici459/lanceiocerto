@@ -1,24 +1,107 @@
-document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll("[data-home-target]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const target = btn.dataset.homeTarget;
-      document.querySelectorAll(".lc-tab").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      document.querySelectorAll(".home-tab-panel").forEach((p) => p.classList.remove("active"));
-      const panel = document.getElementById(target);
-      if (panel) panel.classList.add("active");
+(function () {
+  "use strict";
+
+  function onReady(callback) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", callback, { once: true });
+    } else {
+      callback();
+    }
+  }
+
+  function isInternalNavigableLink(link) {
+    if (!link || !link.href) return false;
+    if (link.target && link.target !== "_self") return false;
+    if (link.hasAttribute("download")) return false;
+    if (link.dataset.noPrefetch === "true" || link.dataset.noTransition === "true") return false;
+
+    let url;
+    try {
+      url = new URL(link.href, window.location.href);
+    } catch (_) {
+      return false;
+    }
+
+    if (url.origin !== window.location.origin) return false;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+
+    const path = url.pathname.toLowerCase();
+    if (path === "/logout") return false;
+    if (path.startsWith("/static/")) return false;
+    if (path.startsWith("/api/")) return false;
+    if (path.startsWith("/ws/")) return false;
+
+    return true;
+  }
+
+  function isSamePageHash(url) {
+    return (
+      url.origin === window.location.origin &&
+      url.pathname === window.location.pathname &&
+      url.search === window.location.search &&
+      url.hash
+    );
+  }
+
+  function initNavigationPrefetch() {
+    const prefetched = new Set();
+
+    function prefetch(link) {
+      if (!isInternalNavigableLink(link)) return;
+      const url = new URL(link.href, window.location.href);
+      if (isSamePageHash(url)) return;
+      const key = url.href;
+      if (prefetched.has(key)) return;
+      prefetched.add(key);
+
+      try {
+        const hint = document.createElement("link");
+        hint.rel = "prefetch";
+        hint.href = key;
+        hint.as = "document";
+        document.head.appendChild(hint);
+      } catch (_) {}
+
+      if (window.fetch) {
+        window.setTimeout(() => {
+          fetch(key, {
+            method: "GET",
+            credentials: "same-origin",
+            headers: { "X-Prefetch": "1" },
+            priority: "low",
+          }).catch(() => {});
+        }, 80);
+      }
+    }
+
+    document.querySelectorAll("a[href]").forEach((link) => {
+      link.addEventListener("pointerenter", () => prefetch(link), { passive: true });
+      link.addEventListener("focus", () => prefetch(link), { passive: true });
+      link.addEventListener("touchstart", () => prefetch(link), { passive: true });
     });
-  });
+  }
 
-  // Countdown leve apenas fora da página do leilão.
-  // O leilão tem controlador próprio em auction.html.
-  if (document.getElementById("auction-layout")) return;
+  function initPageTransitions() {
+    document.body.classList.add("page-ready");
 
-  const countdowns = Array.from(
-    document.querySelectorAll(".countdown[data-seconds]")
-  );
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest("a[href]");
+      if (!isInternalNavigableLink(link)) return;
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
-  if (!countdowns.length) return;
+      const url = new URL(link.href, window.location.href);
+      if (isSamePageHash(url)) return;
+
+      document.body.classList.add("page-leaving");
+    }, true);
+
+    window.addEventListener("pageshow", () => {
+      document.body.classList.remove("page-leaving");
+      document.body.classList.add("page-ready");
+    });
+  }
 
   function formatTime(seconds) {
     seconds = Math.max(0, Number.parseInt(seconds || "0", 10) || 0);
@@ -30,14 +113,97 @@ document.addEventListener("DOMContentLoaded", () => {
       : `${m}m ${String(s).padStart(2, "0")}s`;
   }
 
-  function tickCountdowns() {
-    countdowns.forEach((el) => {
-      let seconds = Math.max(0, Number.parseInt(el.dataset.seconds || "0", 10) || 0);
-      el.textContent = formatTime(seconds);
-      el.dataset.seconds = String(Math.max(0, seconds - 1));
-    });
+  function parseServerDate(value) {
+    if (!value) return null;
+    const normalized = String(value).trim().replace(" ", "T");
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  tickCountdowns();
-  setInterval(tickCountdowns, 1000);
-});
+  function secondsFromDate(value) {
+    const date = parseServerDate(value);
+    if (!date) return null;
+    return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
+  }
+
+  function initHomeTabs() {
+    const buttons = document.querySelectorAll("[data-home-target]");
+    if (!buttons.length) return;
+
+    function openHomePanel(target, updateHash) {
+      const panel = document.getElementById(target);
+      if (!panel) return;
+
+      document.querySelectorAll(".lc-tab").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.homeTarget === target);
+      });
+      document.querySelectorAll(".home-tab-panel").forEach((item) => {
+        item.classList.toggle("active", item.id === target);
+      });
+
+      if (updateHash && window.history && window.location.hash !== `#${target}`) {
+        history.replaceState(null, "", `#${target}`);
+      }
+    }
+
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => openHomePanel(btn.dataset.homeTarget, true));
+    });
+
+    const initialHash = (window.location.hash || "").replace("#", "");
+    if (initialHash && document.getElementById(initialHash)) {
+      openHomePanel(initialHash, false);
+    }
+  }
+
+  function initCountdowns() {
+    if (document.getElementById("auction-layout")) return;
+
+    const countdowns = Array.from(document.querySelectorAll(".countdown[data-seconds]"));
+    if (!countdowns.length) return;
+
+    function currentSeconds(el) {
+      const endAt = el.dataset.endAt;
+      const startAt = el.dataset.startAt;
+      const fromDate = secondsFromDate(endAt || startAt);
+      if (fromDate !== null) return fromDate;
+      return Math.max(0, Number.parseInt(el.dataset.seconds || "0", 10) || 0);
+    }
+
+    function tickCountdowns() {
+      countdowns.forEach((el) => {
+        const seconds = currentSeconds(el);
+        el.textContent = formatTime(seconds);
+        if (!el.dataset.endAt && !el.dataset.startAt) {
+          el.dataset.seconds = String(Math.max(0, seconds - 1));
+        }
+      });
+    }
+
+    tickCountdowns();
+    setInterval(tickCountdowns, 1000);
+  }
+
+  function initAccountHashHelpers() {
+    const balancePanel = document.getElementById("account-balance-panel");
+    if (!balancePanel) return;
+
+    function openBalancePanel(scroll) {
+      balancePanel.classList.add("active");
+      document.querySelectorAll("[data-account-target]").forEach((link) => link.classList.add("active"));
+      if (scroll) balancePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    if (window.location.hash === "#account-balance-panel") {
+      window.setTimeout(() => openBalancePanel(true), 120);
+    }
+  }
+
+  onReady(() => {
+    initNavigationPrefetch();
+    initPageTransitions();
+    initHomeTabs();
+    initCountdowns();
+    initAccountHashHelpers();
+  });
+})();
