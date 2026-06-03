@@ -635,7 +635,7 @@
 </style>
 {% block extra_scripts %}
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+(function () {
   function openBalancePanel(scroll = true) {
     const panel = document.getElementById("account-balance-panel");
     if (!panel) return;
@@ -795,6 +795,6 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-});
+})();
 </script>
 {% endblock %}

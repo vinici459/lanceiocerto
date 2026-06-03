@@ -221,3 +221,34 @@ body.page-leaving .page-content-shell{opacity:.86;transform:translateY(3px);tran
   body.page-ready .page-content-shell,.home-tab-panel,.admin-panel,.wallet-mode-panel,.deposit-panel{animation:none!important;}
   body.page-leaving .page-content-shell{opacity:1!important;transform:none!important;}
 }
+
+
+/* Barra real de carregamento usada pela navegação instantânea */
+.page-content-shell{
+  min-height:calc(100vh - 74px);
+}
+.page-content-shell.page-content-out{
+  opacity:.55;
+  transform:translateY(6px);
+}
+.page-content-shell.page-content-in{
+  animation:lcPageIn .22s ease both;
+}
+.page-progress-bar{
+  position:fixed;
+  z-index:10000;
+  top:0;
+  left:0;
+  width:0;
+  height:3px;
+  opacity:0;
+  pointer-events:none;
+  background:linear-gradient(90deg,#2563eb,#22c55e);
+  box-shadow:0 0 18px rgba(59,130,246,.55);
+  transition:width .25s ease, opacity .18s ease;
+}
+.page-progress-bar.active{opacity:1;width:42%;}
+.page-progress-bar.active.almost{width:78%;}
+.page-progress-bar.done{width:100%;opacity:0;}
+body.page-loading a,body.page-loading button{cursor:progress;}
+.nav a.active{color:#93c5fd;}

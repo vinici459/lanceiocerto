@@ -334,7 +334,7 @@
 </section>
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+(function () {
   const buttons = document.querySelectorAll(".lc-tab");
   const panels = document.querySelectorAll(".home-tab-panel");
   const searchInput = document.getElementById("auctionSearch");
@@ -492,7 +492,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   tickCountdowns();
   setInterval(tickCountdowns, 1000);
-});
+})();
 </script>
 
 <style>

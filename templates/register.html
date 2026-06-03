@@ -125,7 +125,7 @@
 </style>
 
 <script>
-document.addEventListener("DOMContentLoaded", function(){
+(function () {
   const form = document.getElementById("register-form");
   const submit = document.getElementById("register-submit");
   const cpf = document.querySelector('[data-mask="cpf"]');
@@ -193,6 +193,6 @@ document.addEventListener("DOMContentLoaded", function(){
   form?.addEventListener("input", updateSubmit);
   form?.addEventListener("change", updateSubmit);
   updateSubmit();
-});
+})();
 </script>
 {% endblock %}

@@ -1034,7 +1034,7 @@
 </section>
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+(function () {
   const links = document.querySelectorAll(".admin-link");
   const panels = document.querySelectorAll(".admin-panel");
   const openTabButtons = document.querySelectorAll(".admin-open-tab");
@@ -1125,7 +1125,7 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     });
   });
-});
+})();
 </script>
 
 <style>
@@ -1241,7 +1241,7 @@ document.addEventListener("DOMContentLoaded", function () {
 </style>
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+(function () {
   const priceInput = document.querySelector('input[name="source_price"]');
   const targetInput = document.querySelector('input[name="turbo_fee_target_percent"]');
   const previewText = document.getElementById("turbo-preview-text");
@@ -1266,7 +1266,7 @@ document.addEventListener("DOMContentLoaded", function () {
   priceInput?.addEventListener("input", updateTurboPreview);
   targetInput?.addEventListener("input", updateTurboPreview);
   updateTurboPreview();
-});
+})();
 </script>
 
 {% endblock %}

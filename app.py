@@ -3525,9 +3525,16 @@ def my_receipts(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(100).all()
-        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
-        audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(100).all()
+        transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(80).all()
+        orders = (
+            db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
+            .filter(WinnerOrder.user_id == user.id)
+            .order_by(desc(WinnerOrder.created_at))
+            .limit(80)
+            .all()
+        )
+        audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(80).all()
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", "wallet_transactions": transactions, "orders_raw": orders, "audit_logs": audits})
     finally:
         db.close()
@@ -3580,25 +3587,48 @@ def my_participations(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        bids = db.query(Bid).filter(Bid.user_id == user.id).order_by(desc(Bid.created_at)).all()
-        grouped = {}
-        for bid in bids:
-            aid = bid.auction_id
-            if aid not in grouped:
-                item = bid.auction
-                grouped[aid] = {
-                    "auction_id": aid,
-                    "title": item.title,
-                    "image_url": safe_image_url(item.image_url),
-                    "status": public_display_status(item.status),
-                    "total_bids": 0,
-                    "total_spent": 0.0,
-                    "won": item.winner_user_id == user.id,
-                    "last_activity": bid.created_at.strftime("%d/%m/%Y %H:%M"),
-                }
-            grouped[aid]["total_bids"] += 1
-            grouped[aid]["total_spent"] = BR(grouped[aid]["total_spent"] + bid.bid_value)
-        data = list(grouped.values())
+
+        # Consulta agregada: evita carregar todos os lances do usuário e evita N+1
+        # em bid.auction. Esta tela é uma das que mais pesava quando o usuário
+        # tinha muitas participações.
+        rows = (
+            db.query(
+                Bid.auction_id.label("auction_id"),
+                func.count(Bid.id).label("total_bids"),
+                func.coalesce(func.sum(Bid.bid_value), 0.0).label("total_spent"),
+                func.max(Bid.created_at).label("last_activity"),
+                AuctionItem.title.label("title"),
+                AuctionItem.image_url.label("image_url"),
+                AuctionItem.status.label("status"),
+                AuctionItem.winner_user_id.label("winner_user_id"),
+            )
+            .join(AuctionItem, AuctionItem.id == Bid.auction_id)
+            .filter(Bid.user_id == user.id)
+            .group_by(
+                Bid.auction_id,
+                AuctionItem.title,
+                AuctionItem.image_url,
+                AuctionItem.status,
+                AuctionItem.winner_user_id,
+            )
+            .order_by(desc(func.max(Bid.created_at)))
+            .limit(120)
+            .all()
+        )
+
+        data = [
+            {
+                "auction_id": row.auction_id,
+                "title": row.title,
+                "image_url": safe_image_url(row.image_url),
+                "status": public_display_status(row.status),
+                "total_bids": int(row.total_bids or 0),
+                "total_spent": BR(row.total_spent or 0.0),
+                "won": row.winner_user_id == user.id,
+                "last_activity": fmt_br_datetime(row.last_activity),
+            }
+            for row in rows
+        ]
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "participations", "items": data})
     finally:
         db.close()
@@ -3609,7 +3639,14 @@ def my_wins(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).all()
+        orders = (
+            db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
+            .filter(WinnerOrder.user_id == user.id)
+            .order_by(desc(WinnerOrder.created_at))
+            .limit(120)
+            .all()
+        )
         data = [build_order_card(x) for x in orders]
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wins", "orders": data})
     finally:
@@ -3735,8 +3772,10 @@ def my_expired_orders(request: Request):
         user = require_user(request, db)
         orders = (
             db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "expired")
             .order_by(desc(WinnerOrder.created_at))
+            .limit(120)
             .all()
         )
         data = [build_order_card(x) for x in orders]
