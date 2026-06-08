@@ -22,7 +22,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import (
@@ -426,10 +426,66 @@ class AuctionStateHTTPException(HTTPException):
 
 
 @app.middleware("http")
-async def add_static_cache_headers(request: Request, call_next):
+async def navigation_cache_and_diagnostics(request: Request, call_next):
+    """Cache seguro + diagnóstico de navegação.
+
+    O problema de navegação duplicada não vinha mais do nosso app.js. Alguns
+    navegadores/extensões/proxies podem disparar requisições especulativas
+    (prefetch/prerender) ou repetir navegações muito próximas. Este middleware:
+    - bloqueia requisições especulativas antes de bater nas rotas pesadas;
+    - aplica cache PRIVATE curto em páginas HTML navegáveis;
+    - registra tempo real e cabeçalhos úteis para confirmar a origem.
+    """
+    import time
+
+    path = request.url.path
+    method = request.method.upper()
+    purpose = (
+        request.headers.get("purpose")
+        or request.headers.get("sec-purpose")
+        or request.headers.get("x-purpose")
+        or request.headers.get("x-moz")
+        or ""
+    ).lower()
+    sec_fetch_mode = (request.headers.get("sec-fetch-mode") or "").lower()
+    sec_fetch_dest = (request.headers.get("sec-fetch-dest") or "").lower()
+    user_agent = (request.headers.get("user-agent") or "")[:80]
+
+    # Corta carregamentos especulativos. Uma navegação real nunca depende destes
+    # headers. Isso evita que /admin, /minha-conta e /login sejam montadas sem clique.
+    if method == "GET" and ("prefetch" in purpose or "prerender" in purpose):
+        print(f"[NAV-SKIP] {method} {path} speculative=1 purpose={purpose} mode={sec_fetch_mode} dest={sec_fetch_dest}")
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    started = time.perf_counter()
     response = await call_next(request)
-    if request.url.path.startswith("/static/"):
+    elapsed_ms = (time.perf_counter() - started) * 1000
+
+    if path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
+    elif method == "GET" and response.status_code == 200:
+        content_type = (response.headers.get("content-type") or "").lower()
+        if "text/html" in content_type:
+            # Cache privado: só no navegador do próprio usuário. Não é cache público
+            # nem compartilhado. Ajuda muito nos cliques repetidos/back-forward.
+            if path == "/":
+                response.headers.setdefault("Cache-Control", "private, max-age=8, stale-while-revalidate=20")
+            elif path.startswith("/minha-conta"):
+                response.headers.setdefault("Cache-Control", "private, max-age=5, stale-while-revalidate=15")
+            elif path.startswith("/admin"):
+                response.headers.setdefault("Cache-Control", "private, max-age=3, stale-while-revalidate=10")
+            elif path == "/login":
+                response.headers.setdefault("Cache-Control", "private, max-age=10")
+
+    if method in {"GET", "POST"} and path in {"/", "/login", "/minha-conta", "/admin"}:
+        print(
+            f"[NAV-REQ] {method} {request.url.path}"
+            f"{('?' + request.url.query) if request.url.query else ''} "
+            f"status={response.status_code} total={elapsed_ms:.1f}ms "
+            f"purpose={purpose or '-'} mode={sec_fetch_mode or '-'} dest={sec_fetch_dest or '-'} "
+            f"ua={user_agent}"
+        )
+
     return response
 SESSIONS: dict[str, int] = {}
 BANNED_WORDS = {
