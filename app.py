@@ -425,67 +425,77 @@ class AuctionStateHTTPException(HTTPException):
 
 
 
-@app.middleware("http")
-async def navigation_cache_and_diagnostics(request: Request, call_next):
-    """Cache seguro + diagnóstico de navegação.
+def is_speculative_navigation_request(request: Request) -> bool:
+    """Bloqueia requisições automáticas do navegador que não são navegação real.
 
-    O problema de navegação duplicada não vinha mais do nosso app.js. Alguns
-    navegadores/extensões/proxies podem disparar requisições especulativas
-    (prefetch/prerender) ou repetir navegações muito próximas. Este middleware:
-    - bloqueia requisições especulativas antes de bater nas rotas pesadas;
-    - aplica cache PRIVATE curto em páginas HTML navegáveis;
-    - registra tempo real e cabeçalhos úteis para confirmar a origem.
+    Nos testes em produção o Chrome/Edge enviou GET para /, /admin e /minha-conta
+    com Sec-Fetch-Mode: cors e Sec-Fetch-Dest: empty. Essas chamadas vinham
+    antes/ao lado da navegação real e faziam o backend montar páginas pesadas
+    sem o usuário realmente ter clicado duas vezes.
     """
-    import time
+    if request.method.upper() != "GET":
+        return False
 
-    path = request.url.path
-    method = request.method.upper()
-    purpose = (
-        request.headers.get("purpose")
-        or request.headers.get("sec-purpose")
-        or request.headers.get("x-purpose")
-        or request.headers.get("x-moz")
-        or ""
-    ).lower()
-    sec_fetch_mode = (request.headers.get("sec-fetch-mode") or "").lower()
-    sec_fetch_dest = (request.headers.get("sec-fetch-dest") or "").lower()
-    user_agent = (request.headers.get("user-agent") or "")[:80]
+    path = request.url.path.rstrip("/") or "/"
+    if path.startswith("/static/") or path.startswith("/api/") or path.startswith("/ws/"):
+        return False
 
-    # Corta carregamentos especulativos. Uma navegação real nunca depende destes
-    # headers. Isso evita que /admin, /minha-conta e /login sejam montadas sem clique.
-    if method == "GET" and ("prefetch" in purpose or "prerender" in purpose):
-        print(f"[NAV-SKIP] {method} {path} speculative=1 purpose={purpose} mode={sec_fetch_mode} dest={sec_fetch_dest}")
+    # Só tratamos como página HTML principal. Endpoints de formulário/API ficam fora.
+    nav_paths = {"/", "/login", "/register", "/admin", "/minha-conta"}
+    if path not in nav_paths and not path.startswith("/minha-conta/"):
+        return False
+
+    purpose = (request.headers.get("purpose") or request.headers.get("sec-purpose") or "").lower()
+    fetch_mode = (request.headers.get("sec-fetch-mode") or "").lower()
+    fetch_dest = (request.headers.get("sec-fetch-dest") or "").lower()
+    requested_with = (request.headers.get("x-requested-with") or "").lower()
+    accept = (request.headers.get("accept") or "").lower()
+
+    if requested_with == "xmlhttprequest" or "application/json" in accept:
+        return False
+
+    if "prefetch" in purpose or "prerender" in purpose:
+        return True
+
+    # Navegação real deve vir como navigate/document. CORS/empty em página HTML
+    # é requisição especulativa ou fetch automático; não deve renderizar template.
+    if fetch_mode and fetch_mode != "navigate" and fetch_dest in {"", "empty"}:
+        return True
+
+    return False
+
+
+@app.middleware("http")
+async def navigation_guard_and_static_cache(request: Request, call_next):
+    if is_speculative_navigation_request(request):
+        print(
+            f"[NAV-SKIP] {request.method} {request.url.path} speculative=1 "
+            f"purpose={request.headers.get('purpose') or request.headers.get('sec-purpose') or '-'} "
+            f"mode={request.headers.get('sec-fetch-mode') or '-'} "
+            f"dest={request.headers.get('sec-fetch-dest') or '-'}"
+        )
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
+    import time
     started = time.perf_counter()
     response = await call_next(request)
-    elapsed_ms = (time.perf_counter() - started) * 1000
 
-    if path.startswith("/static/"):
+    if request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
-    elif method == "GET" and response.status_code == 200:
-        content_type = (response.headers.get("content-type") or "").lower()
-        if "text/html" in content_type:
-            # Cache privado: só no navegador do próprio usuário. Não é cache público
-            # nem compartilhado. Ajuda muito nos cliques repetidos/back-forward.
-            if path == "/":
-                response.headers.setdefault("Cache-Control", "private, max-age=8, stale-while-revalidate=20")
-            elif path.startswith("/minha-conta"):
-                response.headers.setdefault("Cache-Control", "private, max-age=5, stale-while-revalidate=15")
-            elif path.startswith("/admin"):
-                response.headers.setdefault("Cache-Control", "private, max-age=3, stale-while-revalidate=10")
-            elif path == "/login":
-                response.headers.setdefault("Cache-Control", "private, max-age=10")
+    elif request.method.upper() == "GET" and response.status_code == 200:
+        # Cache privado curtíssimo para o botão voltar/ida-e-volta no mesmo usuário.
+        # Não é compartilhado por proxy e não guarda nada público entre contas.
+        if request.url.path in {"/", "/admin", "/minha-conta"} or request.url.path.startswith("/minha-conta/"):
+            response.headers.setdefault("Cache-Control", "private, max-age=3")
 
-    if method in {"GET", "POST"} and path in {"/", "/login", "/minha-conta", "/admin"}:
+    if request.method.upper() in {"GET", "POST"} and not request.url.path.startswith("/static/"):
+        elapsed = (time.perf_counter() - started) * 1000
         print(
-            f"[NAV-REQ] {method} {request.url.path}"
-            f"{('?' + request.url.query) if request.url.query else ''} "
-            f"status={response.status_code} total={elapsed_ms:.1f}ms "
-            f"purpose={purpose or '-'} mode={sec_fetch_mode or '-'} dest={sec_fetch_dest or '-'} "
-            f"ua={user_agent}"
+            f"[NAV-REQ] {request.method} {request.url.path} status={response.status_code} total={elapsed:.1f}ms "
+            f"purpose={request.headers.get('purpose') or request.headers.get('sec-purpose') or '-'} "
+            f"mode={request.headers.get('sec-fetch-mode') or '-'} "
+            f"dest={request.headers.get('sec-fetch-dest') or '-'}"
         )
-
     return response
 SESSIONS: dict[str, int] = {}
 BANNED_WORDS = {
@@ -2607,6 +2617,21 @@ def cached_suggestion_vote_stats(db: Session, ttl_seconds: int = 45) -> list[dic
     return list(value)
 
 
+
+def cached_home_user_suggestion_context(db: Session, user: Optional[User], ttl_seconds: int = 12) -> dict:
+    """Pequeno cache por usuário para evitar 3 consultas repetidas na Home."""
+    if not user:
+        return {"user_week_nomination": None, "today_suggestion_vote": None, "today_suggestion_nomination": None}
+    key = f"home:user-suggestion:{user.id}"
+    cached = nav_cache_get(key)
+    if cached is not None:
+        return cached
+    return nav_cache_set(key, {
+        "user_week_nomination": user_week_nomination(db, user),
+        "today_suggestion_vote": user_today_suggestion_vote(db, user),
+        "today_suggestion_nomination": user_today_nomination(db, user),
+    }, ttl_seconds)
+
 def should_sync_home_states() -> bool:
     global HOME_SYNC_LAST_AT
     now = datetime.utcnow()
@@ -2616,7 +2641,7 @@ def should_sync_home_states() -> bool:
     return True
 
 
-def cached_home_public_context(db: Session, ttl_seconds: int = 8) -> dict:
+def cached_home_public_context(db: Session, ttl_seconds: int = 18) -> dict:
     """Dados públicos da Home com cache curto.
 
     A Home era chamada várias vezes seguidas durante a navegação. Cada chamada
@@ -2651,6 +2676,7 @@ def home(request: Request):
         user = current_user(request, db)
 
         public_home = cached_home_public_context(db)
+        user_suggestion = cached_home_user_suggestion_context(db, user)
 
         return templates.TemplateResponse(
             "index.html",
@@ -2665,9 +2691,9 @@ def home(request: Request):
                 "suggestion_categories": suggestion_categories(),
                 "suggestion_week_limit": SUGGESTION_WEEK_LIMIT,
                 "suggestion_week_count": public_home["suggestion_week_count"],
-                "user_week_nomination": user_week_nomination(db, user),
-                "today_suggestion_vote": user_today_suggestion_vote(db, user),
-                "today_suggestion_nomination": user_today_nomination(db, user),
+                "user_week_nomination": user_suggestion["user_week_nomination"],
+                "today_suggestion_vote": user_suggestion["today_suggestion_vote"],
+                "today_suggestion_nomination": user_suggestion["today_suggestion_nomination"],
                 "fee_percent": "1%",
             },
         )
@@ -3609,7 +3635,7 @@ async def send_chat(request: Request, auction_id: int, message: str = Form(...))
     return JSONResponse({"ok": True})
 
 
-def cached_account_dashboard_context(db: Session, user: User, ttl_seconds: int = 8) -> dict:
+def cached_account_dashboard_context(db: Session, user: User, ttl_seconds: int = 20) -> dict:
     """Resumo da conta com cache curto por usuário.
 
     Não guarda o objeto User nem saldo; só cards/contadores do painel inicial.
@@ -4050,7 +4076,7 @@ def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0
     return stats
 
 
-def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0, ttl_seconds: int = 10) -> dict:
+def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0, ttl_seconds: int = 20) -> dict:
     key = f"admin:light-stats:{int(is_super_admin)}:{int(returned_count)}"
     cached = nav_cache_get(key)
     if cached is not None:
@@ -4058,7 +4084,7 @@ def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: 
     return nav_cache_set(key, admin_light_stats(db, is_super_admin, returned_count), ttl_seconds)
 
 
-def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 12) -> dict:
+def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 30) -> dict:
     """Blocos financeiros pesados com cache curto.
 
     Fluxo de Caixa e Resumo Geral eram as abas mais lentas. Como são telas de
@@ -4076,7 +4102,7 @@ def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 12) -> dict:
     return nav_cache_set("admin:cashflow-context", value, ttl_seconds)
 
 
-def cached_finished_auctions(db: Session, ttl_seconds: int = 10) -> list[dict]:
+def cached_finished_auctions(db: Session, ttl_seconds: int = 20) -> list[dict]:
     cached = nav_cache_get("admin:finished-auctions")
     if cached is not None:
         return cached
@@ -4244,6 +4270,7 @@ async def admin_create_item(
         )
         db.add(item)
         db.commit()
+        nav_cache_clear()
         return RedirectResponse("/admin", status_code=303)
     finally:
         db.close()

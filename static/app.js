@@ -55,12 +55,13 @@
   function initPageTransitions() {
     document.body.classList.add("page-ready");
 
-    let lastNavigationKey = "";
-    let lastNavigationAt = 0;
+    let lastNavHref = "";
+    let lastNavAt = 0;
 
     document.addEventListener("click", (event) => {
       const link = event.target.closest("a[href]");
       if (!isInternalNavigableLink(link)) return;
+      if (link.hasAttribute("data-login-open")) return;
       if (event.defaultPrevented) return;
       if (event.button !== 0) return;
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -68,27 +69,23 @@
       const url = new URL(link.href, window.location.href);
       if (isSamePageHash(url)) return;
 
-      // Trava curta contra disparo duplicado no mesmo link. Isso não bloqueia
-      // navegação normal; só impede dois eventos iguais quase simultâneos vindos
-      // de touch/click, extensão ou duplo evento do navegador.
       const now = Date.now();
-      const key = url.href;
-      if (lastNavigationKey === key && now - lastNavigationAt < 1200) {
+      if (lastNavHref === url.href && now - lastNavAt < 1200) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-      lastNavigationKey = key;
-      lastNavigationAt = now;
+      lastNavHref = url.href;
+      lastNavAt = now;
 
       document.body.classList.add("page-leaving");
     }, true);
 
     window.addEventListener("pageshow", () => {
-      lastNavigationKey = "";
-      lastNavigationAt = 0;
       document.body.classList.remove("page-leaving");
       document.body.classList.add("page-ready");
+      lastNavHref = "";
+      lastNavAt = 0;
     });
   }
 
