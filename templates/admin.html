@@ -1034,7 +1034,8 @@
 </section>
 
 <script>
-(function () {
+window.__ADMIN_LOADED_TAB__ = "{{ loaded_admin_tab|default('admin-dashboard') }}";
+document.addEventListener("DOMContentLoaded", function () {
   const links = document.querySelectorAll(".admin-link");
   const panels = document.querySelectorAll(".admin-panel");
   const openTabButtons = document.querySelectorAll(".admin-open-tab");
@@ -1057,15 +1058,25 @@
     }
   }
 
+  function requestPanel(target) {
+    if (!target) return;
+    const loaded = window.__ADMIN_LOADED_TAB__ || "";
+    if (target !== loaded) {
+      window.location.href = `/admin?tab=${encodeURIComponent(target)}#${encodeURIComponent(target)}`;
+      return;
+    }
+    openPanel(target, { updateHash: true, scroll: true });
+  }
+
   links.forEach((link) => link.addEventListener("click", function () {
-    openPanel(this.getAttribute("data-target"), { updateHash: true, scroll: true });
+    requestPanel(this.getAttribute("data-target"));
   }));
   openTabButtons.forEach((button) => button.addEventListener("click", function () {
-    openPanel(this.getAttribute("data-target"), { updateHash: true, scroll: true });
+    requestPanel(this.getAttribute("data-target"));
   }));
 
-  const initialHash = (window.location.hash || "").replace("#", "");
-  if (initialHash && document.getElementById(initialHash)) openPanel(initialHash, { updateHash: false, scroll: false });
+  const initialTarget = window.__ADMIN_LOADED_TAB__ || (window.location.hash || "").replace("#", "");
+  if (initialTarget && document.getElementById(initialTarget)) openPanel(initialTarget, { updateHash: false, scroll: false });
 
   const scheduleMode = document.getElementById("schedule-mode");
   const minuteField = document.querySelector(".schedule-minutes-field");
@@ -1125,7 +1136,7 @@
       }
     });
   });
-})();
+});
 </script>
 
 <style>
@@ -1241,7 +1252,8 @@
 </style>
 
 <script>
-(function () {
+window.__ADMIN_LOADED_TAB__ = "{{ loaded_admin_tab|default('admin-dashboard') }}";
+document.addEventListener("DOMContentLoaded", function () {
   const priceInput = document.querySelector('input[name="source_price"]');
   const targetInput = document.querySelector('input[name="turbo_fee_target_percent"]');
   const previewText = document.getElementById("turbo-preview-text");
@@ -1266,7 +1278,7 @@
   priceInput?.addEventListener("input", updateTurboPreview);
   targetInput?.addEventListener("input", updateTurboPreview);
   updateTurboPreview();
-})();
+});
 </script>
 
 {% endblock %}

@@ -427,6 +427,15 @@ class AuctionStateHTTPException(HTTPException):
 
 @app.middleware("http")
 async def add_static_cache_headers(request: Request, call_next):
+    # Proteção contra prefetch pesado: alguns navegadores/scripts podem pedir
+    # páginas completas antes do clique. Em rotas dinâmicas isso duplicava o
+    # trabalho do Railway/Postgres. Para prefetch explícito, respondemos leve.
+    purpose = (request.headers.get("purpose") or request.headers.get("sec-purpose") or "").lower()
+    if request.method == "GET" and (request.headers.get("x-prefetch") == "1" or "prefetch" in purpose):
+        path = request.url.path or "/"
+        if not path.startswith("/static/") and not path.startswith("/api/") and not path.startswith("/ws/"):
+            return HTMLResponse("", status_code=204)
+
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
@@ -3488,10 +3497,12 @@ def my_account(request: Request):
                 "stats": stats,
                 "pending_orders": pending,
                 "latest_orders": latest,
-                "wallet_transactions": db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(30).all(),
-                "withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id == user.id).order_by(desc(WithdrawalRequest.created_at)).limit(20).all(),
-                "tickets": db.query(SupportTicket).filter(SupportTicket.user_id == user.id).order_by(desc(SupportTicket.created_at)).limit(20).all(),
-                "orders_raw": won_orders,
+                # Dashboard rápido: extratos, saques, chamados e lista bruta de pedidos
+                # são carregados nas rotas específicas (/comprovantes, /ganhos etc.).
+                "wallet_transactions": [],
+                "withdrawals": [],
+                "tickets": [],
+                "orders_raw": [],
                 "account_status_label": account_status_label(user),
             },
         )
@@ -3525,16 +3536,9 @@ def my_receipts(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(80).all()
-        orders = (
-            db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
-            .filter(WinnerOrder.user_id == user.id)
-            .order_by(desc(WinnerOrder.created_at))
-            .limit(80)
-            .all()
-        )
-        audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(80).all()
+        transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(100).all()
+        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(100).all()
+        audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(100).all()
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", "wallet_transactions": transactions, "orders_raw": orders, "audit_logs": audits})
     finally:
         db.close()
@@ -3587,48 +3591,25 @@ def my_participations(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-
-        # Consulta agregada: evita carregar todos os lances do usuário e evita N+1
-        # em bid.auction. Esta tela é uma das que mais pesava quando o usuário
-        # tinha muitas participações.
-        rows = (
-            db.query(
-                Bid.auction_id.label("auction_id"),
-                func.count(Bid.id).label("total_bids"),
-                func.coalesce(func.sum(Bid.bid_value), 0.0).label("total_spent"),
-                func.max(Bid.created_at).label("last_activity"),
-                AuctionItem.title.label("title"),
-                AuctionItem.image_url.label("image_url"),
-                AuctionItem.status.label("status"),
-                AuctionItem.winner_user_id.label("winner_user_id"),
-            )
-            .join(AuctionItem, AuctionItem.id == Bid.auction_id)
-            .filter(Bid.user_id == user.id)
-            .group_by(
-                Bid.auction_id,
-                AuctionItem.title,
-                AuctionItem.image_url,
-                AuctionItem.status,
-                AuctionItem.winner_user_id,
-            )
-            .order_by(desc(func.max(Bid.created_at)))
-            .limit(120)
-            .all()
-        )
-
-        data = [
-            {
-                "auction_id": row.auction_id,
-                "title": row.title,
-                "image_url": safe_image_url(row.image_url),
-                "status": public_display_status(row.status),
-                "total_bids": int(row.total_bids or 0),
-                "total_spent": BR(row.total_spent or 0.0),
-                "won": row.winner_user_id == user.id,
-                "last_activity": fmt_br_datetime(row.last_activity),
-            }
-            for row in rows
-        ]
+        bids = db.query(Bid).filter(Bid.user_id == user.id).order_by(desc(Bid.created_at)).all()
+        grouped = {}
+        for bid in bids:
+            aid = bid.auction_id
+            if aid not in grouped:
+                item = bid.auction
+                grouped[aid] = {
+                    "auction_id": aid,
+                    "title": item.title,
+                    "image_url": safe_image_url(item.image_url),
+                    "status": public_display_status(item.status),
+                    "total_bids": 0,
+                    "total_spent": 0.0,
+                    "won": item.winner_user_id == user.id,
+                    "last_activity": bid.created_at.strftime("%d/%m/%Y %H:%M"),
+                }
+            grouped[aid]["total_bids"] += 1
+            grouped[aid]["total_spent"] = BR(grouped[aid]["total_spent"] + bid.bid_value)
+        data = list(grouped.values())
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "participations", "items": data})
     finally:
         db.close()
@@ -3639,14 +3620,7 @@ def my_wins(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        orders = (
-            db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
-            .filter(WinnerOrder.user_id == user.id)
-            .order_by(desc(WinnerOrder.created_at))
-            .limit(120)
-            .all()
-        )
+        orders = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).all()
         data = [build_order_card(x) for x in orders]
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wins", "orders": data})
     finally:
@@ -3772,10 +3746,8 @@ def my_expired_orders(request: Request):
         user = require_user(request, db)
         orders = (
             db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "expired")
             .order_by(desc(WinnerOrder.created_at))
-            .limit(120)
             .all()
         )
         data = [build_order_card(x) for x in orders]
@@ -3872,53 +3844,147 @@ def admin_dashboard(request: Request):
 
         if not admin:
             return RedirectResponse("/login", status_code=303)
-
         if admin.is_banned:
             return RedirectResponse("/login", status_code=303)
-
         if not admin.is_admin:
             return RedirectResponse("/", status_code=303)
 
         is_super_admin = bool(admin.is_superadmin)
+        allowed_tabs = {
+            "admin-product", "admin-returned", "admin-auctions", "admin-finished",
+            "admin-shipping", "admin-tickets", "admin-suggestions",
+            "admin-search-orders", "admin-moderation",
+        }
+        if is_super_admin:
+            allowed_tabs.update({
+                "admin-dashboard", "admin-cashflow", "admin-pending-payments",
+                "admin-users", "admin-identity-pending", "admin-withdrawals", "admin-audit",
+            })
+        default_tab = "admin-dashboard" if is_super_admin else "admin-product"
+        selected_tab = (request.query_params.get("tab") or default_tab).strip()
+        if selected_tab not in allowed_tabs:
+            selected_tab = default_tab
 
         search = (request.query_params.get("q") or "").strip()
-        users_query = db.query(User)
-        if search:
-            like = f"%{search}%"
-            users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-        users = users_query.order_by(desc(User.created_at)).limit(40).all() if is_super_admin else []
-        moderation_users = users_query.order_by(desc(User.created_at)).limit(80).all()
-        identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all() if is_super_admin else []
-        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(30).all()
-        for item in items:
-            item.collected_percent = auction_progress_percent(item)
-            item.cash_reserved = auction_cash_reserved_before_payment(item)
-            item.expected_total_if_paid = auction_total_if_paid(item)
-            item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
-        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(30).all()
-        pending_payment_orders = [o for o in orders if o.status == "pending_payment"]
-        shipping_orders = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
-        consultation_orders = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
-        withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all() if is_super_admin else []
-        support_tickets = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(25).all()
-        admin_order_cards = build_admin_order_cards(db, orders)
-        returned_items = build_returned_items(db)
-        finance = build_finance_dashboard(db) if is_super_admin else {}
-        cashflow_movements = build_cashflow_movements(db) if is_super_admin else []
-        auction_results = build_auction_results(db) if is_super_admin else []
-        stats = {
-            "users": db.query(User).count(),
-            "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
-            "scheduled": db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).count(),
-            "pending_payment": len(pending_payment_orders),
-            "completed": db.query(AuctionItem).filter(AuctionItem.status.in_(["ended"])).count(),
-            "pending_shipping": len(shipping_orders),
-            "active_users": db.query(User).filter(User.is_banned == False).count(),
-            "identity_pending": db.query(User).filter(User.identity_status == "pending").count(),
-            "pending_withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").count(),
-            "open_tickets": db.query(SupportTicket).filter(SupportTicket.status.in_(["open", "in_review", "dispute"])).count(),
-            "returned_products": len(returned_items),
-        }
+
+        # Valores padrão leves: o template continua funcionando, mas a rota não
+        # carrega dados de todas as abas escondidas antes do usuário clicar.
+        users: list[User] = []
+        moderation_users: list[User] = []
+        identity_pending_users: list[User] = []
+        items: list[AuctionItem] = []
+        orders: list[WinnerOrder] = []
+        pending_payment_orders: list[WinnerOrder] = []
+        shipping_orders: list[WinnerOrder] = []
+        consultation_orders: list[WinnerOrder] = []
+        withdrawal_requests: list[WithdrawalRequest] = []
+        support_tickets: list[SupportTicket] = []
+        admin_order_cards: list[dict] = []
+        returned_items: list[dict] = []
+        finance: dict = {}
+        cashflow_movements: list[dict] = []
+        auction_results: list[dict] = []
+        audit_logs: list[AuditLog] = []
+        recent_chat_messages: list[ChatMessage] = []
+        finished_auctions: list[dict] = []
+        suggestion_stats: list[dict] = []
+        user_audit: dict = {}
+
+        def query_orders(limit: int = 30) -> list[WinnerOrder]:
+            return (
+                db.query(WinnerOrder)
+                .options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user))
+                .order_by(desc(WinnerOrder.created_at))
+                .limit(limit)
+                .all()
+            )
+
+        def query_items() -> list[AuctionItem]:
+            rows = (
+                db.query(AuctionItem)
+                .filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"]))
+                .order_by(desc(AuctionItem.created_at))
+                .limit(30)
+                .all()
+            )
+            for item in rows:
+                item.collected_percent = auction_progress_percent(item)
+                item.cash_reserved = auction_cash_reserved_before_payment(item)
+                item.expected_total_if_paid = auction_total_if_paid(item)
+                item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
+            return rows
+
+        # Dashboard do superadmin: carrega apenas indicadores e financeiro resumido.
+        if selected_tab in {"admin-dashboard", "admin-cashflow"} and is_super_admin:
+            finance = build_finance_dashboard(db)
+            if selected_tab == "admin-cashflow":
+                cashflow_movements = build_cashflow_movements(db)
+                auction_results = build_auction_results(db)
+
+        if selected_tab == "admin-product":
+            pass
+        elif selected_tab == "admin-returned":
+            returned_items = build_returned_items(db)
+        elif selected_tab == "admin-auctions":
+            items = query_items()
+        elif selected_tab == "admin-finished":
+            finished_auctions = build_finished_auctions(db)
+        elif selected_tab == "admin-pending-payments" and is_super_admin:
+            orders = query_orders(40)
+            pending_payment_orders = [o for o in orders if o.status == "pending_payment"]
+        elif selected_tab == "admin-shipping":
+            orders = query_orders(40)
+            shipping_orders = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
+        elif selected_tab == "admin-search-orders":
+            orders = query_orders(40)
+            consultation_orders = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
+            admin_order_cards = build_admin_order_cards(db, orders)
+        elif selected_tab == "admin-users" and is_super_admin:
+            users_query = db.query(User)
+            if search:
+                like = f"%{search}%"
+                users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
+            users = users_query.order_by(desc(User.created_at)).limit(40).all()
+            user_audit = user_audit_map(db, users)
+        elif selected_tab == "admin-identity-pending" and is_super_admin:
+            identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all()
+        elif selected_tab == "admin-withdrawals" and is_super_admin:
+            withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all()
+        elif selected_tab == "admin-tickets":
+            support_tickets = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(25).all()
+        elif selected_tab == "admin-suggestions":
+            suggestion_stats = suggestion_vote_stats(db)
+        elif selected_tab == "admin-audit" and is_super_admin:
+            audit_logs = db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all()
+        elif selected_tab == "admin-moderation":
+            recent_chat_messages = db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(15).all()
+            moderation_users = db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all()
+
+        # Contadores são mantidos, mas só no dashboard completo. Nas demais abas,
+        # evitamos vários COUNT(*) que atrasavam a primeira pintura da página.
+        if selected_tab in {"admin-dashboard", "admin-cashflow"}:
+            returned_count = len(build_returned_items(db)) if is_super_admin else 0
+            stats = {
+                "users": db.query(User).count(),
+                "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
+                "scheduled": db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).count(),
+                "pending_payment": db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").count(),
+                "completed": db.query(AuctionItem).filter(AuctionItem.status.in_(["ended"])).count(),
+                "pending_shipping": db.query(WinnerOrder).filter(WinnerOrder.status.in_(["paid", "processing", "purchased"])).count(),
+                "active_users": db.query(User).filter(User.is_banned == False).count(),
+                "identity_pending": db.query(User).filter(User.identity_status == "pending").count(),
+                "pending_withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").count(),
+                "open_tickets": db.query(SupportTicket).filter(SupportTicket.status.in_(["open", "in_review", "dispute"])).count(),
+                "returned_products": returned_count,
+            }
+        else:
+            stats = {
+                "users": "—", "live": "—", "scheduled": "—", "pending_payment": "—",
+                "completed": "—", "pending_shipping": "—", "active_users": "—",
+                "identity_pending": "—", "pending_withdrawals": "—", "open_tickets": "—",
+                "returned_products": "—",
+            }
+
         return templates.TemplateResponse(
             "admin.html",
             {
@@ -3936,19 +4002,19 @@ def admin_dashboard(request: Request):
                 "consultation_orders": consultation_orders,
                 "withdrawal_requests": withdrawal_requests,
                 "support_tickets": support_tickets,
-                "user_audit": user_audit_map(db, users) if is_super_admin else {},
-                "audit_logs": db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all() if is_super_admin else [],
+                "user_audit": user_audit,
+                "audit_logs": audit_logs,
                 "search": search,
-                "finished_auctions": build_finished_auctions(db),
+                "finished_auctions": finished_auctions,
                 "returned_items": returned_items,
                 "finance": finance,
                 "cashflow_movements": cashflow_movements,
                 "auction_results": auction_results,
-                "recent_chat_messages": db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(15).all(),
-                "moderation_users": db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all(),
+                "recent_chat_messages": recent_chat_messages,
                 "payment_deadline_minutes": PAYMENT_DEADLINE_MINUTES,
-                "suggestion_vote_stats": suggestion_vote_stats(db),
+                "suggestion_vote_stats": suggestion_stats,
                 "is_super_admin": is_super_admin,
+                "loaded_admin_tab": selected_tab,
             },
         )
     finally:
