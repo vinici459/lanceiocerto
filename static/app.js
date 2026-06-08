@@ -1,6 +1,8 @@
 (function () {
   "use strict";
 
+  const NAV_CACHE_FIX_VERSION = "20260608-nav-cache-v2";
+
   function onReady(callback) {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", callback, { once: true });

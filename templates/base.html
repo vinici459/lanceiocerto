@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lancei o Certo</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}" />
   {% block extra_head %}{% endblock %}
 
   <style>
@@ -59,6 +59,7 @@
       transition: 0.2s ease;
     }
   </style>
+  <!-- NAV-CACHE-FIX: static assets versioned to avoid stale app.js/style.css after deploy -->
 </head>
 
 <body>
@@ -66,7 +67,7 @@
 <header class="topbar">
   <div class="container topbar-inner">
 
-    <a href="/" class="brand" aria-label="Lancei o Certo" data-prefetch>
+    <a href="/" class="brand" aria-label="Lancei o Certo">
       <span class="logo-mark">
         <span class="logo-letters">LC</span>
       </span>
@@ -74,13 +75,13 @@
     </a>
 
     <nav class="nav">
-      <a href="/" data-prefetch>Início</a>
+      <a href="/">Início</a>
 
       {% if user %}
-        <a href="/minha-conta" data-prefetch>Minha Conta</a>
+        <a href="/minha-conta">Minha Conta</a>
 
         {% if user.is_admin %}
-          <a href="/admin" data-prefetch>Painel Admin</a>
+          <a href="/admin">Painel Admin</a>
         {% endif %}
 
         <div class="user-box">
@@ -93,7 +94,7 @@
         <a href="/logout">Sair</a>
       {% else %}
         <a href="/login" data-login-open>Entrar</a>
-        <a href="/register" class="btn small" data-prefetch>Criar conta</a>
+        <a href="/register" class="btn small">Criar conta</a>
       {% endif %}
     </nav>
 
@@ -104,7 +105,7 @@
   {% block content %}{% endblock %}
 </main>
 
-<script src="/static/app.js" defer></script>
+<script src="/static/app.js?v={{ asset_version }}" defer></script>
 {% block extra_scripts %}{% endblock %}
 
 

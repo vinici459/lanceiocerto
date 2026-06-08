@@ -408,6 +408,8 @@ class ConnectionManager:
 app = FastAPI(title=APP_NAME)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 templates = Jinja2Templates(directory="templates")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260608-nav-cache-v2")
+templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
