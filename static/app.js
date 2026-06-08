@@ -45,14 +45,27 @@
 
   function initNavigationPrefetch() {
     // Desativado de propósito.
-    // O prefetch de documentos estava gerando várias requisições GET antes do clique
-    // e, no Railway, isso deixava a navegação mais lenta em vez de ajudar.
-    // Mantemos a função para compatibilidade, mas ela não cria <link rel="prefetch">
-    // nem faz fetch() manual.
+    // O navegador/Chrome estava disparando várias requisições GET antes do clique
+    // real. Como o backend ainda tem páginas dinâmicas, isso piorava a sensação
+    // de lentidão e aumentava carga. A velocidade agora vem do cache no servidor.
   }
+
 
   function initPageTransitions() {
     document.body.classList.add("page-ready");
+
+    document.addEventListener("click", (event) => {
+      const link = event.target.closest("a[href]");
+      if (!isInternalNavigableLink(link)) return;
+      if (event.defaultPrevented) return;
+      if (event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const url = new URL(link.href, window.location.href);
+      if (isSamePageHash(url)) return;
+
+      document.body.classList.add("page-leaving");
+    }, true);
 
     window.addEventListener("pageshow", () => {
       document.body.classList.remove("page-leaving");

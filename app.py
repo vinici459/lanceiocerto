@@ -8,7 +8,6 @@ import re
 import secrets
 import shutil
 import threading
-import time
 import base64
 import hashlib
 import hmac
@@ -416,8 +415,6 @@ SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 SUGGESTION_USER_VOTE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 WITHDRAWAL_USER_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
 BID_COOLDOWN_MEMORY: dict[str, datetime] = {}
-USER_STATS_CACHE: dict[int, tuple[datetime, dict]] = {}
-USER_STATS_CACHE_TTL_SECONDS = 20
 
 
 class AuctionStateHTTPException(HTTPException):
@@ -430,21 +427,9 @@ class AuctionStateHTTPException(HTTPException):
 
 @app.middleware("http")
 async def add_static_cache_headers(request: Request, call_next):
-    start = time.perf_counter()
     response = await call_next(request)
-    path = request.url.path
-
-    if path.startswith("/static/"):
+    if request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
-    else:
-        # Páginas com usuário/saldo/documentos não devem ser cacheadas pelo navegador.
-        response.headers.setdefault("Cache-Control", "no-store")
-
-    # Diagnóstico leve para validar a navegação em produção sem poluir demais.
-    if path in {"/", "/admin", "/login"} or path.startswith("/minha-conta"):
-        elapsed_ms = (time.perf_counter() - start) * 1000
-        print(f"[NAV-REQ] {request.method} {path} status={response.status_code} total={elapsed_ms:.1f}ms")
-
     return response
 SESSIONS: dict[str, int] = {}
 BANNED_WORDS = {
@@ -613,8 +598,14 @@ SUGGESTION_PRODUCTS = PRODUCT_SUGGESTION_CATALOG
 # Caches leves para navegação pública/admin. Não guardam saldo nem dados sensíveis.
 # Servem para evitar recalcular blocos pesados em todo clique de navegação.
 SUGGESTION_STATS_CACHE: dict[str, object] = {"expires_at": None, "value": []}
+HOME_PUBLIC_CACHE: dict[str, object] = {"expires_at": None, "value": None}
+ACCOUNT_DASHBOARD_CACHE: dict[int, dict[str, object]] = {}
+ADMIN_TAB_CACHE: dict[str, dict[str, object]] = {}
 HOME_SYNC_LAST_AT: Optional[datetime] = None
-HOME_SYNC_INTERVAL_SECONDS = 15
+HOME_SYNC_INTERVAL_SECONDS = 30
+HOME_PUBLIC_CACHE_SECONDS = 20
+ACCOUNT_DASHBOARD_CACHE_SECONDS = 20
+ADMIN_TAB_CACHE_SECONDS = 25
 
 
 def BR(v: float) -> float:
@@ -1642,19 +1633,12 @@ def public_auction_card_payload(item: AuctionItem) -> dict:
 
 
 def user_stats(db: Session, user: User) -> dict:
-    """Resumo da conta com cache curto.
+    """Resumo da conta com poucas idas ao banco.
 
-    A navegação estava lenta porque cada abertura de /minha-conta refazia
-    contagens no banco remoto. Como esses números são apenas resumo visual,
-    usamos cache curto por usuário. Lances/saldo continuam validados no backend.
+    A versão anterior fazia 5 contagens separadas. Em ambiente remoto isso
+    custava mais de 1 segundo só para abrir /minha-conta. Aqui consolidamos
+    os lances em uma consulta e os pedidos em outra.
     """
-    now = datetime.utcnow()
-    cached = USER_STATS_CACHE.get(user.id)
-    if cached:
-        expires_at, value = cached
-        if expires_at > now:
-            return dict(value)
-
     bid_row = (
         db.query(
             func.count(Bid.id),
@@ -1676,15 +1660,13 @@ def user_stats(db: Session, user: User) -> dict:
     won = sum(by_status.values())
     pending = by_status.get("pending_payment", 0)
     expired = by_status.get("expired", 0)
-    value = {
+    return {
         "bids_total": bids_total,
         "distinct_auctions": distinct_auctions,
         "won": won,
         "pending": pending,
         "expired": expired,
     }
-    USER_STATS_CACHE[user.id] = (now + timedelta(seconds=USER_STATS_CACHE_TTL_SECONDS), dict(value))
-    return value
 
 
 
@@ -2556,45 +2538,111 @@ def should_sync_home_states() -> bool:
     return True
 
 
+def cache_is_valid(entry: Optional[dict], ttl_seconds: int) -> bool:
+    if not entry:
+        return False
+    created_at = entry.get("created_at")
+    return isinstance(created_at, datetime) and (datetime.utcnow() - created_at).total_seconds() < ttl_seconds
+
+
+def cached_home_public_payload(db: Session) -> dict:
+    """Dados públicos da Home com cache curto.
+
+    Os logs mostraram que a Home gastava 2–4s repetindo as mesmas consultas
+    em cada clique. Este cache guarda somente dados públicos e por poucos
+    segundos, sem saldo, sessão ou informações privadas.
+    """
+    cached = HOME_PUBLIC_CACHE.get("value")
+    expires_at = HOME_PUBLIC_CACHE.get("expires_at")
+    now = datetime.utcnow()
+    if cached is not None and isinstance(expires_at, datetime) and expires_at > now:
+        return dict(cached)
+
+    if should_sync_home_states() and sync_due_auction_states(db):
+        db.commit()
+
+    live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(12).all()
+    upcoming_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(12).all()
+    ended_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(12).all()
+    suggestion_products = cached_suggestion_vote_stats(db, ttl_seconds=90)
+    week_count = db.query(ProductSuggestionNomination).filter(ProductSuggestionNomination.week_start == current_week_start_utc()).count()
+
+    payload = {
+        "live_items": [public_auction_card_payload(x) for x in live_items],
+        "upcoming_items": [public_auction_card_payload(x) for x in upcoming_items],
+        "ended_items": [public_auction_card_payload(x) for x in ended_items],
+        "suggestion_products": suggestion_products,
+        "suggestion_catalog": PRODUCT_SUGGESTION_CATALOG,
+        "suggestion_categories": suggestion_categories(),
+        "suggestion_week_limit": SUGGESTION_WEEK_LIMIT,
+        "suggestion_week_count": week_count,
+        "fee_percent": "1%",
+    }
+    HOME_PUBLIC_CACHE["value"] = payload
+    HOME_PUBLIC_CACHE["expires_at"] = now + timedelta(seconds=HOME_PUBLIC_CACHE_SECONDS)
+    return dict(payload)
+
+
+def cached_account_dashboard_data(db: Session, user: User) -> dict:
+    cached = ACCOUNT_DASHBOARD_CACHE.get(user.id)
+    if cache_is_valid(cached, ACCOUNT_DASHBOARD_CACHE_SECONDS):
+        return dict(cached.get("value") or {})
+
+    stats = user_stats(db, user)
+    pending_orders = (
+        db.query(WinnerOrder)
+        .options(selectinload(WinnerOrder.auction))
+        .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
+        .order_by(desc(WinnerOrder.created_at))
+        .limit(3)
+        .all()
+    )
+    won_orders = (
+        db.query(WinnerOrder)
+        .options(selectinload(WinnerOrder.auction))
+        .filter(WinnerOrder.user_id == user.id)
+        .order_by(desc(WinnerOrder.created_at))
+        .limit(5)
+        .all()
+    )
+    value = {
+        "stats": stats,
+        "pending_orders": [build_order_card(x) for x in pending_orders[:3]],
+        "latest_orders": [build_order_card(x) for x in won_orders[:5]],
+        "orders_raw": [],
+    }
+    ACCOUNT_DASHBOARD_CACHE[user.id] = {"created_at": datetime.utcnow(), "value": value}
+    return dict(value)
+
+
+def cached_admin_tab_value(key: str, builder, ttl_seconds: int = ADMIN_TAB_CACHE_SECONDS):
+    cached = ADMIN_TAB_CACHE.get(key)
+    if cache_is_valid(cached, ttl_seconds):
+        return cached.get("value")
+    value = builder()
+    ADMIN_TAB_CACHE[key] = {"created_at": datetime.utcnow(), "value": value}
+    return value
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     db = SessionLocal()
     try:
         user = current_user(request, db)
+        ctx = cached_home_public_payload(db)
 
-        # Sincronização de estados é importante, mas não precisa rodar em toda
-        # navegação da Home. No Railway cada consulta remota pesa; este throttle
-        # reduz travadas sem mexer nos lances nem no websocket da página interna.
-        if should_sync_home_states() and sync_due_auction_states(db):
-            db.commit()
+        # Dados específicos do usuário ficam fora do cache público.
+        if user:
+            ctx["user_week_nomination"] = user_week_nomination(db, user)
+            ctx["today_suggestion_vote"] = user_today_suggestion_vote(db, user)
+            ctx["today_suggestion_nomination"] = user_today_nomination(db, user)
+        else:
+            ctx["user_week_nomination"] = None
+            ctx["today_suggestion_vote"] = None
+            ctx["today_suggestion_nomination"] = None
 
-        live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(12).all()
-        upcoming_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(12).all()
-        ended_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(12).all()
-
-        # Bloco de indicação com cache curto: era o maior custo da Home nos logs.
-        suggestion_products = cached_suggestion_vote_stats(db)
-        week_nominations = current_week_nominations(db)
-
-        return templates.TemplateResponse(
-            "index.html",
-            {
-                "request": request,
-                "user": user,
-                "live_items": [public_auction_card_payload(x) for x in live_items],
-                "upcoming_items": [public_auction_card_payload(x) for x in upcoming_items],
-                "ended_items": [public_auction_card_payload(x) for x in ended_items],
-                "suggestion_products": suggestion_products,
-                "suggestion_catalog": PRODUCT_SUGGESTION_CATALOG,
-                "suggestion_categories": suggestion_categories(),
-                "suggestion_week_limit": SUGGESTION_WEEK_LIMIT,
-                "suggestion_week_count": len(week_nominations),
-                "user_week_nomination": user_week_nomination(db, user),
-                "today_suggestion_vote": user_today_suggestion_vote(db, user),
-                "today_suggestion_nomination": user_today_nomination(db, user),
-                "fee_percent": "1%",
-            },
-        )
+        ctx.update({"request": request, "user": user})
+        return templates.TemplateResponse("index.html", ctx)
     finally:
         db.close()
 
@@ -3538,42 +3586,20 @@ def my_account(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        stats = user_stats(db, user)
-
-        # Resumo inicial leve: a página principal da conta não deve buscar todo
-        # o histórico, saques e chamados. As seções específicas continuam nas
-        # rotas próprias do menu lateral.
-        pending_orders = (
-            db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
-            .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
-            .order_by(desc(WinnerOrder.created_at))
-            .limit(3)
-            .all()
-        )
-        won_orders = (
-            db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
-            .filter(WinnerOrder.user_id == user.id)
-            .order_by(desc(WinnerOrder.created_at))
-            .limit(5)
-            .all()
-        )
-        latest = [build_order_card(x) for x in won_orders[:5]]
-        pending = [build_order_card(x) for x in pending_orders[:3]]
+        data = cached_account_dashboard_data(db, user)
         return templates.TemplateResponse(
             "account_pages.html",
             {
                 "request": request,
                 "user": user,
                 "section": "dashboard",
-                "stats": stats,
-                "pending_orders": pending,
-                "latest_orders": latest,
+                "stats": data.get("stats", {}),
+                "pending_orders": data.get("pending_orders", []),
+                "latest_orders": data.get("latest_orders", []),
                 "wallet_transactions": [],
                 "withdrawals": [],
                 "tickets": [],
-                "orders_raw": won_orders,
+                "orders_raw": data.get("orders_raw", []),
                 "account_status_label": account_status_label(user),
             },
         )
@@ -4006,14 +4032,25 @@ def admin_dashboard(request: Request):
         # Produto é a aba mais leve e padrão do admin operacional. Não precisa
         # carregar financeiro, auditoria, usuários nem pedidos.
         if active_panel == "admin-dashboard":
-            ctx["stats"] = admin_light_stats(db, is_super_admin)
+            ctx["stats"] = cached_admin_tab_value(
+                f"stats:{is_super_admin}",
+                lambda: admin_light_stats(db, is_super_admin),
+                ttl_seconds=20,
+            )
         elif active_panel == "admin-cashflow" and is_super_admin:
-            ctx["finance"] = build_finance_dashboard(db)
-            ctx["cashflow_movements"] = build_cashflow_movements(db)
-            ctx["auction_results"] = build_auction_results(db)
-            ctx["stats"] = admin_light_stats(db, is_super_admin)
+            finance_bundle = cached_admin_tab_value(
+                "cashflow:super",
+                lambda: {
+                    "finance": build_finance_dashboard(db),
+                    "cashflow_movements": build_cashflow_movements(db),
+                    "auction_results": build_auction_results(db),
+                    "stats": admin_light_stats(db, is_super_admin),
+                },
+                ttl_seconds=25,
+            )
+            ctx.update(finance_bundle)
         elif active_panel == "admin-returned":
-            returned_items = build_returned_items(db)
+            returned_items = cached_admin_tab_value("returned_items", lambda: build_returned_items(db), ttl_seconds=20)
             ctx["returned_items"] = returned_items
             ctx["stats"] = admin_light_stats(db, is_super_admin, returned_count=len(returned_items))
         elif active_panel == "admin-auctions":
@@ -4032,7 +4069,7 @@ def admin_dashboard(request: Request):
             ctx["shipping_orders"] = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
             ctx["consultation_orders"] = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
         elif active_panel == "admin-finished":
-            ctx["finished_auctions"] = build_finished_auctions(db)
+            ctx["finished_auctions"] = cached_admin_tab_value("finished_auctions", lambda: build_finished_auctions(db), ttl_seconds=20)
         elif active_panel == "admin-users" and is_super_admin:
             users_query = db.query(User)
             if search:
