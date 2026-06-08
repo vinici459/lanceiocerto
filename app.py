@@ -468,13 +468,30 @@ def is_speculative_navigation_request(request: Request) -> bool:
 @app.middleware("http")
 async def navigation_guard_and_static_cache(request: Request, call_next):
     if is_speculative_navigation_request(request):
-        print(
-            f"[NAV-SKIP] {request.method} {request.url.path} speculative=1 "
-            f"purpose={request.headers.get('purpose') or request.headers.get('sec-purpose') or '-'} "
-            f"mode={request.headers.get('sec-fetch-mode') or '-'} "
-            f"dest={request.headers.get('sec-fetch-dest') or '-'}"
+        now = datetime.utcnow()
+        skip_key = (
+            f"{request.method}:{request.url.path}:"
+            f"{request.headers.get('purpose') or request.headers.get('sec-purpose') or '-'}:"
+            f"{request.headers.get('sec-fetch-mode') or '-'}:"
+            f"{request.headers.get('sec-fetch-dest') or '-'}"
         )
-        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        last_logged = NAV_SKIP_LOG_MEMORY.get(skip_key)
+        if not last_logged or (now - last_logged).total_seconds() >= NAV_SKIP_LOG_INTERVAL_SECONDS:
+            NAV_SKIP_LOG_MEMORY[skip_key] = now
+            print(
+                f"[NAV-SKIP] {request.method} {request.url.path} speculative=1 "
+                f"purpose={request.headers.get('purpose') or request.headers.get('sec-purpose') or '-'} "
+                f"mode={request.headers.get('sec-fetch-mode') or '-'} "
+                f"dest={request.headers.get('sec-fetch-dest') or '-'}"
+            )
+        return Response(
+            status_code=204,
+            headers={
+                "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+                "Pragma": "no-cache",
+                "X-Nav-Skip": "1",
+            },
+        )
 
     import time
     started = time.perf_counter()
@@ -669,6 +686,10 @@ SUGGESTION_STATS_CACHE: dict[str, object] = {"expires_at": None, "value": []}
 NAV_CACHE: dict[str, dict[str, object]] = {}
 HOME_SYNC_LAST_AT: Optional[datetime] = None
 HOME_SYNC_INTERVAL_SECONDS = 15
+# Evita poluir os logs com dezenas de prefetch/prerender bloqueados pelo navegador.
+# O bloqueio continua ativo, mas o mesmo caminho só é logado em janela curta.
+NAV_SKIP_LOG_MEMORY: dict[str, datetime] = {}
+NAV_SKIP_LOG_INTERVAL_SECONDS = 20
 
 
 def nav_cache_get(key: str):
