@@ -8,7 +8,6 @@ import re
 import secrets
 import shutil
 import threading
-import time
 import base64
 import hashlib
 import hmac
@@ -66,45 +65,6 @@ if DATABASE_URL.startswith("sqlite"):
 else:
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
-
-
-# -----------------------------------------------------------------------------
-# Diagnóstico leve de navegação/rotas lentas
-# -----------------------------------------------------------------------------
-# Ative/desative no Railway com NAV_PROFILING=1/0. Mantive ligado por padrão
-# porque o custo é mínimo e ajuda a separar lentidão de servidor, banco e template.
-NAV_PROFILING_ENABLED = os.getenv("NAV_PROFILING", "1").strip().lower() not in {"0", "false", "no", "off"}
-NAV_PROFILE_PATHS = ("/", "/minha-conta", "/admin", "/login")
-
-
-def should_profile_path(path: str) -> bool:
-    if not NAV_PROFILING_ENABLED:
-        return False
-    if path.startswith(("/static/", "/api/", "/ws/")):
-        return False
-    return path == "/" or path.startswith(("/minha-conta", "/admin", "/login"))
-
-
-def perf_now() -> float:
-    return time.perf_counter()
-
-
-def perf_step(marks: list[tuple[str, float]], label: str) -> None:
-    if NAV_PROFILING_ENABLED:
-        marks.append((label, perf_now()))
-
-
-def perf_report(route: str, marks: list[tuple[str, float]], request: Optional[Request] = None) -> None:
-    if not NAV_PROFILING_ENABLED or not marks:
-        return
-    total_ms = (marks[-1][1] - marks[0][1]) * 1000
-    parts = []
-    for idx in range(1, len(marks)):
-        label = marks[idx][0]
-        delta_ms = (marks[idx][1] - marks[idx - 1][1]) * 1000
-        parts.append(f"{label}={delta_ms:.1f}ms")
-    prefetch = "1" if request and request.headers.get("x-prefetch") else "0"
-    print(f"[NAV-PERF] route={route} prefetch={prefetch} total={total_ms:.1f}ms | " + " | ".join(parts), flush=True)
 
 
 class Base(DeclarativeBase):
@@ -466,18 +426,6 @@ class AuctionStateHTTPException(HTTPException):
 
 
 @app.middleware("http")
-async def add_navigation_timing_headers(request: Request, call_next):
-    start = perf_now()
-    response = await call_next(request)
-    if should_profile_path(request.url.path):
-        elapsed_ms = (perf_now() - start) * 1000
-        response.headers["X-Nav-Server-Time-Ms"] = f"{elapsed_ms:.1f}"
-        response.headers["Server-Timing"] = f"app;dur={elapsed_ms:.1f}"
-        print(f"[NAV-REQ] {request.method} {request.url.path} status={getattr(response, 'status_code', '?')} total={elapsed_ms:.1f}ms prefetch={'1' if request.headers.get('x-prefetch') else '0'}", flush=True)
-    return response
-
-
-@app.middleware("http")
 async def add_static_cache_headers(request: Request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/static/"):
@@ -647,6 +595,11 @@ PRODUCT_SUGGESTION_CATALOG = [
 # não a lista fixa completa.
 SUGGESTION_PRODUCTS = PRODUCT_SUGGESTION_CATALOG
 
+# Caches leves para navegação pública/admin. Não guardam saldo nem dados sensíveis.
+# Servem para evitar recalcular blocos pesados em todo clique de navegação.
+SUGGESTION_STATS_CACHE: dict[str, object] = {"expires_at": None, "value": []}
+HOME_SYNC_LAST_AT: Optional[datetime] = None
+HOME_SYNC_INTERVAL_SECONDS = 15
 
 
 def BR(v: float) -> float:
@@ -1674,11 +1627,33 @@ def public_auction_card_payload(item: AuctionItem) -> dict:
 
 
 def user_stats(db: Session, user: User) -> dict:
-    bids_total = db.query(Bid).filter(Bid.user_id == user.id).count()
-    distinct_auctions = db.query(Bid.auction_id).filter(Bid.user_id == user.id).distinct().count()
-    won = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id).count()
-    pending = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment").count()
-    expired = db.query(WinnerOrder).filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "expired").count()
+    """Resumo da conta com poucas idas ao banco.
+
+    A versão anterior fazia 5 contagens separadas. Em ambiente remoto isso
+    custava mais de 1 segundo só para abrir /minha-conta. Aqui consolidamos
+    os lances em uma consulta e os pedidos em outra.
+    """
+    bid_row = (
+        db.query(
+            func.count(Bid.id),
+            func.count(func.distinct(Bid.auction_id)),
+        )
+        .filter(Bid.user_id == user.id)
+        .first()
+    )
+    bids_total = int((bid_row[0] if bid_row else 0) or 0)
+    distinct_auctions = int((bid_row[1] if bid_row else 0) or 0)
+
+    order_rows = (
+        db.query(WinnerOrder.status, func.count(WinnerOrder.id))
+        .filter(WinnerOrder.user_id == user.id)
+        .group_by(WinnerOrder.status)
+        .all()
+    )
+    by_status = {status: int(total or 0) for status, total in order_rows}
+    won = sum(by_status.values())
+    pending = by_status.get("pending_payment", 0)
+    expired = by_status.get("expired", 0)
     return {
         "bids_total": bids_total,
         "distinct_auctions": distinct_auctions,
@@ -2532,37 +2507,52 @@ async def auction_watcher():
             db.close()
 
 
+def cached_suggestion_vote_stats(db: Session, ttl_seconds: int = 45) -> list[dict]:
+    """Ranking público com cache curto.
+
+    A indicação da semana não precisa ser recalculada em todo carregamento da
+    Home. O cache é curto para manter a página leve sem perder atualização.
+    """
+    now = datetime.utcnow()
+    expires_at = SUGGESTION_STATS_CACHE.get("expires_at")
+    if isinstance(expires_at, datetime) and expires_at > now:
+        return list(SUGGESTION_STATS_CACHE.get("value") or [])
+    value = suggestion_vote_stats(db)
+    SUGGESTION_STATS_CACHE["value"] = value
+    SUGGESTION_STATS_CACHE["expires_at"] = now + timedelta(seconds=ttl_seconds)
+    return list(value)
+
+
+def should_sync_home_states() -> bool:
+    global HOME_SYNC_LAST_AT
+    now = datetime.utcnow()
+    if HOME_SYNC_LAST_AT and (now - HOME_SYNC_LAST_AT).total_seconds() < HOME_SYNC_INTERVAL_SECONDS:
+        return False
+    HOME_SYNC_LAST_AT = now
+    return True
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    marks = [("start", perf_now())]
     db = SessionLocal()
     try:
-        perf_step(marks, "db_open")
         user = current_user(request, db)
-        perf_step(marks, "current_user")
 
-        # Mantém os cronômetros da vitrine alinhados com a página interna.
-        # Inicia/finaliza leilões que já passaram do horário antes de separar
-        # "Ao vivo", "Próximos" e "Encerrados".
-        if sync_due_auction_states(db):
+        # Sincronização de estados é importante, mas não precisa rodar em toda
+        # navegação da Home. No Railway cada consulta remota pesa; este throttle
+        # reduz travadas sem mexer nos lances nem no websocket da página interna.
+        if should_sync_home_states() and sync_due_auction_states(db):
             db.commit()
-        perf_step(marks, "sync_states")
 
-        # A vitrine não precisa carregar o histórico completo de todos os leilões.
-        # Limitar os cards evita travamentos quando o banco cresce.
         live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(12).all()
-        perf_step(marks, "live_query")
         upcoming_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(12).all()
-        perf_step(marks, "upcoming_query")
         ended_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(12).all()
-        perf_step(marks, "ended_query")
-        suggestion_stats_data = suggestion_vote_stats(db)
-        suggestion_week_count_data = len(current_week_nominations(db))
-        user_week_nomination_data = user_week_nomination(db, user)
-        today_suggestion_vote_data = user_today_suggestion_vote(db, user)
-        today_suggestion_nomination_data = user_today_nomination(db, user)
-        perf_step(marks, "suggestions")
-        response = templates.TemplateResponse(
+
+        # Bloco de indicação com cache curto: era o maior custo da Home nos logs.
+        suggestion_products = cached_suggestion_vote_stats(db)
+        week_nominations = current_week_nominations(db)
+
+        return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
@@ -2570,23 +2560,19 @@ def home(request: Request):
                 "live_items": [public_auction_card_payload(x) for x in live_items],
                 "upcoming_items": [public_auction_card_payload(x) for x in upcoming_items],
                 "ended_items": [public_auction_card_payload(x) for x in ended_items],
-                "suggestion_products": suggestion_stats_data,
+                "suggestion_products": suggestion_products,
                 "suggestion_catalog": PRODUCT_SUGGESTION_CATALOG,
                 "suggestion_categories": suggestion_categories(),
                 "suggestion_week_limit": SUGGESTION_WEEK_LIMIT,
-                "suggestion_week_count": suggestion_week_count_data,
-                "user_week_nomination": user_week_nomination_data,
-                "today_suggestion_vote": today_suggestion_vote_data,
-                "today_suggestion_nomination": today_suggestion_nomination_data,
+                "suggestion_week_count": len(week_nominations),
+                "user_week_nomination": user_week_nomination(db, user),
+                "today_suggestion_vote": user_today_suggestion_vote(db, user),
+                "today_suggestion_nomination": user_today_nomination(db, user),
                 "fee_percent": "1%",
             },
         )
-        perf_step(marks, "template_response")
-        perf_report("/", marks, request)
-        return response
     finally:
         db.close()
-
 
 
 @app.post("/indicacao/indicar")
@@ -3525,42 +3511,33 @@ async def send_chat(request: Request, auction_id: int, message: str = Form(...))
 
 @app.get("/minha-conta", response_class=HTMLResponse)
 def my_account(request: Request):
-    marks = [("start", perf_now())]
     db = SessionLocal()
     try:
-        perf_step(marks, "db_open")
         user = require_user(request, db)
-        perf_step(marks, "require_user")
         stats = user_stats(db, user)
-        perf_step(marks, "user_stats")
+
+        # Resumo inicial leve: a página principal da conta não deve buscar todo
+        # o histórico, saques e chamados. As seções específicas continuam nas
+        # rotas próprias do menu lateral.
         pending_orders = (
             db.query(WinnerOrder)
             .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
             .order_by(desc(WinnerOrder.created_at))
-            .limit(10)
+            .limit(3)
             .all()
         )
-        perf_step(marks, "pending_orders")
         won_orders = (
             db.query(WinnerOrder)
             .options(selectinload(WinnerOrder.auction))
             .filter(WinnerOrder.user_id == user.id)
             .order_by(desc(WinnerOrder.created_at))
-            .limit(30)
+            .limit(5)
             .all()
         )
-        perf_step(marks, "won_orders")
         latest = [build_order_card(x) for x in won_orders[:5]]
         pending = [build_order_card(x) for x in pending_orders[:3]]
-        perf_step(marks, "build_cards")
-        wallet_transactions_data = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(30).all()
-        perf_step(marks, "wallet_transactions")
-        withdrawals_data = db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id == user.id).order_by(desc(WithdrawalRequest.created_at)).limit(20).all()
-        perf_step(marks, "withdrawals")
-        tickets_data = db.query(SupportTicket).filter(SupportTicket.user_id == user.id).order_by(desc(SupportTicket.created_at)).limit(20).all()
-        perf_step(marks, "tickets")
-        response = templates.TemplateResponse(
+        return templates.TemplateResponse(
             "account_pages.html",
             {
                 "request": request,
@@ -3569,16 +3546,13 @@ def my_account(request: Request):
                 "stats": stats,
                 "pending_orders": pending,
                 "latest_orders": latest,
-                "wallet_transactions": wallet_transactions_data,
-                "withdrawals": withdrawals_data,
-                "tickets": tickets_data,
+                "wallet_transactions": [],
+                "withdrawals": [],
+                "tickets": [],
                 "orders_raw": won_orders,
                 "account_status_label": account_status_label(user),
             },
         )
-        perf_step(marks, "template_response")
-        perf_report("/minha-conta", marks, request)
-        return response
     finally:
         db.close()
 
@@ -3909,14 +3883,65 @@ def user_audit_map(db: Session, users: list[User]) -> dict[int, dict]:
     return data
 
 
+def blank_admin_context() -> dict:
+    return {
+        "stats": {
+            "users": 0, "active_users": 0, "live": 0, "scheduled": 0,
+            "pending_payment": 0, "completed": 0, "identity_pending": 0,
+            "pending_withdrawals": 0, "open_tickets": 0, "pending_shipping": 0,
+            "returned_products": 0,
+        },
+        "users": [],
+        "moderation_users": [],
+        "identity_pending_users": [],
+        "items": [],
+        "orders": [],
+        "admin_order_cards": [],
+        "pending_payment_orders": [],
+        "shipping_orders": [],
+        "consultation_orders": [],
+        "withdrawal_requests": [],
+        "support_tickets": [],
+        "user_audit": {},
+        "audit_logs": [],
+        "finished_auctions": [],
+        "returned_items": [],
+        "finance": {},
+        "cashflow_movements": [],
+        "auction_results": [],
+        "recent_chat_messages": [],
+        "suggestion_vote_stats": [],
+    }
+
+
+def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0) -> dict:
+    """Estatísticas mínimas para o painel abrir rápido."""
+    stats = {
+        "users": 0,
+        "active_users": 0,
+        "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
+        "scheduled": db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).count(),
+        "pending_payment": db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").count(),
+        "completed": db.query(AuctionItem).filter(AuctionItem.status == "ended").count(),
+        "pending_shipping": db.query(WinnerOrder).filter(WinnerOrder.status.in_(["paid", "processing", "purchased"])).count(),
+        "identity_pending": 0,
+        "pending_withdrawals": 0,
+        "open_tickets": db.query(SupportTicket).filter(SupportTicket.status.in_(["open", "in_review", "dispute"])).count(),
+        "returned_products": returned_count,
+    }
+    if is_super_admin:
+        stats["users"] = db.query(User).count()
+        stats["active_users"] = db.query(User).filter(User.is_banned == False).count()
+        stats["identity_pending"] = db.query(User).filter(User.identity_status == "pending").count()
+        stats["pending_withdrawals"] = db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").count()
+    return stats
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
-    marks = [("start", perf_now())]
     db = SessionLocal()
     try:
-        perf_step(marks, "db_open")
         admin = current_user(request, db)
-        perf_step(marks, "current_user")
 
         if not admin:
             return RedirectResponse("/login", status_code=303)
@@ -3928,101 +3953,85 @@ def admin_dashboard(request: Request):
             return RedirectResponse("/", status_code=303)
 
         is_super_admin = bool(admin.is_superadmin)
-        perf_step(marks, "auth_checks")
-
-        search = (request.query_params.get("q") or "").strip()
-        users_query = db.query(User)
-        if search:
-            like = f"%{search}%"
-            users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-        users = users_query.order_by(desc(User.created_at)).limit(40).all() if is_super_admin else []
-        moderation_users = users_query.order_by(desc(User.created_at)).limit(80).all()
-        identity_pending_users = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all() if is_super_admin else []
-        perf_step(marks, "users_queries")
-        items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(30).all()
-        for item in items:
-            item.collected_percent = auction_progress_percent(item)
-            item.cash_reserved = auction_cash_reserved_before_payment(item)
-            item.expected_total_if_paid = auction_total_if_paid(item)
-            item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
-        perf_step(marks, "items_queries")
-        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(30).all()
-        pending_payment_orders = [o for o in orders if o.status == "pending_payment"]
-        shipping_orders = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
-        consultation_orders = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
-        perf_step(marks, "orders_query")
-        withdrawal_requests = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all() if is_super_admin else []
-        support_tickets = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(25).all()
-        perf_step(marks, "withdrawals_tickets")
-        admin_order_cards = build_admin_order_cards(db, orders)
-        perf_step(marks, "admin_order_cards")
-        returned_items = build_returned_items(db)
-        perf_step(marks, "returned_items")
-        finance = build_finance_dashboard(db) if is_super_admin else {}
-        perf_step(marks, "finance")
-        cashflow_movements = build_cashflow_movements(db) if is_super_admin else []
-        perf_step(marks, "cashflow_movements")
-        auction_results = build_auction_results(db) if is_super_admin else []
-        perf_step(marks, "auction_results")
-        stats = {
-            "users": db.query(User).count(),
-            "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
-            "scheduled": db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).count(),
-            "pending_payment": len(pending_payment_orders),
-            "completed": db.query(AuctionItem).filter(AuctionItem.status.in_(["ended"])).count(),
-            "pending_shipping": len(shipping_orders),
-            "active_users": db.query(User).filter(User.is_banned == False).count(),
-            "identity_pending": db.query(User).filter(User.identity_status == "pending").count(),
-            "pending_withdrawals": db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").count(),
-            "open_tickets": db.query(SupportTicket).filter(SupportTicket.status.in_(["open", "in_review", "dispute"])).count(),
-            "returned_products": len(returned_items),
+        allowed_tabs = {
+            "admin-product", "admin-returned", "admin-auctions", "admin-finished",
+            "admin-shipping", "admin-tickets", "admin-suggestions",
+            "admin-search-orders", "admin-moderation",
         }
-        perf_step(marks, "stats_counts")
-        finished_auctions_data = build_finished_auctions(db)
-        perf_step(marks, "finished_auctions")
-        user_audit_data = user_audit_map(db, users) if is_super_admin else {}
-        perf_step(marks, "user_audit")
-        audit_logs_data = db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all() if is_super_admin else []
-        perf_step(marks, "audit_logs")
-        recent_chat_messages_data = db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(15).all()
-        moderation_users_data = db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all()
-        suggestion_vote_stats_data = suggestion_vote_stats(db)
-        perf_step(marks, "recent_moderation_suggestions")
-        response = templates.TemplateResponse(
-            "admin.html",
-            {
-                "request": request,
-                "user": admin,
-                "stats": stats,
-                "users": users,
-                "moderation_users": moderation_users,
-                "identity_pending_users": identity_pending_users,
-                "items": items,
-                "orders": orders,
-                "admin_order_cards": admin_order_cards,
-                "pending_payment_orders": pending_payment_orders,
-                "shipping_orders": shipping_orders,
-                "consultation_orders": consultation_orders,
-                "withdrawal_requests": withdrawal_requests,
-                "support_tickets": support_tickets,
-                "user_audit": user_audit_data,
-                "audit_logs": audit_logs_data,
-                "search": search,
-                "finished_auctions": finished_auctions_data,
-                "returned_items": returned_items,
-                "finance": finance,
-                "cashflow_movements": cashflow_movements,
-                "auction_results": auction_results,
-                "recent_chat_messages": recent_chat_messages_data,
-                "moderation_users": moderation_users_data,
-                "payment_deadline_minutes": PAYMENT_DEADLINE_MINUTES,
-                "suggestion_vote_stats": suggestion_vote_stats_data,
-                "is_super_admin": is_super_admin,
-            },
-        )
-        perf_step(marks, "template_response")
-        perf_report("/admin", marks, request)
-        return response
+        if is_super_admin:
+            allowed_tabs.update({
+                "admin-dashboard", "admin-cashflow", "admin-pending-payments",
+                "admin-users", "admin-identity-pending", "admin-withdrawals",
+                "admin-audit",
+            })
+
+        requested_tab = (request.query_params.get("tab") or "").strip()
+        active_panel = requested_tab if requested_tab in allowed_tabs else "admin-product"
+        search = (request.query_params.get("q") or "").strip()
+
+        ctx = blank_admin_context()
+        ctx.update({
+            "request": request,
+            "user": admin,
+            "search": search,
+            "payment_deadline_minutes": PAYMENT_DEADLINE_MINUTES,
+            "is_super_admin": is_super_admin,
+            "admin_active_panel": active_panel,
+        })
+
+        # Produto é a aba mais leve e padrão do admin operacional. Não precisa
+        # carregar financeiro, auditoria, usuários nem pedidos.
+        if active_panel == "admin-dashboard":
+            ctx["stats"] = admin_light_stats(db, is_super_admin)
+        elif active_panel == "admin-cashflow" and is_super_admin:
+            ctx["finance"] = build_finance_dashboard(db)
+            ctx["cashflow_movements"] = build_cashflow_movements(db)
+            ctx["auction_results"] = build_auction_results(db)
+            ctx["stats"] = admin_light_stats(db, is_super_admin)
+        elif active_panel == "admin-returned":
+            returned_items = build_returned_items(db)
+            ctx["returned_items"] = returned_items
+            ctx["stats"] = admin_light_stats(db, is_super_admin, returned_count=len(returned_items))
+        elif active_panel == "admin-auctions":
+            items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(30).all()
+            for item in items:
+                item.collected_percent = auction_progress_percent(item)
+                item.cash_reserved = auction_cash_reserved_before_payment(item)
+                item.expected_total_if_paid = auction_total_if_paid(item)
+                item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
+            ctx["items"] = items
+        elif active_panel in {"admin-pending-payments", "admin-shipping", "admin-search-orders"}:
+            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(40).all()
+            ctx["orders"] = orders
+            ctx["admin_order_cards"] = build_admin_order_cards(db, orders)
+            ctx["pending_payment_orders"] = [o for o in orders if o.status == "pending_payment"]
+            ctx["shipping_orders"] = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
+            ctx["consultation_orders"] = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
+        elif active_panel == "admin-finished":
+            ctx["finished_auctions"] = build_finished_auctions(db)
+        elif active_panel == "admin-users" and is_super_admin:
+            users_query = db.query(User)
+            if search:
+                like = f"%{search}%"
+                users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
+            users = users_query.order_by(desc(User.created_at)).limit(40).all()
+            ctx["users"] = users
+            ctx["user_audit"] = user_audit_map(db, users)
+        elif active_panel == "admin-identity-pending" and is_super_admin:
+            ctx["identity_pending_users"] = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all()
+        elif active_panel == "admin-withdrawals" and is_super_admin:
+            ctx["withdrawal_requests"] = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all()
+        elif active_panel == "admin-tickets":
+            ctx["support_tickets"] = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(25).all()
+        elif active_panel == "admin-suggestions":
+            ctx["suggestion_vote_stats"] = cached_suggestion_vote_stats(db)
+        elif active_panel == "admin-audit" and is_super_admin:
+            ctx["audit_logs"] = db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all()
+            ctx["recent_chat_messages"] = db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(15).all()
+        elif active_panel == "admin-moderation":
+            ctx["moderation_users"] = db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all()
+
+        return templates.TemplateResponse("admin.html", ctx)
     finally:
         db.close()
 

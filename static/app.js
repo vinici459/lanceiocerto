@@ -43,10 +43,37 @@
     );
   }
 
-  // A versão anterior fazia fetch() das páginas ao passar o mouse.
-  // Isso parecia profissional, mas na prática dobrava a carga do Railway:
-  // uma requisição no hover + outra no clique. Agora mantemos apenas
-  // transição visual leve e deixamos o backend carregar sob demanda.
+  function initNavigationPrefetch() {
+    const prefetched = new Set();
+
+    function prefetch(link) {
+      if (!isInternalNavigableLink(link)) return;
+      const url = new URL(link.href, window.location.href);
+      if (isSamePageHash(url)) return;
+      const key = url.href;
+      if (prefetched.has(key)) return;
+      prefetched.add(key);
+
+      try {
+        const hint = document.createElement("link");
+        hint.rel = "prefetch";
+        hint.href = key;
+        hint.as = "document";
+        document.head.appendChild(hint);
+      } catch (_) {}
+
+      // Importante: não fazemos fetch() manual aqui.
+      // Em produção isso duplicava o trabalho do backend: uma requisição de
+      // prefetch + outra navegação real. Mantemos apenas o hint nativo do
+      // navegador, que é mais leve e pode ser ignorado quando a rede estiver ocupada.
+    }
+
+    document.querySelectorAll("a[href]").forEach((link) => {
+      link.addEventListener("pointerenter", () => prefetch(link), { passive: true });
+      link.addEventListener("focus", () => prefetch(link), { passive: true });
+      link.addEventListener("touchstart", () => prefetch(link), { passive: true });
+    });
+  }
 
   function initPageTransitions() {
     document.body.classList.add("page-ready");
@@ -167,6 +194,7 @@
   }
 
   onReady(() => {
+    initNavigationPrefetch();
     initPageTransitions();
     initHomeTabs();
     initCountdowns();

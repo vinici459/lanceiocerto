@@ -9,33 +9,33 @@
         <p>Gestão profissional de leilões, caixa, usuários e operação.</p>
       </div>
 
-      {% if user.is_superadmin %}<button class="side-link admin-link active" data-target="admin-dashboard" type="button">Resumo Geral</button>{% endif %}
-      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-cashflow" type="button">Fluxo de Caixa</button>{% endif %}
-      <button class="side-link admin-link {% if not user.is_superadmin %}active{% endif %}" data-target="admin-product" type="button">Cadastrar Produto</button>
-      <button class="side-link admin-link" data-target="admin-returned" type="button">Produtos Retornados</button>
-      <button class="side-link admin-link" data-target="admin-auctions" type="button">Gerenciar Leilões</button>
-      <button class="side-link admin-link" data-target="admin-finished" type="button">Leilões Finalizados</button>
-      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-pending-payments" type="button">Leilões Pendentes</button>{% endif %}
-      <button class="side-link admin-link" data-target="admin-shipping" type="button">Envios Pendentes</button>
-      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-users" type="button">Usuários</button>{% endif %}
-      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-identity-pending" type="button">Usuários pendentes</button>{% endif %}
-      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-withdrawals" type="button">Saques Pendentes</button>{% endif %}
-      <button class="side-link admin-link" data-target="admin-tickets" type="button">Chamados/Disputas</button>
-      <button class="side-link admin-link" data-target="admin-suggestions" type="button">Indicações</button>
-      <button class="side-link admin-link" data-target="admin-search-orders" type="button">Consulta</button>
-      {% if user.is_superadmin %}<button class="side-link admin-link" data-target="admin-audit" type="button">Auditoria Geral</button>{% endif %}
-      <button class="side-link admin-link" data-target="admin-moderation" type="button">Moderação</button>
+      {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-dashboard' %}active{% endif %}" href="/admin?tab=admin-dashboard" data-target="admin-dashboard" data-no-prefetch="true">Resumo Geral</a>{% endif %}
+      {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-cashflow' %}active{% endif %}" href="/admin?tab=admin-cashflow" data-target="admin-cashflow" data-no-prefetch="true">Fluxo de Caixa</a>{% endif %}
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-product' %}active{% endif %}" href="/admin?tab=admin-product" data-target="admin-product" data-no-prefetch="true">Cadastrar Produto</a>
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-returned' %}active{% endif %}" href="/admin?tab=admin-returned" data-target="admin-returned" data-no-prefetch="true">Produtos Retornados</a>
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-auctions' %}active{% endif %}" href="/admin?tab=admin-auctions" data-target="admin-auctions" data-no-prefetch="true">Gerenciar Leilões</a>
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-finished' %}active{% endif %}" href="/admin?tab=admin-finished" data-target="admin-finished" data-no-prefetch="true">Leilões Finalizados</a>
+      {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}" href="/admin?tab=admin-pending-payments" data-target="admin-pending-payments" data-no-prefetch="true">Leilões Pendentes</a>{% endif %}
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-shipping' %}active{% endif %}" href="/admin?tab=admin-shipping" data-target="admin-shipping" data-no-prefetch="true">Envios Pendentes</a>
+      {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-users' %}active{% endif %}" href="/admin?tab=admin-users" data-target="admin-users" data-no-prefetch="true">Usuários</a>{% endif %}
+      {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}" href="/admin?tab=admin-identity-pending" data-target="admin-identity-pending" data-no-prefetch="true">Usuários pendentes</a>{% endif %}
+      {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}" href="/admin?tab=admin-withdrawals" data-target="admin-withdrawals" data-no-prefetch="true">Saques Pendentes</a>{% endif %}
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-tickets' %}active{% endif %}" href="/admin?tab=admin-tickets" data-target="admin-tickets" data-no-prefetch="true">Chamados/Disputas</a>
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}" href="/admin?tab=admin-suggestions" data-target="admin-suggestions" data-no-prefetch="true">Indicações</a>
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}" href="/admin?tab=admin-search-orders" data-target="admin-search-orders" data-no-prefetch="true">Consulta</a>
+      {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-audit' %}active{% endif %}" href="/admin?tab=admin-audit" data-target="admin-audit" data-no-prefetch="true">Auditoria Geral</a>{% endif %}
+      <a class="side-link admin-link {% if admin_active_panel == 'admin-moderation' %}active{% endif %}" href="/admin?tab=admin-moderation" data-target="admin-moderation" data-no-prefetch="true">Moderação</a>
     </aside>
 
     <div class="account-content admin-content-clean admin-production-content">
       {% if user.is_superadmin %}
-<section id="admin-dashboard" class="admin-panel active">
+<section id="admin-dashboard" class="admin-panel {% if admin_active_panel == 'admin-dashboard' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Resumo Geral</h1>
             <p>Visão executiva da operação, com indicadores de leilões, usuários, caixa e risco financeiro.</p>
           </div>
-          <button class="btn small admin-open-tab" data-target="admin-cashflow" type="button">Abrir fluxo de caixa</button>
+          <a class="btn small" href="/admin?tab=admin-cashflow" data-no-prefetch="true">Abrir fluxo de caixa</a>
         </div>
 
         <div class="stats-grid account-stats admin-stats-pro admin-kpi-grid">
@@ -86,7 +86,7 @@
       {% endif %}
 
       {% if user.is_superadmin %}
-<section id="admin-cashflow" class="admin-panel">
+<section id="admin-cashflow" class="admin-panel {% if admin_active_panel == 'admin-cashflow' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Fluxo de Caixa</h1>
@@ -159,7 +159,7 @@
 
       {% endif %}
 
-      <section id="admin-product" class="admin-panel {% if not user.is_superadmin %}active{% endif %}">
+      <section id="admin-product" class="admin-panel {% if admin_active_panel == 'admin-product' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Cadastrar Produto</h1>
@@ -242,7 +242,7 @@
         </div>
       </section>
 
-      <section id="admin-returned" class="admin-panel">
+      <section id="admin-returned" class="admin-panel {% if admin_active_panel == 'admin-returned' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Produtos Retornados</h1>
@@ -332,7 +332,7 @@
         </div>
       </section>
 
-      <section id="admin-auctions" class="admin-panel">
+      <section id="admin-auctions" class="admin-panel {% if admin_active_panel == 'admin-auctions' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Gerenciar Leilões</h1>
@@ -376,7 +376,7 @@
         </div>
       </section>
 
-      <section id="admin-finished" class="admin-panel">
+      <section id="admin-finished" class="admin-panel {% if admin_active_panel == 'admin-finished' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Leilões Finalizados</h1>
@@ -410,7 +410,7 @@
       </section>
 
       {% if user.is_superadmin %}
-<section id="admin-pending-payments" class="admin-panel">
+<section id="admin-pending-payments" class="admin-panel {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Leilões Pendentes</h1>
@@ -453,7 +453,7 @@
 
       {% endif %}
 
-      <section id="admin-shipping" class="admin-panel">
+      <section id="admin-shipping" class="admin-panel {% if admin_active_panel == 'admin-shipping' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Envios Pendentes</h1>
@@ -508,7 +508,7 @@
       </section>
 
       {% if user.is_superadmin %}
-<section id="admin-users" class="admin-panel">
+<section id="admin-users" class="admin-panel {% if admin_active_panel == 'admin-users' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Usuários</h1>
@@ -582,7 +582,7 @@
       {% endif %}
 
       {% if user.is_superadmin %}
-<section id="admin-identity-pending" class="admin-panel">
+<section id="admin-identity-pending" class="admin-panel {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Usuários pendentes</h1>
@@ -693,7 +693,7 @@
       {% endif %}
 
       {% if user.is_superadmin %}
-<section id="admin-withdrawals" class="admin-panel">
+<section id="admin-withdrawals" class="admin-panel {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Saques Pendentes</h1>
@@ -771,7 +771,51 @@
 
       {% endif %}
 
-      <section id="admin-suggestions" class="admin-panel">
+      <section id="admin-tickets" class="admin-panel {% if admin_active_panel == 'admin-tickets' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Chamados e Disputas</h1>
+            <p>Atendimento operacional dos usuários, sem acesso ao caixa.</p>
+          </div>
+        </div>
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Chamados recentes</h2><span class="pill-soft">Suporte</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Data</th><th>Usuário</th><th>Assunto</th><th>Status</th><th>Observação</th><th>Ação</th></tr></thead>
+              <tbody>
+                {% for t in support_tickets if support_tickets is defined %}
+                <tr>
+                  <td>{{ t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '—' }}</td>
+                  <td>{{ t.user.full_name if t.user else '—' }}<br><small>@{{ t.user.public_name or t.user.nickname if t.user else '—' }}</small></td>
+                  <td><strong>{{ t.subject or 'Chamado' }}</strong><br><small>{{ t.message[:140] if t.message else '' }}</small></td>
+                  <td>{{ t.status }}</td>
+                  <td>{{ t.admin_note or '—' }}</td>
+                  <td>
+                    <form method="post" action="/admin/ticket/{{ t.id }}/set-status" class="inline-form">
+                      <select name="status">
+                        <option value="open" {% if t.status == 'open' %}selected{% endif %}>Aberto</option>
+                        <option value="in_review" {% if t.status == 'in_review' %}selected{% endif %}>Em análise</option>
+                        <option value="dispute" {% if t.status == 'dispute' %}selected{% endif %}>Disputa</option>
+                        <option value="resolved" {% if t.status == 'resolved' %}selected{% endif %}>Resolvido</option>
+                        <option value="closed" {% if t.status == 'closed' %}selected{% endif %}>Fechado</option>
+                      </select>
+                      <input name="admin_note" value="{{ t.admin_note or '' }}" placeholder="Observação">
+                      <button class="btn small" type="submit">Salvar</button>
+                    </form>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6">Nenhum chamado encontrado.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      <section id="admin-suggestions" class="admin-panel {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Indicações de Produtos</h1>
@@ -821,7 +865,7 @@
         </div>
       </section>
 
-            <section id="admin-search-orders" class="admin-panel">
+            <section id="admin-search-orders" class="admin-panel {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Central de Controle de Arremates</h1>
@@ -955,7 +999,7 @@
 
 
 {% if user.is_superadmin %}
-<section id="admin-audit" class="admin-panel">
+<section id="admin-audit" class="admin-panel {% if admin_active_panel == 'admin-audit' %}active{% endif %}">
   <div class="section-head admin-section-head-pro">
     <div><h1>Auditoria Geral</h1><p>Registro cronológico de ações sensíveis da plataforma: cadastro, KYC, depósitos pendentes, saques, pagamentos e decisões administrativas.</p></div>
   </div>
@@ -971,7 +1015,7 @@
 
 {% endif %}
 
-      <section id="admin-moderation" class="admin-panel">
+      <section id="admin-moderation" class="admin-panel {% if admin_active_panel == 'admin-moderation' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Moderação</h1>
@@ -1034,49 +1078,13 @@
 </section>
 
 <script>
-window.__ADMIN_LOADED_TAB__ = "{{ loaded_admin_tab|default('admin-dashboard') }}";
 document.addEventListener("DOMContentLoaded", function () {
-  const links = document.querySelectorAll(".admin-link");
-  const panels = document.querySelectorAll(".admin-panel");
-  const openTabButtons = document.querySelectorAll(".admin-open-tab");
+  // As abas principais do admin agora carregam por demanda pelo backend:
+  // /admin?tab=admin-auctions, /admin?tab=admin-cashflow etc.
+  // Isso evita montar financeiro, auditoria e usuários em toda abertura.
+  // Os botões laterais são links normais; este script fica apenas para
+  // detalhes internos dos cards, sem trocar painéis pesados localmente.
 
-  function openPanel(target, options = {}) {
-    if (!target) return;
-    const selected = document.getElementById(target);
-    if (!selected) return;
-
-    links.forEach((item) => item.classList.toggle("active", item.getAttribute("data-target") === target));
-    panels.forEach((panel) => panel.classList.toggle("active", panel.id === target));
-
-    if (options.updateHash !== false && window.history) {
-      const nextHash = `#${target}`;
-      if (window.location.hash !== nextHash) history.replaceState(null, "", nextHash);
-    }
-
-    if (options.scroll !== false) {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  }
-
-  function requestPanel(target) {
-    if (!target) return;
-    const loaded = window.__ADMIN_LOADED_TAB__ || "";
-    if (target !== loaded) {
-      window.location.href = `/admin?tab=${encodeURIComponent(target)}#${encodeURIComponent(target)}`;
-      return;
-    }
-    openPanel(target, { updateHash: true, scroll: true });
-  }
-
-  links.forEach((link) => link.addEventListener("click", function () {
-    requestPanel(this.getAttribute("data-target"));
-  }));
-  openTabButtons.forEach((button) => button.addEventListener("click", function () {
-    requestPanel(this.getAttribute("data-target"));
-  }));
-
-  const initialTarget = window.__ADMIN_LOADED_TAB__ || (window.location.hash || "").replace("#", "");
-  if (initialTarget && document.getElementById(initialTarget)) openPanel(initialTarget, { updateHash: false, scroll: false });
 
   const scheduleMode = document.getElementById("schedule-mode");
   const minuteField = document.querySelector(".schedule-minutes-field");
@@ -1252,7 +1260,6 @@ document.addEventListener("DOMContentLoaded", function () {
 </style>
 
 <script>
-window.__ADMIN_LOADED_TAB__ = "{{ loaded_admin_tab|default('admin-dashboard') }}";
 document.addEventListener("DOMContentLoaded", function () {
   const priceInput = document.querySelector('input[name="source_price"]');
   const targetInput = document.querySelector('input[name="turbo_fee_target_percent"]');
