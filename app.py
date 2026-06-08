@@ -598,14 +598,36 @@ SUGGESTION_PRODUCTS = PRODUCT_SUGGESTION_CATALOG
 # Caches leves para navegação pública/admin. Não guardam saldo nem dados sensíveis.
 # Servem para evitar recalcular blocos pesados em todo clique de navegação.
 SUGGESTION_STATS_CACHE: dict[str, object] = {"expires_at": None, "value": []}
-HOME_PUBLIC_CACHE: dict[str, object] = {"expires_at": None, "value": None}
-ACCOUNT_DASHBOARD_CACHE: dict[int, dict[str, object]] = {}
-ADMIN_TAB_CACHE: dict[str, dict[str, object]] = {}
+# Cache curto de navegação. Mantém a plataforma responsiva sem guardar páginas inteiras
+# com saldo/sessão. Os blocos cacheados são dados já serializados ou resumos públicos.
+NAV_CACHE: dict[str, dict[str, object]] = {}
 HOME_SYNC_LAST_AT: Optional[datetime] = None
-HOME_SYNC_INTERVAL_SECONDS = 30
-HOME_PUBLIC_CACHE_SECONDS = 20
-ACCOUNT_DASHBOARD_CACHE_SECONDS = 20
-ADMIN_TAB_CACHE_SECONDS = 25
+HOME_SYNC_INTERVAL_SECONDS = 15
+
+
+def nav_cache_get(key: str):
+    item = NAV_CACHE.get(key)
+    if not item:
+        return None
+    expires_at = item.get("expires_at")
+    if isinstance(expires_at, datetime) and expires_at > datetime.utcnow():
+        return item.get("value")
+    NAV_CACHE.pop(key, None)
+    return None
+
+
+def nav_cache_set(key: str, value, ttl_seconds: int = 8):
+    NAV_CACHE[key] = {"value": value, "expires_at": datetime.utcnow() + timedelta(seconds=ttl_seconds)}
+    return value
+
+
+def nav_cache_clear(prefix: str | None = None) -> None:
+    if not prefix:
+        NAV_CACHE.clear()
+        return
+    for key in list(NAV_CACHE.keys()):
+        if key.startswith(prefix):
+            NAV_CACHE.pop(key, None)
 
 
 def BR(v: float) -> float:
@@ -2538,25 +2560,16 @@ def should_sync_home_states() -> bool:
     return True
 
 
-def cache_is_valid(entry: Optional[dict], ttl_seconds: int) -> bool:
-    if not entry:
-        return False
-    created_at = entry.get("created_at")
-    return isinstance(created_at, datetime) and (datetime.utcnow() - created_at).total_seconds() < ttl_seconds
-
-
-def cached_home_public_payload(db: Session) -> dict:
+def cached_home_public_context(db: Session, ttl_seconds: int = 8) -> dict:
     """Dados públicos da Home com cache curto.
 
-    Os logs mostraram que a Home gastava 2–4s repetindo as mesmas consultas
-    em cada clique. Este cache guarda somente dados públicos e por poucos
-    segundos, sem saldo, sessão ou informações privadas.
+    A Home era chamada várias vezes seguidas durante a navegação. Cada chamada
+    repetia consultas de leilões, indicações e payloads. O usuário/saldo NÃO
+    fica aqui; só blocos públicos.
     """
-    cached = HOME_PUBLIC_CACHE.get("value")
-    expires_at = HOME_PUBLIC_CACHE.get("expires_at")
-    now = datetime.utcnow()
-    if cached is not None and isinstance(expires_at, datetime) and expires_at > now:
-        return dict(cached)
+    cached = nav_cache_get("home:public")
+    if cached is not None:
+        return cached
 
     if should_sync_home_states() and sync_due_auction_states(db):
         db.commit()
@@ -2564,64 +2577,15 @@ def cached_home_public_payload(db: Session) -> dict:
     live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(12).all()
     upcoming_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(12).all()
     ended_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(12).all()
-    suggestion_products = cached_suggestion_vote_stats(db, ttl_seconds=90)
-    week_count = db.query(ProductSuggestionNomination).filter(ProductSuggestionNomination.week_start == current_week_start_utc()).count()
+    week_nominations = current_week_nominations(db)
 
-    payload = {
+    return nav_cache_set("home:public", {
         "live_items": [public_auction_card_payload(x) for x in live_items],
         "upcoming_items": [public_auction_card_payload(x) for x in upcoming_items],
         "ended_items": [public_auction_card_payload(x) for x in ended_items],
-        "suggestion_products": suggestion_products,
-        "suggestion_catalog": PRODUCT_SUGGESTION_CATALOG,
-        "suggestion_categories": suggestion_categories(),
-        "suggestion_week_limit": SUGGESTION_WEEK_LIMIT,
-        "suggestion_week_count": week_count,
-        "fee_percent": "1%",
-    }
-    HOME_PUBLIC_CACHE["value"] = payload
-    HOME_PUBLIC_CACHE["expires_at"] = now + timedelta(seconds=HOME_PUBLIC_CACHE_SECONDS)
-    return dict(payload)
-
-
-def cached_account_dashboard_data(db: Session, user: User) -> dict:
-    cached = ACCOUNT_DASHBOARD_CACHE.get(user.id)
-    if cache_is_valid(cached, ACCOUNT_DASHBOARD_CACHE_SECONDS):
-        return dict(cached.get("value") or {})
-
-    stats = user_stats(db, user)
-    pending_orders = (
-        db.query(WinnerOrder)
-        .options(selectinload(WinnerOrder.auction))
-        .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
-        .order_by(desc(WinnerOrder.created_at))
-        .limit(3)
-        .all()
-    )
-    won_orders = (
-        db.query(WinnerOrder)
-        .options(selectinload(WinnerOrder.auction))
-        .filter(WinnerOrder.user_id == user.id)
-        .order_by(desc(WinnerOrder.created_at))
-        .limit(5)
-        .all()
-    )
-    value = {
-        "stats": stats,
-        "pending_orders": [build_order_card(x) for x in pending_orders[:3]],
-        "latest_orders": [build_order_card(x) for x in won_orders[:5]],
-        "orders_raw": [],
-    }
-    ACCOUNT_DASHBOARD_CACHE[user.id] = {"created_at": datetime.utcnow(), "value": value}
-    return dict(value)
-
-
-def cached_admin_tab_value(key: str, builder, ttl_seconds: int = ADMIN_TAB_CACHE_SECONDS):
-    cached = ADMIN_TAB_CACHE.get(key)
-    if cache_is_valid(cached, ttl_seconds):
-        return cached.get("value")
-    value = builder()
-    ADMIN_TAB_CACHE[key] = {"created_at": datetime.utcnow(), "value": value}
-    return value
+        "suggestion_products": cached_suggestion_vote_stats(db),
+        "suggestion_week_count": len(week_nominations),
+    }, ttl_seconds)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2629,20 +2593,28 @@ def home(request: Request):
     db = SessionLocal()
     try:
         user = current_user(request, db)
-        ctx = cached_home_public_payload(db)
 
-        # Dados específicos do usuário ficam fora do cache público.
-        if user:
-            ctx["user_week_nomination"] = user_week_nomination(db, user)
-            ctx["today_suggestion_vote"] = user_today_suggestion_vote(db, user)
-            ctx["today_suggestion_nomination"] = user_today_nomination(db, user)
-        else:
-            ctx["user_week_nomination"] = None
-            ctx["today_suggestion_vote"] = None
-            ctx["today_suggestion_nomination"] = None
+        public_home = cached_home_public_context(db)
 
-        ctx.update({"request": request, "user": user})
-        return templates.TemplateResponse("index.html", ctx)
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "user": user,
+                "live_items": public_home["live_items"],
+                "upcoming_items": public_home["upcoming_items"],
+                "ended_items": public_home["ended_items"],
+                "suggestion_products": public_home["suggestion_products"],
+                "suggestion_catalog": PRODUCT_SUGGESTION_CATALOG,
+                "suggestion_categories": suggestion_categories(),
+                "suggestion_week_limit": SUGGESTION_WEEK_LIMIT,
+                "suggestion_week_count": public_home["suggestion_week_count"],
+                "user_week_nomination": user_week_nomination(db, user),
+                "today_suggestion_vote": user_today_suggestion_vote(db, user),
+                "today_suggestion_nomination": user_today_nomination(db, user),
+                "fee_percent": "1%",
+            },
+        )
     finally:
         db.close()
 
@@ -3581,25 +3553,60 @@ async def send_chat(request: Request, auction_id: int, message: str = Form(...))
     return JSONResponse({"ok": True})
 
 
+def cached_account_dashboard_context(db: Session, user: User, ttl_seconds: int = 8) -> dict:
+    """Resumo da conta com cache curto por usuário.
+
+    Não guarda o objeto User nem saldo; só cards/contadores do painel inicial.
+    A área de saldo continua usando o user.wallet_balance atual do banco.
+    """
+    key = f"account:dashboard:{user.id}"
+    cached = nav_cache_get(key)
+    if cached is not None:
+        return cached
+
+    stats = user_stats(db, user)
+    pending_orders = (
+        db.query(WinnerOrder)
+        .options(selectinload(WinnerOrder.auction))
+        .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
+        .order_by(desc(WinnerOrder.created_at))
+        .limit(3)
+        .all()
+    )
+    won_orders = (
+        db.query(WinnerOrder)
+        .options(selectinload(WinnerOrder.auction))
+        .filter(WinnerOrder.user_id == user.id)
+        .order_by(desc(WinnerOrder.created_at))
+        .limit(5)
+        .all()
+    )
+    return nav_cache_set(key, {
+        "stats": stats,
+        "pending_orders": [build_order_card(x) for x in pending_orders[:3]],
+        "latest_orders": [build_order_card(x) for x in won_orders[:5]],
+    }, ttl_seconds)
+
+
 @app.get("/minha-conta", response_class=HTMLResponse)
 def my_account(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        data = cached_account_dashboard_data(db, user)
+        account_summary = cached_account_dashboard_context(db, user)
         return templates.TemplateResponse(
             "account_pages.html",
             {
                 "request": request,
                 "user": user,
                 "section": "dashboard",
-                "stats": data.get("stats", {}),
-                "pending_orders": data.get("pending_orders", []),
-                "latest_orders": data.get("latest_orders", []),
+                "stats": account_summary["stats"],
+                "pending_orders": account_summary["pending_orders"],
+                "latest_orders": account_summary["latest_orders"],
                 "wallet_transactions": [],
                 "withdrawals": [],
                 "tickets": [],
-                "orders_raw": data.get("orders_raw", []),
+                "orders_raw": [],
                 "account_status_label": account_status_label(user),
             },
         )
@@ -3987,6 +3994,39 @@ def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0
     return stats
 
 
+def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0, ttl_seconds: int = 10) -> dict:
+    key = f"admin:light-stats:{int(is_super_admin)}:{int(returned_count)}"
+    cached = nav_cache_get(key)
+    if cached is not None:
+        return cached
+    return nav_cache_set(key, admin_light_stats(db, is_super_admin, returned_count), ttl_seconds)
+
+
+def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 12) -> dict:
+    """Blocos financeiros pesados com cache curto.
+
+    Fluxo de Caixa e Resumo Geral eram as abas mais lentas. Como são telas de
+    leitura administrativa, cache de poucos segundos reduz troca de abas sem
+    esconder alterações por muito tempo.
+    """
+    cached = nav_cache_get("admin:cashflow-context")
+    if cached is not None:
+        return cached
+    value = {
+        "finance": build_finance_dashboard(db),
+        "cashflow_movements": build_cashflow_movements(db),
+        "auction_results": build_auction_results(db),
+    }
+    return nav_cache_set("admin:cashflow-context", value, ttl_seconds)
+
+
+def cached_finished_auctions(db: Session, ttl_seconds: int = 10) -> list[dict]:
+    cached = nav_cache_get("admin:finished-auctions")
+    if cached is not None:
+        return cached
+    return nav_cache_set("admin:finished-auctions", build_finished_auctions(db), ttl_seconds)
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
     db = SessionLocal()
@@ -4032,27 +4072,15 @@ def admin_dashboard(request: Request):
         # Produto é a aba mais leve e padrão do admin operacional. Não precisa
         # carregar financeiro, auditoria, usuários nem pedidos.
         if active_panel == "admin-dashboard":
-            ctx["stats"] = cached_admin_tab_value(
-                f"stats:{is_super_admin}",
-                lambda: admin_light_stats(db, is_super_admin),
-                ttl_seconds=20,
-            )
+            ctx["stats"] = cached_admin_light_stats(db, is_super_admin)
         elif active_panel == "admin-cashflow" and is_super_admin:
-            finance_bundle = cached_admin_tab_value(
-                "cashflow:super",
-                lambda: {
-                    "finance": build_finance_dashboard(db),
-                    "cashflow_movements": build_cashflow_movements(db),
-                    "auction_results": build_auction_results(db),
-                    "stats": admin_light_stats(db, is_super_admin),
-                },
-                ttl_seconds=25,
-            )
-            ctx.update(finance_bundle)
+            cashflow_ctx = cached_admin_cashflow_context(db)
+            ctx.update(cashflow_ctx)
+            ctx["stats"] = cached_admin_light_stats(db, is_super_admin)
         elif active_panel == "admin-returned":
-            returned_items = cached_admin_tab_value("returned_items", lambda: build_returned_items(db), ttl_seconds=20)
+            returned_items = build_returned_items(db)
             ctx["returned_items"] = returned_items
-            ctx["stats"] = admin_light_stats(db, is_super_admin, returned_count=len(returned_items))
+            ctx["stats"] = cached_admin_light_stats(db, is_super_admin, returned_count=len(returned_items))
         elif active_panel == "admin-auctions":
             items = db.query(AuctionItem).filter(AuctionItem.status.in_(["live", "scheduled", "relisted", "paused"])).order_by(desc(AuctionItem.created_at)).limit(30).all()
             for item in items:
@@ -4069,7 +4097,7 @@ def admin_dashboard(request: Request):
             ctx["shipping_orders"] = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
             ctx["consultation_orders"] = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
         elif active_panel == "admin-finished":
-            ctx["finished_auctions"] = cached_admin_tab_value("finished_auctions", lambda: build_finished_auctions(db), ttl_seconds=20)
+            ctx["finished_auctions"] = cached_finished_auctions(db)
         elif active_panel == "admin-users" and is_super_admin:
             users_query = db.query(User)
             if search:

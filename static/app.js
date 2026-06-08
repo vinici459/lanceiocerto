@@ -44,12 +44,13 @@
   }
 
   function initNavigationPrefetch() {
-    // Desativado de propósito.
-    // O navegador/Chrome estava disparando várias requisições GET antes do clique
-    // real. Como o backend ainda tem páginas dinâmicas, isso piorava a sensação
-    // de lentidão e aumentava carga. A velocidade agora vem do cache no servidor.
+    // Prefetch de páginas desativado de propósito.
+    // Nos testes em produção, até o hint nativo <link rel="prefetch">
+    // gerava requisições extras para /, /login, /admin e /minha-conta,
+    // aumentando a carga do backend e piorando a sensação de navegação.
+    // A otimização agora fica no backend: páginas mais leves + cache curto.
+    return;
   }
-
 
   function initPageTransitions() {
     document.body.classList.add("page-ready");

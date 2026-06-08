@@ -29,6 +29,7 @@
 
     <div class="account-content admin-content-clean admin-production-content">
       {% if user.is_superadmin %}
+{% if admin_active_panel == 'admin-dashboard' %}
 <section id="admin-dashboard" class="admin-panel {% if admin_active_panel == 'admin-dashboard' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -86,6 +87,8 @@
       {% endif %}
 
       {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-cashflow' %}
 <section id="admin-cashflow" class="admin-panel {% if admin_active_panel == 'admin-cashflow' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -158,6 +161,8 @@
       </section>
 
       {% endif %}
+{% endif %}
+{% if admin_active_panel == 'admin-product' %}
 
       <section id="admin-product" class="admin-panel {% if admin_active_panel == 'admin-product' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -241,6 +246,8 @@
           </form>
         </div>
       </section>
+{% endif %}
+{% if admin_active_panel == 'admin-returned' %}
 
       <section id="admin-returned" class="admin-panel {% if admin_active_panel == 'admin-returned' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -331,6 +338,8 @@
           {% endfor %}
         </div>
       </section>
+{% endif %}
+{% if admin_active_panel == 'admin-auctions' %}
 
       <section id="admin-auctions" class="admin-panel {% if admin_active_panel == 'admin-auctions' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -375,6 +384,8 @@
           </div>
         </div>
       </section>
+{% endif %}
+{% if admin_active_panel == 'admin-finished' %}
 
       <section id="admin-finished" class="admin-panel {% if admin_active_panel == 'admin-finished' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -410,6 +421,8 @@
       </section>
 
       {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-pending-payments' %}
 <section id="admin-pending-payments" class="admin-panel {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -452,6 +465,8 @@
       </section>
 
       {% endif %}
+{% endif %}
+{% if admin_active_panel == 'admin-shipping' %}
 
       <section id="admin-shipping" class="admin-panel {% if admin_active_panel == 'admin-shipping' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -508,6 +523,8 @@
       </section>
 
       {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-users' %}
 <section id="admin-users" class="admin-panel {% if admin_active_panel == 'admin-users' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -582,6 +599,8 @@
       {% endif %}
 
       {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-identity-pending' %}
 <section id="admin-identity-pending" class="admin-panel {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -693,6 +712,8 @@
       {% endif %}
 
       {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-withdrawals' %}
 <section id="admin-withdrawals" class="admin-panel {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
@@ -770,6 +791,8 @@
 
 
       {% endif %}
+{% endif %}
+{% if admin_active_panel == 'admin-tickets' %}
 
       <section id="admin-tickets" class="admin-panel {% if admin_active_panel == 'admin-tickets' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -813,6 +836,8 @@
           </div>
         </div>
       </section>
+{% endif %}
+{% if admin_active_panel == 'admin-suggestions' %}
 
 
       <section id="admin-suggestions" class="admin-panel {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}">
@@ -864,6 +889,8 @@
           </div>
         </div>
       </section>
+{% endif %}
+{% if admin_active_panel == 'admin-search-orders' %}
 
             <section id="admin-search-orders" class="admin-panel {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -999,6 +1026,8 @@
 
 
 {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-audit' %}
 <section id="admin-audit" class="admin-panel {% if admin_active_panel == 'admin-audit' %}active{% endif %}">
   <div class="section-head admin-section-head-pro">
     <div><h1>Auditoria Geral</h1><p>Registro cronológico de ações sensíveis da plataforma: cadastro, KYC, depósitos pendentes, saques, pagamentos e decisões administrativas.</p></div>
@@ -1014,6 +1043,8 @@
 </section>
 
 {% endif %}
+{% endif %}
+{% if admin_active_panel == 'admin-moderation' %}
 
       <section id="admin-moderation" class="admin-panel {% if admin_active_panel == 'admin-moderation' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
@@ -1073,6 +1104,8 @@
           </div>
         </div>
       </section>
+{% endif %}
+
     </div>
   </div>
 </section>
