@@ -44,52 +44,15 @@
   }
 
   function initNavigationPrefetch() {
-    const prefetched = new Set();
-
-    function prefetch(link) {
-      if (!isInternalNavigableLink(link)) return;
-      const url = new URL(link.href, window.location.href);
-      if (isSamePageHash(url)) return;
-      const key = url.href;
-      if (prefetched.has(key)) return;
-      prefetched.add(key);
-
-      try {
-        const hint = document.createElement("link");
-        hint.rel = "prefetch";
-        hint.href = key;
-        hint.as = "document";
-        document.head.appendChild(hint);
-      } catch (_) {}
-
-      // Importante: não fazemos fetch() manual aqui.
-      // Em produção isso duplicava o trabalho do backend: uma requisição de
-      // prefetch + outra navegação real. Mantemos apenas o hint nativo do
-      // navegador, que é mais leve e pode ser ignorado quando a rede estiver ocupada.
-    }
-
-    document.querySelectorAll("a[href]").forEach((link) => {
-      link.addEventListener("pointerenter", () => prefetch(link), { passive: true });
-      link.addEventListener("focus", () => prefetch(link), { passive: true });
-      link.addEventListener("touchstart", () => prefetch(link), { passive: true });
-    });
+    // Desativado de propósito.
+    // O prefetch de documentos estava gerando várias requisições GET antes do clique
+    // e, no Railway, isso deixava a navegação mais lenta em vez de ajudar.
+    // Mantemos a função para compatibilidade, mas ela não cria <link rel="prefetch">
+    // nem faz fetch() manual.
   }
 
   function initPageTransitions() {
     document.body.classList.add("page-ready");
-
-    document.addEventListener("click", (event) => {
-      const link = event.target.closest("a[href]");
-      if (!isInternalNavigableLink(link)) return;
-      if (event.defaultPrevented) return;
-      if (event.button !== 0) return;
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-
-      const url = new URL(link.href, window.location.href);
-      if (isSamePageHash(url)) return;
-
-      document.body.classList.add("page-leaving");
-    }, true);
 
     window.addEventListener("pageshow", () => {
       document.body.classList.remove("page-leaving");

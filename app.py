@@ -8,6 +8,7 @@ import re
 import secrets
 import shutil
 import threading
+import time
 import base64
 import hashlib
 import hmac
@@ -415,6 +416,8 @@ SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 SUGGESTION_USER_VOTE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 WITHDRAWAL_USER_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
 BID_COOLDOWN_MEMORY: dict[str, datetime] = {}
+USER_STATS_CACHE: dict[int, tuple[datetime, dict]] = {}
+USER_STATS_CACHE_TTL_SECONDS = 20
 
 
 class AuctionStateHTTPException(HTTPException):
@@ -427,9 +430,21 @@ class AuctionStateHTTPException(HTTPException):
 
 @app.middleware("http")
 async def add_static_cache_headers(request: Request, call_next):
+    start = time.perf_counter()
     response = await call_next(request)
-    if request.url.path.startswith("/static/"):
+    path = request.url.path
+
+    if path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
+    else:
+        # Páginas com usuário/saldo/documentos não devem ser cacheadas pelo navegador.
+        response.headers.setdefault("Cache-Control", "no-store")
+
+    # Diagnóstico leve para validar a navegação em produção sem poluir demais.
+    if path in {"/", "/admin", "/login"} or path.startswith("/minha-conta"):
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        print(f"[NAV-REQ] {request.method} {path} status={response.status_code} total={elapsed_ms:.1f}ms")
+
     return response
 SESSIONS: dict[str, int] = {}
 BANNED_WORDS = {
@@ -1627,12 +1642,19 @@ def public_auction_card_payload(item: AuctionItem) -> dict:
 
 
 def user_stats(db: Session, user: User) -> dict:
-    """Resumo da conta com poucas idas ao banco.
+    """Resumo da conta com cache curto.
 
-    A versão anterior fazia 5 contagens separadas. Em ambiente remoto isso
-    custava mais de 1 segundo só para abrir /minha-conta. Aqui consolidamos
-    os lances em uma consulta e os pedidos em outra.
+    A navegação estava lenta porque cada abertura de /minha-conta refazia
+    contagens no banco remoto. Como esses números são apenas resumo visual,
+    usamos cache curto por usuário. Lances/saldo continuam validados no backend.
     """
+    now = datetime.utcnow()
+    cached = USER_STATS_CACHE.get(user.id)
+    if cached:
+        expires_at, value = cached
+        if expires_at > now:
+            return dict(value)
+
     bid_row = (
         db.query(
             func.count(Bid.id),
@@ -1654,13 +1676,15 @@ def user_stats(db: Session, user: User) -> dict:
     won = sum(by_status.values())
     pending = by_status.get("pending_payment", 0)
     expired = by_status.get("expired", 0)
-    return {
+    value = {
         "bids_total": bids_total,
         "distinct_auctions": distinct_auctions,
         "won": won,
         "pending": pending,
         "expired": expired,
     }
+    USER_STATS_CACHE[user.id] = (now + timedelta(seconds=USER_STATS_CACHE_TTL_SECONDS), dict(value))
+    return value
 
 
 

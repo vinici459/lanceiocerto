@@ -198,11 +198,9 @@ img{max-width:100%;}
 select option{background:#111827;color:#ffffff;}
 select:focus{border-color:rgba(96,165,250,.55);box-shadow:0 0 0 3px rgba(59,130,246,.16);}
 
-/* Navegação profissional: prefetch + transições leves sem alterar lógica do leilão */
+/* Navegação profissional: sem prefetch pesado e sem escurecer a página durante loads reais. */
 html{scroll-behavior:smooth;}
-body.page-ready .page-content-shell{animation:lcPageIn .16s ease-out both;}
-body.page-leaving .page-content-shell{opacity:.86;transform:translateY(3px);transition:opacity .12s ease,transform .12s ease;}
-@keyframes lcPageIn{from{opacity:.86;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+body.page-ready .page-content-shell{opacity:1;}
 
 .lc-tab,.side-link,.account-side-link,.admin-link,.wallet-action-btn,.wallet-choice-btn,.btn,.card,.panel-card{
   transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .18s ease,opacity .18s ease;
