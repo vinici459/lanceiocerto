@@ -38,6 +38,7 @@ from sqlalchemy import (
     inspect,
     text,
     func,
+    or_,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker, selectinload
 from sqlalchemy.exc import IntegrityError
@@ -687,7 +688,7 @@ SUGGESTION_STATS_CACHE: dict[str, object] = {"expires_at": None, "value": []}
 # com saldo/sessão. Os blocos cacheados são dados já serializados ou resumos públicos.
 NAV_CACHE: dict[str, dict[str, object]] = {}
 HOME_SYNC_LAST_AT: Optional[datetime] = None
-HOME_SYNC_INTERVAL_SECONDS = 15
+HOME_SYNC_INTERVAL_SECONDS = 60
 # Evita poluir os logs com dezenas de prefetch/prerender bloqueados pelo navegador.
 # O bloqueio continua ativo, mas o mesmo caminho só é logado em janela curta.
 NAV_SKIP_LOG_MEMORY: dict[str, datetime] = {}
@@ -1436,9 +1437,17 @@ def sync_due_auction_states(db: Session, now: Optional[datetime] = None, limit: 
     now = now or datetime.utcnow()
     changed = False
 
+    # Carrega apenas leilões que realmente precisam mudar de estado agora.
+    # Antes a Home varria até 80 leilões scheduled/live em todo cache miss,
+    # mesmo quando nada estava vencido. Em produção isso custava segundos.
     due_items = (
         db.query(AuctionItem)
-        .filter(AuctionItem.status.in_(["scheduled", "relisted", "live"]))
+        .filter(
+            or_(
+                (AuctionItem.status.in_(["scheduled", "relisted"])) & (AuctionItem.scheduled_start <= now),
+                (AuctionItem.status == "live") & (AuctionItem.ends_at != None) & (AuctionItem.ends_at <= now),
+            )
+        )
         .order_by(AuctionItem.scheduled_start.asc())
         .limit(limit)
         .all()
@@ -1996,10 +2005,25 @@ def build_auction_results(db: Session) -> list[dict]:
         orders_by_auction.setdefault(order.auction_id, order)
 
     outgoing_by_order: dict[int, float] = {}
-    for tx in db.query(WalletTransaction).filter(WalletTransaction.kind == "product_outgoing").all():
-        m = re.search(r"Pedido #(\d+)", tx.note or "")
-        if m:
-            outgoing_by_order[int(m.group(1))] = BR(outgoing_by_order.get(int(m.group(1)), 0.0) + abs(tx.amount or 0.0))
+    order_ids = [order.id for order in orders_by_auction.values() if order]
+    if order_ids:
+        # WalletTransaction não possui order_id; o vínculo fica no texto da nota.
+        # Para não varrer a tabela inteira, olhamos uma janela recente e filtramos
+        # apenas os pedidos que aparecem no relatório carregado.
+        wanted_order_ids = set(order_ids)
+        product_txs = (
+            db.query(WalletTransaction)
+            .filter(WalletTransaction.kind == "product_outgoing")
+            .order_by(desc(WalletTransaction.created_at))
+            .limit(400)
+            .all()
+        )
+        for tx in product_txs:
+            m = re.search(r"Pedido #(\d+)", tx.note or "")
+            if m:
+                order_id = int(m.group(1))
+                if order_id in wanted_order_ids:
+                    outgoing_by_order[order_id] = BR(outgoing_by_order.get(order_id, 0.0) + abs(tx.amount or 0.0))
 
     for item in items:
         agg = bid_aggs.get(item.id)
@@ -2028,7 +2052,7 @@ def build_auction_results(db: Session) -> list[dict]:
 
 
 
-def cached_returned_items(db: Session, ttl_seconds: int = 60) -> list[dict]:
+def cached_returned_items(db: Session, ttl_seconds: int = 180) -> list[dict]:
     cached = nav_cache_get("admin:returned-items")
     if cached is not None:
         return cached
@@ -2685,7 +2709,7 @@ def should_sync_home_states() -> bool:
     return True
 
 
-def cached_home_public_context(db: Session, ttl_seconds: int = 45) -> dict:
+def cached_home_public_context(db: Session, ttl_seconds: int = 90) -> dict:
     """Dados públicos da Home com cache curto.
 
     A Home era chamada várias vezes seguidas durante a navegação. Cada chamada
@@ -2696,20 +2720,45 @@ def cached_home_public_context(db: Session, ttl_seconds: int = 45) -> dict:
     if cached is not None:
         return cached
 
-    if should_sync_home_states() and sync_due_auction_states(db):
+    if should_sync_home_states() and sync_due_auction_states(db, limit=25):
         db.commit()
+        nav_cache_clear("home:")
 
-    live_items = db.query(AuctionItem).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(12).all()
-    upcoming_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(12).all()
-    ended_items = db.query(AuctionItem).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(12).all()
-    week_nominations = current_week_nominations(db)
+    live_items = (
+        db.query(AuctionItem)
+        .filter(AuctionItem.status == "live")
+        .order_by(AuctionItem.created_at.desc())
+        .limit(8)
+        .all()
+    )
+    upcoming_items = (
+        db.query(AuctionItem)
+        .filter(AuctionItem.status.in_(["scheduled", "relisted"]))
+        .order_by(AuctionItem.scheduled_start.asc())
+        .limit(8)
+        .all()
+    )
+    ended_items = (
+        db.query(AuctionItem)
+        .options(selectinload(AuctionItem.winner))
+        .filter(AuctionItem.status.in_(["pending_payment", "ended"]))
+        .order_by(desc(AuctionItem.created_at))
+        .limit(8)
+        .all()
+    )
+    week_start = current_week_start_utc()
+    suggestion_week_count = int(
+        db.query(func.count(ProductSuggestionNomination.id))
+        .filter(ProductSuggestionNomination.week_start == week_start)
+        .scalar() or 0
+    )
 
     return nav_cache_set("home:public", {
         "live_items": [public_auction_card_payload(x) for x in live_items],
         "upcoming_items": [public_auction_card_payload(x) for x in upcoming_items],
         "ended_items": [public_auction_card_payload(x) for x in ended_items],
         "suggestion_products": cached_suggestion_vote_stats(db),
-        "suggestion_week_count": len(week_nominations),
+        "suggestion_week_count": suggestion_week_count,
     }, ttl_seconds)
 
 
@@ -3821,36 +3870,40 @@ def my_participations(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        rows = (
-            db.query(
-                Bid.auction_id.label("auction_id"),
-                func.count(Bid.id).label("total_bids"),
-                func.coalesce(func.sum(Bid.bid_value), 0.0).label("total_spent"),
-                func.max(Bid.created_at).label("last_activity"),
-                AuctionItem.title.label("title"),
-                AuctionItem.image_url.label("image_url"),
-                AuctionItem.status.label("status"),
-                AuctionItem.winner_user_id.label("winner_user_id"),
+        cache_key = f"account:participations:{user.id}"
+        data = nav_cache_get(cache_key)
+        if data is None:
+            rows = (
+                db.query(
+                    Bid.auction_id.label("auction_id"),
+                    func.count(Bid.id).label("total_bids"),
+                    func.coalesce(func.sum(Bid.bid_value), 0.0).label("total_spent"),
+                    func.max(Bid.created_at).label("last_activity"),
+                    AuctionItem.title.label("title"),
+                    AuctionItem.image_url.label("image_url"),
+                    AuctionItem.status.label("status"),
+                    AuctionItem.winner_user_id.label("winner_user_id"),
+                )
+                .join(AuctionItem, AuctionItem.id == Bid.auction_id)
+                .filter(Bid.user_id == user.id)
+                .group_by(Bid.auction_id, AuctionItem.title, AuctionItem.image_url, AuctionItem.status, AuctionItem.winner_user_id)
+                .order_by(desc(func.max(Bid.created_at)))
+                .limit(40)
+                .all()
             )
-            .join(AuctionItem, AuctionItem.id == Bid.auction_id)
-            .filter(Bid.user_id == user.id)
-            .group_by(Bid.auction_id, AuctionItem.title, AuctionItem.image_url, AuctionItem.status, AuctionItem.winner_user_id)
-            .order_by(desc(func.max(Bid.created_at)))
-            .limit(60)
-            .all()
-        )
-        data = []
-        for row in rows:
-            data.append({
-                "auction_id": row.auction_id,
-                "title": row.title,
-                "image_url": safe_image_url(row.image_url),
-                "status": public_display_status(row.status),
-                "total_bids": int(row.total_bids or 0),
-                "total_spent": BR(row.total_spent or 0.0),
-                "won": row.winner_user_id == user.id,
-                "last_activity": row.last_activity.strftime("%d/%m/%Y %H:%M") if row.last_activity else "—",
-            })
+            data = []
+            for row in rows:
+                data.append({
+                    "auction_id": row.auction_id,
+                    "title": row.title,
+                    "image_url": safe_image_url(row.image_url),
+                    "status": public_display_status(row.status),
+                    "total_bids": int(row.total_bids or 0),
+                    "total_spent": BR(row.total_spent or 0.0),
+                    "won": row.winner_user_id == user.id,
+                    "last_activity": row.last_activity.strftime("%d/%m/%Y %H:%M") if row.last_activity else "—",
+                })
+            nav_cache_set(cache_key, data, 90)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "participations", "items": data})
     finally:
         db.close()
@@ -3861,8 +3914,12 @@ def my_wins(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(50).all()
-        data = [build_order_card(x) for x in orders]
+        cache_key = f"account:wins:{user.id}"
+        data = nav_cache_get(cache_key)
+        if data is None:
+            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(30).all()
+            data = [build_order_card(x) for x in orders]
+            nav_cache_set(cache_key, data, 90)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wins", "orders": data})
     finally:
         db.close()
@@ -3873,15 +3930,19 @@ def my_pending_payments(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        orders = (
-            db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
-            .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
-            .order_by(desc(WinnerOrder.created_at))
-            .limit(30)
-            .all()
-        )
-        data = [build_order_card(x) for x in orders]
+        cache_key = f"account:payments:{user.id}"
+        data = nav_cache_get(cache_key)
+        if data is None:
+            orders = (
+                db.query(WinnerOrder)
+                .options(selectinload(WinnerOrder.auction))
+                .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
+                .order_by(desc(WinnerOrder.created_at))
+                .limit(20)
+                .all()
+            )
+            data = [build_order_card(x) for x in orders]
+            nav_cache_set(cache_key, data, 45)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "payments", "orders": data})
     finally:
         db.close()
@@ -3987,15 +4048,19 @@ def my_expired_orders(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        orders = (
-            db.query(WinnerOrder)
-            .options(selectinload(WinnerOrder.auction))
-            .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "expired")
-            .order_by(desc(WinnerOrder.created_at))
-            .limit(50)
-            .all()
-        )
-        data = [build_order_card(x) for x in orders]
+        cache_key = f"account:expired:{user.id}"
+        data = nav_cache_get(cache_key)
+        if data is None:
+            orders = (
+                db.query(WinnerOrder)
+                .options(selectinload(WinnerOrder.auction))
+                .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "expired")
+                .order_by(desc(WinnerOrder.created_at))
+                .limit(30)
+                .all()
+            )
+            data = [build_order_card(x) for x in orders]
+            nav_cache_set(cache_key, data, 90)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "expired", "orders": data})
     finally:
         db.close()
@@ -4114,28 +4179,46 @@ def blank_admin_context() -> dict:
 
 def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0) -> dict:
     """Estatísticas mínimas para o painel abrir rápido."""
+    auction_counts = {
+        status: int(total or 0)
+        for status, total in db.query(AuctionItem.status, func.count(AuctionItem.id)).group_by(AuctionItem.status).all()
+    }
+    order_counts = {
+        status: int(total or 0)
+        for status, total in db.query(WinnerOrder.status, func.count(WinnerOrder.id)).group_by(WinnerOrder.status).all()
+    }
+    ticket_open = int(
+        db.query(func.count(SupportTicket.id))
+        .filter(SupportTicket.status.in_(["open", "in_review", "dispute"]))
+        .scalar() or 0
+    )
     stats = {
         "users": 0,
         "active_users": 0,
-        "live": db.query(AuctionItem).filter(AuctionItem.status == "live").count(),
-        "scheduled": db.query(AuctionItem).filter(AuctionItem.status.in_(["scheduled", "relisted"])).count(),
-        "pending_payment": db.query(WinnerOrder).filter(WinnerOrder.status == "pending_payment").count(),
-        "completed": db.query(AuctionItem).filter(AuctionItem.status == "ended").count(),
-        "pending_shipping": db.query(WinnerOrder).filter(WinnerOrder.status.in_(["paid", "processing", "purchased"])).count(),
+        "live": auction_counts.get("live", 0),
+        "scheduled": auction_counts.get("scheduled", 0) + auction_counts.get("relisted", 0),
+        "pending_payment": order_counts.get("pending_payment", 0),
+        "completed": auction_counts.get("ended", 0),
+        "pending_shipping": order_counts.get("paid", 0) + order_counts.get("processing", 0) + order_counts.get("purchased", 0),
         "identity_pending": 0,
         "pending_withdrawals": 0,
-        "open_tickets": db.query(SupportTicket).filter(SupportTicket.status.in_(["open", "in_review", "dispute"])).count(),
+        "open_tickets": ticket_open,
         "returned_products": returned_count,
     }
     if is_super_admin:
-        stats["users"] = db.query(User).count()
-        stats["active_users"] = db.query(User).filter(User.is_banned == False).count()
-        stats["identity_pending"] = db.query(User).filter(User.identity_status == "pending").count()
-        stats["pending_withdrawals"] = db.query(WithdrawalRequest).filter(WithdrawalRequest.status == "pending").count()
+        user_rows = {
+            str(key): int(total or 0)
+            for key, total in db.query(User.identity_status, func.count(User.id)).group_by(User.identity_status).all()
+        }
+        stats["users"] = sum(user_rows.values())
+        stats["active_users"] = int(db.query(func.count(User.id)).filter(User.is_banned == False).scalar() or 0)
+        stats["identity_pending"] = user_rows.get("pending", 0)
+        stats["pending_withdrawals"] = order_counts.get("__unused__", 0)
+        stats["pending_withdrawals"] = int(db.query(func.count(WithdrawalRequest.id)).filter(WithdrawalRequest.status == "pending").scalar() or 0)
     return stats
 
 
-def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0, ttl_seconds: int = 60) -> dict:
+def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0, ttl_seconds: int = 120) -> dict:
     key = f"admin:light-stats:{int(is_super_admin)}:{int(returned_count)}"
     cached = nav_cache_get(key)
     if cached is not None:
@@ -4143,7 +4226,7 @@ def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: 
     return nav_cache_set(key, admin_light_stats(db, is_super_admin, returned_count), ttl_seconds)
 
 
-def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 90) -> dict:
+def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 180) -> dict:
     """Blocos financeiros pesados com cache curto.
 
     Fluxo de Caixa e Resumo Geral eram as abas mais lentas. Como são telas de
