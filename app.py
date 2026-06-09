@@ -131,7 +131,7 @@ class AuctionItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(150))
     description: Mapped[str] = mapped_column(Text, default="")
-    image_url: Mapped[str] = mapped_column(String(500), default="https://via.placeholder.com/900x600?text=Produto")
+    image_url: Mapped[str] = mapped_column(Text, default="https://via.placeholder.com/900x600?text=Produto")
     source_store: Mapped[str] = mapped_column(String(80), default="Mercado Livre")
     source_url: Mapped[str] = mapped_column(String(600), default="")
     source_price: Mapped[float] = mapped_column(Float, default=0.0)
@@ -2597,6 +2597,12 @@ def ensure_columns() -> None:
 
         if inspector.has_table("auction_items"):
             cols = {c["name"] for c in inspector.get_columns("auction_items")}
+            # Produto usa data URL quando a imagem é enviada pelo admin.
+            # No PostgreSQL, bancos antigos tinham image_url como VARCHAR(500),
+            # o que estourava ao salvar base64. Convertendo para TEXT,
+            # a imagem passa a acompanhar o produto no próprio banco.
+            if engine.dialect.name == "postgresql" and "image_url" in cols:
+                conn.execute(text("ALTER TABLE auction_items ALTER COLUMN image_url TYPE TEXT"))
             for name, ddl in {
                 "source_url": "VARCHAR(600) DEFAULT ''",
                 "chat_paused": "BOOLEAN DEFAULT 0",
