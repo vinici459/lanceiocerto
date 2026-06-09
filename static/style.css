@@ -288,3 +288,35 @@ body.page-leaving .page-content-shell{opacity:.97;transform:translateY(1px);tran
 .page-progress-bar.done{width:100%;opacity:0;}
 body.page-loading a,body.page-loading button{cursor:progress;}
 .nav a.active{color:#93c5fd;}
+
+
+/* Ajuste profissional do Admin: a sidebar fica independente do conteúdo da aba.
+   Assim, listas grandes em Leilões Finalizados/Envios não impedem acessar itens
+   mais abaixo do Controle Geral. */
+.admin-production-page{
+  min-height:calc(100vh - 74px) !important;
+}
+.admin-production-page .account-layout{
+  align-items:start !important;
+}
+.admin-production-sidebar{
+  max-height:calc(100dvh - 96px) !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  padding-bottom:18px !important;
+  -webkit-overflow-scrolling:touch !important;
+}
+.admin-production-sidebar .side-link{
+  margin-bottom:8px !important;
+}
+.admin-production-content{
+  min-width:0 !important;
+}
+@media(max-width:980px){
+  .admin-production-sidebar{
+    position:relative !important;
+    top:auto !important;
+    max-height:none !important;
+    overflow:visible !important;
+  }
+}

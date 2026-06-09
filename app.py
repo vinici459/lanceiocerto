@@ -1846,23 +1846,23 @@ def _sum_scalar(db: Session, expr, *filters) -> float:
 
 
 def build_finance_dashboard(db: Session) -> dict:
-    """Indicadores de caixa com menos idas ao banco.
+    """Indicadores de caixa usando os totais cacheados dos leilões.
 
-    Antes esta função fazia várias somas separadas e ainda varria notas de
-    WalletTransaction para tentar descobrir pedidos já registrados. Em Railway,
-    cada ida remota ao Postgres custa muito; consolidar as agregações deixa
-    Fluxo de Caixa e Resumo Geral bem mais leves.
+    O painel financeiro não precisa somar a tabela inteira de lances a cada
+    abertura do Admin. Cada lance já atualiza AuctionItem.total_bid_spent,
+    AuctionItem.total_bid_fees e AuctionItem.current_price. Somar a tabela de
+    leilões é muito mais leve e mantém o mesmo resultado operacional.
     """
     paid_statuses = ["paid", "processing", "purchased", "sent", "delivered"]
 
-    bid_row = db.query(
-        func.coalesce(func.sum(Bid.bid_value), 0.0),
-        func.coalesce(func.sum(Bid.fee_value), 0.0),
-        func.coalesce(func.sum(Bid.price_increment), 0.0),
+    auction_row = db.query(
+        func.coalesce(func.sum(AuctionItem.total_bid_spent), 0.0),
+        func.coalesce(func.sum(AuctionItem.total_bid_fees), 0.0),
+        func.coalesce(func.sum(AuctionItem.current_price), 0.0),
     ).first()
-    total_bid_spent = BR((bid_row[0] if bid_row else 0.0) or 0.0)
-    total_fees = BR((bid_row[1] if bid_row else 0.0) or 0.0)
-    bid_product_cash = BR((bid_row[2] if bid_row else 0.0) or 0.0)
+    total_bid_spent = BR((auction_row[0] if auction_row else 0.0) or 0.0)
+    total_fees = BR((auction_row[1] if auction_row else 0.0) or 0.0)
+    bid_product_cash = BR((auction_row[2] if auction_row else 0.0) or 0.0)
 
     order_row = db.query(
         func.coalesce(func.sum(WinnerOrder.final_price), 0.0),
@@ -1871,9 +1871,6 @@ def build_finance_dashboard(db: Session) -> dict:
         WinnerOrder.status.in_(paid_statuses)
     ).first()
     total_payments = BR((order_row[0] if order_row else 0.0) or 0.0)
-
-    # Saída prevista: pedidos pagos/em processamento que ainda precisam de compra/envio.
-    # Mantemos simples e rápido; a saída real já é descontada em product_outgoing.
     expected_products = BR((order_row[1] if order_row else 0.0) or 0.0)
 
     tx_rows = db.query(
@@ -1933,7 +1930,7 @@ def build_cashflow_movements(db: Session) -> list[dict]:
     positivo para o caixa do leilão.
     """
     rows: list[dict] = []
-    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(50).all()
+    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(35).all()
     user_ids = {tx.user_id for tx in transactions if tx.user_id}
     users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
 
@@ -1981,24 +1978,15 @@ def build_cashflow_movements(db: Session) -> list[dict]:
         running = BR(running + BR(r.get("amount") or 0.0))
         r["balance_after"] = running
     rows.sort(key=lambda r: r.get("created_at") or datetime.min, reverse=True)
-    return rows[:80]
+    return rows[:50]
 
 
 def build_auction_results(db: Session) -> list[dict]:
     rows = []
-    items = db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(35).all()
+    items = db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(25).all()
     item_ids = [i.id for i in items]
     if not item_ids:
         return rows
-
-    bid_aggs = {
-        row.auction_id: row for row in db.query(
-            Bid.auction_id.label("auction_id"),
-            func.coalesce(func.sum(Bid.bid_value), 0.0).label("gross_bids"),
-            func.coalesce(func.sum(Bid.fee_value), 0.0).label("fees_total"),
-            func.coalesce(func.sum(Bid.price_increment), 0.0).label("product_cash"),
-        ).filter(Bid.auction_id.in_(item_ids)).group_by(Bid.auction_id).all()
-    }
 
     orders_by_auction: dict[int, WinnerOrder] = {}
     for order in db.query(WinnerOrder).filter(WinnerOrder.auction_id.in_(item_ids)).order_by(desc(WinnerOrder.created_at)).all():
@@ -2007,15 +1995,12 @@ def build_auction_results(db: Session) -> list[dict]:
     outgoing_by_order: dict[int, float] = {}
     order_ids = [order.id for order in orders_by_auction.values() if order]
     if order_ids:
-        # WalletTransaction não possui order_id; o vínculo fica no texto da nota.
-        # Para não varrer a tabela inteira, olhamos uma janela recente e filtramos
-        # apenas os pedidos que aparecem no relatório carregado.
         wanted_order_ids = set(order_ids)
         product_txs = (
             db.query(WalletTransaction)
             .filter(WalletTransaction.kind == "product_outgoing")
             .order_by(desc(WalletTransaction.created_at))
-            .limit(200)
+            .limit(120)
             .all()
         )
         for tx in product_txs:
@@ -2026,12 +2011,11 @@ def build_auction_results(db: Session) -> list[dict]:
                     outgoing_by_order[order_id] = BR(outgoing_by_order.get(order_id, 0.0) + abs(tx.amount or 0.0))
 
     for item in items:
-        agg = bid_aggs.get(item.id)
         order = orders_by_auction.get(item.id)
         source_price = BR(item.source_price or 0.0)
-        gross_bids = BR(getattr(agg, "gross_bids", 0.0) if agg else 0.0)
-        fees_total = BR(getattr(agg, "fees_total", 0.0) if agg else (item.total_bid_fees or 0.0))
-        product_cash = BR(getattr(agg, "product_cash", 0.0) if agg else max(0.0, gross_bids - fees_total))
+        gross_bids = BR(getattr(item, "total_bid_spent", 0.0) or 0.0)
+        fees_total = BR(getattr(item, "total_bid_fees", 0.0) or 0.0)
+        product_cash = BR(getattr(item, "current_price", 0.0) or 0.0)
         final_price = BR(order.final_price if order and order.status in ["paid", "processing", "purchased", "sent", "delivered"] else 0.0)
         outgoing = BR(outgoing_by_order.get(order.id, 0.0) if order else 0.0)
         cash_total = BR(gross_bids + final_price)
@@ -2384,6 +2368,9 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_auction_created ON winner_orders (auction_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_user_created ON wallet_transactions (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_kind_created ON wallet_transactions (kind, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_created ON wallet_transactions (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_withdrawals_status_created ON withdrawal_requests (status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_users_identity_created ON users (identity_status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_withdrawals_user_created ON withdrawal_requests (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_support_tickets_user_created ON support_tickets (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
@@ -4231,18 +4218,25 @@ def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: 
     return nav_cache_set(key, admin_light_stats(db, is_super_admin, returned_count), ttl_seconds)
 
 
-def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 180) -> dict:
-    """Blocos financeiros pesados com cache curto.
+def cached_admin_finance_summary(db: Session, ttl_seconds: int = 180) -> dict:
+    cached = nav_cache_get("admin:finance-summary")
+    if cached is not None:
+        return cached
+    return nav_cache_set("admin:finance-summary", build_finance_dashboard(db), ttl_seconds)
 
-    Fluxo de Caixa e Resumo Geral eram as abas mais lentas. Como são telas de
-    leitura administrativa, cache de poucos segundos reduz troca de abas sem
-    esconder alterações por muito tempo.
+
+def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 180) -> dict:
+    """Blocos financeiros completos com cache curto.
+
+    O resumo financeiro usa totais cacheados dos leilões. As tabelas detalhadas
+    continuam disponíveis, mas com limites menores para o Admin não travar ao
+    trocar de aba.
     """
     cached = nav_cache_get("admin:cashflow-context")
     if cached is not None:
         return cached
     value = {
-        "finance": build_finance_dashboard(db),
+        "finance": cached_admin_finance_summary(db, ttl_seconds),
         "cashflow_movements": build_cashflow_movements(db),
         "auction_results": build_auction_results(db),
     }
@@ -4302,6 +4296,8 @@ def admin_dashboard(request: Request):
         # carregar financeiro, auditoria, usuários nem pedidos.
         if active_panel == "admin-dashboard":
             ctx["stats"] = cached_admin_light_stats(db, is_super_admin)
+            if is_super_admin:
+                ctx["finance"] = cached_admin_finance_summary(db)
         elif active_panel == "admin-cashflow" and is_super_admin:
             cashflow_ctx = cached_admin_cashflow_context(db)
             ctx.update(cashflow_ctx)
@@ -4319,12 +4315,32 @@ def admin_dashboard(request: Request):
                 item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
             ctx["items"] = items
         elif active_panel in {"admin-pending-payments", "admin-shipping", "admin-search-orders"}:
-            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(20).all()
+            orders_query = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user))
+            if active_panel == "admin-pending-payments":
+                orders_query = orders_query.filter(WinnerOrder.status == "pending_payment")
+            elif active_panel == "admin-shipping":
+                orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "processing", "purchased"]))
+            elif active_panel == "admin-search-orders":
+                if search:
+                    like = f"%{search}%"
+                    orders_query = orders_query.join(AuctionItem, AuctionItem.id == WinnerOrder.auction_id).join(User, User.id == WinnerOrder.user_id).filter(
+                        or_(
+                            AuctionItem.title.ilike(like),
+                            User.full_name.ilike(like),
+                            User.public_name.ilike(like),
+                            User.email.ilike(like),
+                            User.cpf.ilike(like),
+                            WinnerOrder.tracking_code.ilike(like),
+                        )
+                    )
+                else:
+                    orders_query = orders_query.filter(WinnerOrder.status.in_(["sent", "delivered", "dispute", "resolved", "closed"]))
+            orders = orders_query.order_by(desc(WinnerOrder.created_at)).limit(20).all()
             ctx["orders"] = orders
             ctx["admin_order_cards"] = build_admin_order_cards(db, orders)
-            ctx["pending_payment_orders"] = [o for o in orders if o.status == "pending_payment"]
-            ctx["shipping_orders"] = [o for o in orders if o.status in ["paid", "processing", "purchased"]]
-            ctx["consultation_orders"] = [o for o in orders if o.status in ["sent", "delivered", "dispute", "resolved", "closed"]]
+            ctx["pending_payment_orders"] = orders if active_panel == "admin-pending-payments" else []
+            ctx["shipping_orders"] = orders if active_panel == "admin-shipping" else []
+            ctx["consultation_orders"] = orders if active_panel == "admin-search-orders" else []
         elif active_panel == "admin-finished":
             ctx["finished_auctions"] = cached_finished_auctions(db)
         elif active_panel == "admin-users" and is_super_admin:
