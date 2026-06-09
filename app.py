@@ -817,9 +817,6 @@ def safe_image_url(value: str) -> str:
     return url
 
 
-
-templates.env.globals["safe_image_url"] = safe_image_url
-
 def public_user_name(user: Optional["User"]) -> str:
     if not user:
         return "—"
@@ -1936,7 +1933,7 @@ def build_cashflow_movements(db: Session) -> list[dict]:
     positivo para o caixa do leilão.
     """
     rows: list[dict] = []
-    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(80).all()
+    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(50).all()
     user_ids = {tx.user_id for tx in transactions if tx.user_id}
     users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
 
@@ -1989,7 +1986,7 @@ def build_cashflow_movements(db: Session) -> list[dict]:
 
 def build_auction_results(db: Session) -> list[dict]:
     rows = []
-    items = db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(60).all()
+    items = db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(35).all()
     item_ids = [i.id for i in items]
     if not item_ids:
         return rows
@@ -2018,7 +2015,7 @@ def build_auction_results(db: Session) -> list[dict]:
             db.query(WalletTransaction)
             .filter(WalletTransaction.kind == "product_outgoing")
             .order_by(desc(WalletTransaction.created_at))
-            .limit(400)
+            .limit(200)
             .all()
         )
         for tx in product_txs:
@@ -2112,7 +2109,7 @@ def build_order_card(order: WinnerOrder) -> dict:
         "auction_id": order.auction_id,
         "status": order.status,
         "auction_title": order.auction.title,
-        "image_url": safe_image_url(order.auction.image_url),
+        "image_url": order.auction.image_url,
         "final_price": BR(order.final_price),
         "deadline_label": fmt_deadline(order.payment_deadline),
         "remaining_label": remaining_label(order.payment_deadline),
@@ -3818,10 +3815,15 @@ def my_receipts(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(40).all()
-        orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(40).all()
-        audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(40).all()
-        return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", "wallet_transactions": transactions, "orders_raw": orders, "audit_logs": audits})
+        cache_key = f"account:receipts:{user.id}"
+        data = nav_cache_get(cache_key)
+        if data is None:
+            transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id == user.id).order_by(desc(WalletTransaction.created_at)).limit(25).all()
+            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(25).all()
+            audits = db.query(AuditLog).filter(AuditLog.user_id == user.id).order_by(desc(AuditLog.created_at)).limit(25).all()
+            data = {"wallet_transactions": transactions, "orders_raw": orders, "audit_logs": audits}
+            nav_cache_set(cache_key, data, 60)
+        return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", **data})
     finally:
         db.close()
 
@@ -3920,7 +3922,7 @@ def my_wins(request: Request):
         cache_key = f"account:wins:{user.id}"
         data = nav_cache_get(cache_key)
         if data is None:
-            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(30).all()
+            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(20).all()
             data = [build_order_card(x) for x in orders]
             nav_cache_set(cache_key, data, 90)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wins", "orders": data})
@@ -4078,7 +4080,7 @@ def build_finished_auctions(db: Session) -> list[dict]:
         .options(selectinload(AuctionItem.winner))
         .filter(AuctionItem.status.in_(finished_status))
         .order_by(desc(AuctionItem.created_at))
-        .limit(80)
+        .limit(40)
         .all()
     )
     item_ids = [item.id for item in items]
@@ -4216,6 +4218,7 @@ def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0
         stats["users"] = sum(user_rows.values())
         stats["active_users"] = int(db.query(func.count(User.id)).filter(User.is_banned == False).scalar() or 0)
         stats["identity_pending"] = user_rows.get("pending", 0)
+        stats["pending_withdrawals"] = order_counts.get("__unused__", 0)
         stats["pending_withdrawals"] = int(db.query(func.count(WithdrawalRequest.id)).filter(WithdrawalRequest.status == "pending").scalar() or 0)
     return stats
 
@@ -4316,7 +4319,7 @@ def admin_dashboard(request: Request):
                 item.expected_profit_if_paid = auction_expected_profit_if_paid(item)
             ctx["items"] = items
         elif active_panel in {"admin-pending-payments", "admin-shipping", "admin-search-orders"}:
-            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(40).all()
+            orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user)).order_by(desc(WinnerOrder.created_at)).limit(20).all()
             ctx["orders"] = orders
             ctx["admin_order_cards"] = build_admin_order_cards(db, orders)
             ctx["pending_payment_orders"] = [o for o in orders if o.status == "pending_payment"]
@@ -4329,11 +4332,11 @@ def admin_dashboard(request: Request):
             if search:
                 like = f"%{search}%"
                 users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-            users = users_query.order_by(desc(User.created_at)).limit(40).all()
+            users = users_query.order_by(desc(User.created_at)).limit(30).all()
             ctx["users"] = users
             ctx["user_audit"] = user_audit_map(db, users)
         elif active_panel == "admin-identity-pending" and is_super_admin:
-            ctx["identity_pending_users"] = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(40).all()
+            ctx["identity_pending_users"] = db.query(User).filter(User.identity_status == "pending").order_by(desc(User.created_at)).limit(30).all()
         elif active_panel == "admin-withdrawals" and is_super_admin:
             ctx["withdrawal_requests"] = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all()
         elif active_panel == "admin-tickets":

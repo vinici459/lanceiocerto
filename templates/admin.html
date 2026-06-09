@@ -9,43 +9,41 @@
         <p>Gestão profissional de leilões, caixa, usuários e operação.</p>
       </div>
 
-      <div class="admin-nav-groups" aria-label="Navegação do painel administrativo">
+      <nav class="admin-sidebar-nav" aria-label="Menu do painel administrativo">
         {% if user.is_superadmin %}
-        <div class="admin-nav-group">
-          <span class="admin-nav-title">Visão e dinheiro</span>
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Visão geral</span>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-dashboard' %}active{% endif %}" href="/admin?tab=admin-dashboard" data-target="admin-dashboard" data-no-prefetch="true">Resumo Geral</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-cashflow' %}active{% endif %}" href="/admin?tab=admin-cashflow" data-target="admin-cashflow" data-no-prefetch="true">Fluxo de Caixa</a>
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}" href="/admin?tab=admin-withdrawals" data-target="admin-withdrawals" data-no-prefetch="true">Saques Pendentes</a>
         </div>
         {% endif %}
 
-        <div class="admin-nav-group">
-          <span class="admin-nav-title">Operação dos leilões</span>
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Leilões</span>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-product' %}active{% endif %}" href="/admin?tab=admin-product" data-target="admin-product" data-no-prefetch="true">Cadastrar Produto</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-returned' %}active{% endif %}" href="/admin?tab=admin-returned" data-target="admin-returned" data-no-prefetch="true">Produtos Retornados</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-auctions' %}active{% endif %}" href="/admin?tab=admin-auctions" data-target="admin-auctions" data-no-prefetch="true">Gerenciar Leilões</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-finished' %}active{% endif %}" href="/admin?tab=admin-finished" data-target="admin-finished" data-no-prefetch="true">Leilões Finalizados</a>
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-returned' %}active{% endif %}" href="/admin?tab=admin-returned" data-target="admin-returned" data-no-prefetch="true">Produtos Retornados</a>
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}" href="/admin?tab=admin-pending-payments" data-target="admin-pending-payments" data-no-prefetch="true">Leilões Pendentes</a>{% endif %}
           <a class="side-link admin-link {% if admin_active_panel == 'admin-shipping' %}active{% endif %}" href="/admin?tab=admin-shipping" data-target="admin-shipping" data-no-prefetch="true">Envios Pendentes</a>
         </div>
 
-        {% if user.is_superadmin %}
-        <div class="admin-nav-group">
-          <span class="admin-nav-title">Usuários e segurança</span>
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-users' %}active{% endif %}" href="/admin?tab=admin-users" data-target="admin-users" data-no-prefetch="true">Usuários</a>
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}" href="/admin?tab=admin-identity-pending" data-target="admin-identity-pending" data-no-prefetch="true">Usuários pendentes</a>
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-audit' %}active{% endif %}" href="/admin?tab=admin-audit" data-target="admin-audit" data-no-prefetch="true">Auditoria Geral</a>
-        </div>
-        {% endif %}
-
-        <div class="admin-nav-group">
-          <span class="admin-nav-title">Atendimento</span>
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Usuários e suporte</span>
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-users' %}active{% endif %}" href="/admin?tab=admin-users" data-target="admin-users" data-no-prefetch="true">Usuários</a>{% endif %}
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}" href="/admin?tab=admin-identity-pending" data-target="admin-identity-pending" data-no-prefetch="true">Usuários pendentes</a>{% endif %}
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}" href="/admin?tab=admin-withdrawals" data-target="admin-withdrawals" data-no-prefetch="true">Saques Pendentes</a>{% endif %}
           <a class="side-link admin-link {% if admin_active_panel == 'admin-tickets' %}active{% endif %}" href="/admin?tab=admin-tickets" data-target="admin-tickets" data-no-prefetch="true">Chamados/Disputas</a>
+        </div>
+
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Ferramentas</span>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}" href="/admin?tab=admin-suggestions" data-target="admin-suggestions" data-no-prefetch="true">Indicações</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}" href="/admin?tab=admin-search-orders" data-target="admin-search-orders" data-no-prefetch="true">Consulta</a>
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-audit' %}active{% endif %}" href="/admin?tab=admin-audit" data-target="admin-audit" data-no-prefetch="true">Auditoria Geral</a>{% endif %}
           <a class="side-link admin-link {% if admin_active_panel == 'admin-moderation' %}active{% endif %}" href="/admin?tab=admin-moderation" data-target="admin-moderation" data-no-prefetch="true">Moderação</a>
         </div>
-      </div>
+      </nav>
     </aside>
 
     <div class="account-content admin-content-clean admin-production-content">
@@ -281,7 +279,7 @@
         <div class="returned-card-grid">
           {% for item in returned_items if returned_items is defined %}
           <article class="returned-mini-card">
-            <img src="{{ safe_image_url(item.image_url) }}" alt="{{ item.title }}" loading="lazy" decoding="async">
+            <img src="{{ item.image_url }}" alt="{{ item.title }}" loading="lazy" decoding="async">
             <div>
               <h3>{{ item.title }}</h3>
               <p>Original: <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></p>
@@ -928,7 +926,7 @@
               {% set f = card.finance %}
               <article class="admin-order-card" data-search="{{ (o.user.full_name ~ ' ' ~ o.user.email ~ ' ' ~ o.user.cpf ~ ' ' ~ o.auction.title ~ ' ' ~ o.status)|lower }}">
                 <div class="admin-order-summary">
-                  <img src="{{ safe_image_url(o.auction.image_url) }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async">
+                  <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async">
                   <div>
                     <h3>{{ o.auction.title }}</h3>
                     <p><strong>Ganhador:</strong> {{ o.user.full_name }} • {{ o.user.email }}</p>
@@ -1204,9 +1202,14 @@ document.addEventListener("DOMContentLoaded", function () {
 <style>
 .admin-production-page .admin-panel { display: none; }
 .admin-production-page .admin-panel.active { display: block; }
-.admin-production-sidebar { position: sticky; top: 86px; align-self: flex-start; }
+.admin-production-sidebar { position: sticky; top: 86px; align-self: flex-start; max-height: calc(100vh - 104px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .admin-sidebar-top { margin-bottom: 18px; }
 .admin-sidebar-top p { margin: 8px 0 0; opacity: .78; line-height: 1.4; }
+.admin-sidebar-nav { display: grid; gap: 14px; padding-right: 4px; }
+.admin-menu-group { padding: 10px; border: 1px solid rgba(255,255,255,.07); border-radius: 16px; background: rgba(255,255,255,.025); }
+.admin-menu-label { display: block; margin: 0 0 8px; color: #93c5fd; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.admin-menu-group .side-link, .admin-menu-group .admin-link { margin-bottom: 8px; }
+.admin-menu-group .side-link:last-child, .admin-menu-group .admin-link:last-child { margin-bottom: 0; }
 .admin-badge { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 12px; margin-bottom: 10px; }
 .admin-section-head-pro { align-items: center; gap: 14px; }
 .admin-kpi-grid, .admin-finance-grid { margin-bottom: 18px; }
@@ -1242,7 +1245,7 @@ document.addEventListener("DOMContentLoaded", function () {
 .admin-user-detail-card { padding: 16px; border-radius: 16px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); }
 .admin-user-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .admin-production-page table small { opacity: .72; }
-@media (max-width: 980px) { .admin-production-sidebar { position: static; } .admin-section-head-pro { align-items: flex-start; } }
+@media (max-width: 980px) { .admin-production-sidebar { position: static; max-height: none; overflow: visible; } .admin-section-head-pro { align-items: flex-start; } }
 
 .suggestion-admin-bar {
   width: 100%;
