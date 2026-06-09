@@ -2636,8 +2636,11 @@ def ensure_columns() -> None:
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE withdrawal_requests ADD COLUMN {name} {ddl}"))
-            conn.execute(text("UPDATE withdrawal_requests SET fee_amount = ROUND(COALESCE(amount,0) * 0.01, 2) WHERE COALESCE(fee_amount, 0) = 0 AND COALESCE(amount,0) > 0"))
-            conn.execute(text("UPDATE withdrawal_requests SET net_amount = ROUND(COALESCE(amount,0) - COALESCE(fee_amount,0), 2) WHERE COALESCE(net_amount, 0) = 0 AND COALESCE(amount,0) > 0"))
+            # Correção compatível com SQLite e PostgreSQL/Railway:
+            # não usamos ROUND(double precision, integer), porque no PostgreSQL essa assinatura não existe.
+            # O arredondamento visual continua sendo feito na tela com 2 casas decimais; aqui gravamos os valores base.
+            conn.execute(text("UPDATE withdrawal_requests SET fee_amount = COALESCE(amount,0) * 0.01 WHERE COALESCE(fee_amount, 0) = 0 AND COALESCE(amount,0) > 0"))
+            conn.execute(text("UPDATE withdrawal_requests SET net_amount = COALESCE(amount,0) - COALESCE(fee_amount,0) WHERE COALESCE(net_amount, 0) = 0 AND COALESCE(amount,0) > 0"))
 
 
         # Índices leves para as consultas mais repetidas da home, conta, admin e leilão.
