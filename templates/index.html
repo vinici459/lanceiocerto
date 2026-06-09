@@ -72,7 +72,7 @@
         {% for item in live_items %}
         <article class="card lc-auction-card" data-auction-card data-title="{{ item.title|lower }}">
           <div class="auction-media">
-            <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
+            <img onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';" src="{{ safe_image_url(item.image_url) }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
             <span class="status-badge live">AO VIVO</span>
           </div>
 
@@ -120,7 +120,7 @@
         {% for item in upcoming_items %}
         <article class="card lc-auction-card" data-auction-card data-title="{{ item.title|lower }}">
           <div class="auction-media">
-            <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
+            <img onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';" src="{{ safe_image_url(item.image_url) }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
             <span class="status-badge scheduled">PRÓXIMO</span>
           </div>
 
@@ -176,7 +176,7 @@
         {% for item in ended_items %}
         <article class="card lc-auction-card ended" data-auction-card data-title="{{ item.title|lower }}">
           <div class="auction-media">
-            <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
+            <img onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';" src="{{ safe_image_url(item.image_url) }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
             <span class="status-badge ended">ENCERRADO</span>
           </div>
 

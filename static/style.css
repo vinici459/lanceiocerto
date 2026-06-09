@@ -252,3 +252,23 @@ body.page-leaving .page-content-shell{opacity:.97;transform:translateY(1px);tran
 .page-progress-bar.done{width:100%;opacity:0;}
 body.page-loading a,body.page-loading button{cursor:progress;}
 .nav a.active{color:#93c5fd;}
+
+/* Uploads antigos/quebrados: mantém visual profissional quando o arquivo físico não existe mais. */
+.image-fallback-applied{
+  object-fit:cover;
+  filter:saturate(.85) brightness(.92);
+}
+.identity-doc-link.missing-upload{
+  display:grid;
+  place-items:center;
+  min-height:120px;
+  border:1px dashed rgba(148,163,184,.35);
+  border-radius:14px;
+  background:rgba(148,163,184,.08);
+}
+.identity-doc-link.missing-upload::after{
+  content:"Arquivo indisponível";
+  color:#cbd5e1;
+  font-weight:800;
+  font-size:13px;
+}

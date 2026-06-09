@@ -172,6 +172,19 @@
     setInterval(tickCountdowns, 1000);
   }
 
+  function initBrokenImageFallbacks() {
+    const fallback = "/static/lanceio_hero_slide_01.png";
+    document.querySelectorAll("img").forEach((img) => {
+      if (img.dataset.fallbackBound === "true") return;
+      img.dataset.fallbackBound = "true";
+      img.addEventListener("error", () => {
+        if (img.src && img.src.endsWith(fallback)) return;
+        img.src = fallback;
+        img.classList.add("image-fallback-applied");
+      });
+    });
+  }
+
   function initAccountHashHelpers() {
     const balancePanel = document.getElementById("account-balance-panel");
     if (!balancePanel) return;
@@ -192,6 +205,7 @@
     initPageTransitions();
     initHomeTabs();
     initCountdowns();
+    initBrokenImageFallbacks();
     initAccountHashHelpers();
   });
 })();

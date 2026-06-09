@@ -260,7 +260,7 @@
         <div class="returned-card-grid">
           {% for item in returned_items if returned_items is defined %}
           <article class="returned-mini-card">
-            <img src="{{ item.image_url }}" alt="{{ item.title }}" loading="lazy" decoding="async">
+            <img onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';" src="{{ safe_image_url(item.image_url) }}" alt="{{ item.title }}" loading="lazy" decoding="async">
             <div>
               <h3>{{ item.title }}</h3>
               <p>Original: <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></p>
@@ -567,9 +567,9 @@
                         <div><span>Observação</span><strong>{{ u.identity_note or '—' }}</strong></div>
                       </div>
                       <div class="admin-user-docs">
-                        {% if u.document_file_url %}<a class="btn small ghost" href="{{ u.document_file_url }}" target="_blank">Abrir frente do documento</a>{% endif %}
-                        {% if u.document_back_file_url %}<a class="btn small ghost" href="{{ u.document_back_file_url }}" target="_blank">Abrir verso do documento</a>{% endif %}
-                        {% if u.selfie_file_url %}<a class="btn small ghost" href="{{ u.selfie_file_url }}" target="_blank">Abrir selfie</a>{% endif %}
+                        {% if safe_upload_url(u.document_file_url) %}<a class="btn small ghost" href="{{ safe_upload_url(u.document_file_url) }}" target="_blank">Abrir frente do documento</a>{% endif %}
+                        {% if safe_upload_url(u.document_back_file_url) %}<a class="btn small ghost" href="{{ safe_upload_url(u.document_back_file_url) }}" target="_blank">Abrir verso do documento</a>{% endif %}
+                        {% if safe_upload_url(u.selfie_file_url) %}<a class="btn small ghost" href="{{ safe_upload_url(u.selfie_file_url) }}" target="_blank">Abrir selfie</a>{% endif %}
                       </div>
                       <div class="admin-user-actions">
                         <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form"><input name="note" placeholder="Observação da conferência"><button class="btn small" type="submit">Dar selo confirmado</button></form>
@@ -653,33 +653,33 @@
                       <div class="identity-doc-grid identity-doc-grid-4">
                         <div>
                           <span>Frente do documento</span>
-                          {% if u.document_file_url %}
-                            <a class="identity-doc-link" href="{{ u.document_file_url }}" target="_blank" rel="noopener">
-                              {% if u.document_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_file_url }}" alt="Frente do documento" loading="lazy">{% endif %}
+                          {% if safe_upload_url(u.document_file_url) %}
+                            <a class="identity-doc-link" href="{{ safe_upload_url(u.document_file_url) }}" target="_blank" rel="noopener">
+                              {% if is_pdf_url(safe_upload_url(u.document_file_url)) %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img onerror="this.onerror=null;this.closest('.identity-doc-link')?.classList.add('missing-upload');this.style.display='none';" src="{{ safe_upload_url(u.document_file_url) }}" alt="Frente do documento" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviado.</p>{% endif %}
                         </div>
                         <div>
                           <span>Verso do documento</span>
-                          {% if u.document_back_file_url %}
-                            <a class="identity-doc-link" href="{{ u.document_back_file_url }}" target="_blank" rel="noopener">
-                              {% if u.document_back_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_back_file_url }}" alt="Verso do documento" loading="lazy">{% endif %}
+                          {% if safe_upload_url(u.document_back_file_url) %}
+                            <a class="identity-doc-link" href="{{ safe_upload_url(u.document_back_file_url) }}" target="_blank" rel="noopener">
+                              {% if is_pdf_url(safe_upload_url(u.document_back_file_url)) %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img onerror="this.onerror=null;this.closest('.identity-doc-link')?.classList.add('missing-upload');this.style.display='none';" src="{{ safe_upload_url(u.document_back_file_url) }}" alt="Verso do documento" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviado.</p>{% endif %}
                         </div>
                         <div>
                           <span>Selfie atual</span>
-                          {% if u.selfie_file_url %}
-                            <a class="identity-doc-link" href="{{ u.selfie_file_url }}" target="_blank" rel="noopener">
-                              {% if u.selfie_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir arquivo</span>{% else %}<img src="{{ u.selfie_file_url }}" alt="Selfie" loading="lazy">{% endif %}
+                          {% if safe_upload_url(u.selfie_file_url) %}
+                            <a class="identity-doc-link" href="{{ safe_upload_url(u.selfie_file_url) }}" target="_blank" rel="noopener">
+                              {% if is_pdf_url(safe_upload_url(u.selfie_file_url)) %}<span class="identity-pdf-preview">PDF — abrir arquivo</span>{% else %}<img onerror="this.onerror=null;this.closest('.identity-doc-link')?.classList.add('missing-upload');this.style.display='none';" src="{{ safe_upload_url(u.selfie_file_url) }}" alt="Selfie" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviada.</p>{% endif %}
                         </div>
                         <div>
                           <span>Comprovante de residência</span>
-                          {% if u.residence_proof_file_url %}
-                            <a class="identity-doc-link" href="{{ u.residence_proof_file_url }}" target="_blank" rel="noopener">
-                              {% if u.residence_proof_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir comprovante</span>{% else %}<img src="{{ u.residence_proof_file_url }}" alt="Comprovante de residência" loading="lazy">{% endif %}
+                          {% if safe_upload_url(u.residence_proof_file_url) %}
+                            <a class="identity-doc-link" href="{{ safe_upload_url(u.residence_proof_file_url) }}" target="_blank" rel="noopener">
+                              {% if is_pdf_url(safe_upload_url(u.residence_proof_file_url)) %}<span class="identity-pdf-preview">PDF — abrir comprovante</span>{% else %}<img onerror="this.onerror=null;this.closest('.identity-doc-link')?.classList.add('missing-upload');this.style.display='none';" src="{{ safe_upload_url(u.residence_proof_file_url) }}" alt="Comprovante de residência" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviado.</p>{% endif %}
                         </div>
@@ -907,7 +907,7 @@
               {% set f = card.finance %}
               <article class="admin-order-card" data-search="{{ (o.user.full_name ~ ' ' ~ o.user.email ~ ' ' ~ o.user.cpf ~ ' ' ~ o.auction.title ~ ' ' ~ o.status)|lower }}">
                 <div class="admin-order-summary">
-                  <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async">
+                  <img onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';" src="{{ safe_image_url(o.auction.image_url) }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async">
                   <div>
                     <h3>{{ o.auction.title }}</h3>
                     <p><strong>Ganhador:</strong> {{ o.user.full_name }} • {{ o.user.email }}</p>
