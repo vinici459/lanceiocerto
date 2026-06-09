@@ -328,7 +328,24 @@
           <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
           <td>{{ o.remaining_label if o.status == 'pending_payment' else o.deadline_label }}</td>
           <td>{{ o.tracking_code or '—' }}</td>
-          <td>{% if o.status == 'pending_payment' %}<a class="btn small" href="{{ o.payment_link }}">Pagar agora</a>{% else %}<span class="muted">Sem ação</span>{% endif %}</td>
+          <td>
+            {% if o.status == 'pending_payment' %}
+              <a class="btn small" href="{{ o.payment_link }}">Pagar agora</a>
+            {% elif o.status == 'delivered' %}
+              <details class="account-dispute-box">
+                <summary class="btn small ghost">Abrir disputa</summary>
+                <form method="post" action="/minha-conta/chamado" enctype="multipart/form-data" class="wallet-card">
+                  <input type="hidden" name="order_id" value="{{ o.id }}">
+                  <input type="hidden" name="subject" value="Problema após entrega">
+                  <label>Descreva o problema<textarea name="message" required placeholder="Conte o que aconteceu com o produto entregue."></textarea></label>
+                  <label>Comprovante/foto opcional<input type="file" name="proof_file" accept="image/*,application/pdf"></label>
+                  <button class="btn small" type="submit">Enviar disputa</button>
+                </form>
+              </details>
+            {% else %}
+              <span class="muted">Acompanhar status</span>
+            {% endif %}
+          </td>
         </tr>
         {% else %}
         <tr><td colspan="6">Você ainda não ganhou nenhum leilão.</td></tr>

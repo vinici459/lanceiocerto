@@ -258,7 +258,12 @@ class WithdrawalRequest(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # amount = valor bruto solicitado/descontado do saldo do cliente.
     amount: Mapped[float] = mapped_column(Float, default=0.0)
+    # fee_amount = taxa de saque de 1% que fica no caixa/lucro do site.
+    fee_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    # net_amount = valor líquido que o admin deve transferir ao cliente.
+    net_amount: Mapped[float] = mapped_column(Float, default=0.0)
     pix_key: Mapped[str] = mapped_column(String(160), default="")
     status: Mapped[str] = mapped_column(String(30), default="pending")  # pending/approved/rejected/paid
     admin_note: Mapped[str] = mapped_column(Text, default="")
@@ -828,6 +833,11 @@ def safe_image_url(value: str) -> str:
     url = (value or "").strip()
     if not url:
         return STATIC_FALLBACK_IMAGE
+
+    # Imagem persistida no próprio registro do produto. Evita perder imagem
+    # enviada pelo admin quando o Railway reinicia ou faz novo deploy.
+    if url.startswith("data:image/"):
+        return url
 
     cached = SAFE_IMAGE_URL_CACHE.get(url)
     if cached:
@@ -1965,6 +1975,53 @@ def _sum_scalar(db: Session, expr, *filters) -> float:
     return BR(query.scalar() or 0.0)
 
 
+def build_finance_periods(db: Session) -> dict:
+    """Resumo diário/semanal/mensal para o admin.
+
+    Separa lucro dos lances das taxas e calcula prejuízo quando as saídas
+    registradas superam as entradas do período. Usa data de criação/pagamento
+    dos registros existentes, sem alterar regra de lance.
+    """
+    now = datetime.utcnow()
+    day_start = datetime(now.year, now.month, now.day)
+    week_start = day_start - timedelta(days=day_start.weekday())
+    month_start = datetime(now.year, now.month, 1)
+
+    def period(prefix: str, start: datetime) -> dict:
+        bid_row = db.query(
+            func.coalesce(func.sum(Bid.fee_value), 0.0),
+            func.coalesce(func.sum(Bid.price_increment), 0.0),
+            func.coalesce(func.sum(Bid.bid_value), 0.0),
+        ).filter(Bid.created_at >= start).first()
+        fees = BR((bid_row[0] if bid_row else 0.0) or 0.0)
+        bid_profit = BR((bid_row[1] if bid_row else 0.0) or 0.0)
+        bid_total = BR((bid_row[2] if bid_row else 0.0) or 0.0)
+        payments = BR(db.query(func.coalesce(func.sum(WinnerOrder.final_price), 0.0)).filter(
+            WinnerOrder.status.in_(["paid", "processing", "purchased", "sent", "delivered"]),
+            func.coalesce(WinnerOrder.paid_at, WinnerOrder.created_at) >= start,
+        ).scalar() or 0.0)
+        outgoings = BR(db.query(func.coalesce(func.sum(func.abs(WalletTransaction.amount)), 0.0)).filter(
+            WalletTransaction.kind.in_(["product_outgoing", "refund", "withdrawal_paid"]),
+            WalletTransaction.created_at >= start,
+        ).scalar() or 0.0)
+        profit = BR(fees + bid_profit + payments - outgoings)
+        return {
+            f"fees_{prefix}": fees,
+            f"bid_profit_{prefix}": bid_profit,
+            f"bid_total_{prefix}": bid_total,
+            f"payments_{prefix}": payments,
+            f"outgoing_{prefix}": outgoings,
+            f"estimated_profit_{prefix}": profit if profit > 0 else 0.0,
+            f"accumulated_loss_{prefix}": BR(abs(profit) if profit < 0 else 0.0),
+        }
+
+    result = {}
+    result.update(period("today", day_start))
+    result.update(period("week", week_start))
+    result.update(period("month", month_start))
+    return result
+
+
 def build_finance_dashboard(db: Session) -> dict:
     """Indicadores completos de caixa com o mínimo de round-trips.
 
@@ -1976,7 +2033,10 @@ def build_finance_dashboard(db: Session) -> dict:
     row = db.execute(text("""
         SELECT
           (SELECT COALESCE(SUM(total_bid_spent), 0) FROM auction_items) AS total_bid_spent,
-          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS total_fees,
+          ((SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) +
+           (SELECT COALESCE(SUM(fee_amount), 0) FROM withdrawal_requests WHERE status IN ('pending','approved','paid'))) AS total_fees,
+          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS bid_fee_total,
+          (SELECT COALESCE(SUM(fee_amount), 0) FROM withdrawal_requests WHERE status IN ('pending','approved','paid')) AS withdrawal_fee_total,
           (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
           (SELECT COALESCE(SUM(final_price), 0) FROM winner_orders WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments,
           (SELECT COALESCE(SUM(a.source_price), 0)
@@ -1984,8 +2044,8 @@ def build_finance_dashboard(db: Session) -> dict:
             WHERE o.status IN ('paid','processing','purchased','sent','delivered')) AS expected_products,
           (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'product_outgoing') AS product_outgoing,
           (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'refund') AS refunds,
-          (SELECT COALESCE(SUM(amount), 0) FROM withdrawal_requests WHERE status = 'pending') AS pending_withdrawals,
-          (SELECT COALESCE(SUM(amount), 0) FROM withdrawal_requests WHERE status = 'paid') AS paid_withdrawals,
+          (SELECT COALESCE(SUM(COALESCE(NULLIF(net_amount,0), amount)), 0) FROM withdrawal_requests WHERE status IN ('pending','approved')) AS pending_withdrawals,
+          (SELECT COALESCE(SUM(COALESCE(NULLIF(net_amount,0), amount)), 0) FROM withdrawal_requests WHERE status = 'paid') AS paid_withdrawals,
           (SELECT COALESCE(SUM(wallet_balance), 0) FROM users) AS user_wallet_total
     """)).mappings().first()
 
@@ -1994,6 +2054,8 @@ def build_finance_dashboard(db: Session) -> dict:
 
     total_bid_spent = val("total_bid_spent")
     total_fees = val("total_fees")
+    bid_fee_total = val("bid_fee_total") if "bid_fee_total" in row else total_fees
+    withdrawal_fee_total = val("withdrawal_fee_total") if "withdrawal_fee_total" in row else 0.0
     bid_product_cash = val("bid_product_cash")
     total_payments = val("total_payments")
     expected_products = val("expected_products")
@@ -2010,8 +2072,14 @@ def build_finance_dashboard(db: Session) -> dict:
     net_result = BR(total_income - total_outgoing)
     estimated_profit = BR(total_fees + total_payments + bid_product_cash - product_outgoing - refunds)
 
+    period_finance = build_finance_periods(db)
+
     return {
+        **period_finance,
         "total_fees": total_fees,
+        "bid_fee_total": bid_fee_total,
+        "withdrawal_fee_total": withdrawal_fee_total,
+        "bid_profit_total": bid_product_cash,
         "total_bid_spent": total_bid_spent,
         "bid_product_cash": bid_product_cash,
         "total_payments": total_payments,
@@ -2037,13 +2105,18 @@ def build_finance_dashboard_light(db: Session) -> dict:
     row = db.execute(text("""
         SELECT
           (SELECT COALESCE(SUM(total_bid_spent), 0) FROM auction_items) AS total_bid_spent,
-          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS total_fees,
+          ((SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) +
+           (SELECT COALESCE(SUM(fee_amount), 0) FROM withdrawal_requests WHERE status IN ('pending','approved','paid'))) AS total_fees,
+          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS bid_fee_total,
+          (SELECT COALESCE(SUM(fee_amount), 0) FROM withdrawal_requests WHERE status IN ('pending','approved','paid')) AS withdrawal_fee_total,
           (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
           (SELECT COALESCE(SUM(final_price), 0) FROM winner_orders WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments
     """)).mappings().first()
 
     total_bid_spent = BR((row["total_bid_spent"] if row else 0.0) or 0.0)
     total_fees = BR((row["total_fees"] if row else 0.0) or 0.0)
+    bid_fee_total = BR((row["bid_fee_total"] if row and "bid_fee_total" in row else total_fees) or 0.0)
+    withdrawal_fee_total = BR((row["withdrawal_fee_total"] if row and "withdrawal_fee_total" in row else 0.0) or 0.0)
     bid_product_cash = BR((row["bid_product_cash"] if row else 0.0) or 0.0)
     total_payments = BR((row["total_payments"] if row else 0.0) or 0.0)
     total_income = BR(total_bid_spent + total_payments)
@@ -2051,6 +2124,9 @@ def build_finance_dashboard_light(db: Session) -> dict:
 
     return {
         "total_fees": total_fees,
+        "bid_fee_total": bid_fee_total,
+        "withdrawal_fee_total": withdrawal_fee_total,
+        "bid_profit_total": bid_product_cash,
         "total_bid_spent": total_bid_spent,
         "bid_product_cash": bid_product_cash,
         "total_payments": total_payments,
@@ -2086,7 +2162,7 @@ def build_cashflow_movements(db: Session) -> list[dict]:
         LEFT JOIN users u ON u.id = wt.user_id
         WHERE NOT (wt.kind = 'deposit_pending' AND ABS(COALESCE(wt.amount, 0)) < 0.00001)
         ORDER BY wt.created_at DESC
-        LIMIT 12
+        LIMIT 100
     """)).mappings().all()
 
     type_labels = {
@@ -2094,6 +2170,7 @@ def build_cashflow_movements(db: Session) -> list[dict]:
         "payment": "pagamento_vencedor",
         "product_outgoing": "saida_produto",
         "withdrawal_reserved": "saque_reservado",
+        "withdrawal_fee": "taxa_de_saque",
         "withdrawal_reversal": "saque_estornado",
         "refund": "estorno",
         "manual_adjustment": "ajuste_manual",
@@ -2152,7 +2229,7 @@ def build_auction_results(db: Session) -> list[dict]:
         SELECT id, title, source_price, total_bid_spent, total_bid_fees, current_price, status, created_at
         FROM auction_items
         ORDER BY created_at DESC
-        LIMIT 8
+        LIMIT 100
     """)).mappings().all()
     if not items:
         return rows
@@ -2536,6 +2613,17 @@ def ensure_columns() -> None:
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE winner_orders ADD COLUMN {name} {ddl}"))
 
+        if inspector.has_table("withdrawal_requests"):
+            cols = {c["name"] for c in inspector.get_columns("withdrawal_requests")}
+            for name, ddl in {
+                "fee_amount": "FLOAT DEFAULT 0",
+                "net_amount": "FLOAT DEFAULT 0",
+            }.items():
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE withdrawal_requests ADD COLUMN {name} {ddl}"))
+            conn.execute(text("UPDATE withdrawal_requests SET fee_amount = ROUND(COALESCE(amount,0) * 0.01, 2) WHERE COALESCE(fee_amount, 0) = 0 AND COALESCE(amount,0) > 0"))
+            conn.execute(text("UPDATE withdrawal_requests SET net_amount = ROUND(COALESCE(amount,0) - COALESCE(fee_amount,0), 2) WHERE COALESCE(net_amount, 0) = 0 AND COALESCE(amount,0) > 0"))
+
 
         # Índices leves para as consultas mais repetidas da home, conta, admin e leilão.
         # CREATE INDEX IF NOT EXISTS funciona em SQLite e PostgreSQL.
@@ -2633,6 +2721,39 @@ def save_uploaded_image(file: Optional[UploadFile]) -> str:
         raise HTTPException(status_code=400, detail="Arquivo vazio ou inválido.")
 
     return f"/static/uploads/{final_name}"
+
+
+def save_product_image_data_url(file: Optional[UploadFile]) -> str:
+    """Salva imagem do produto no próprio banco como data URL.
+
+    No Railway, arquivos enviados para /static/uploads podem sumir em redeploy
+    ou reinício do container. Para produto de leilão, a imagem precisa acompanhar
+    o cadastro. Por isso, produto usa data URL; documentos continuam usando
+    arquivo normal para não inflar demais o banco com PDFs.
+    """
+    if not file or not file.filename:
+        return ""
+
+    original_name = Path(file.filename).name
+    ext = Path(original_name).suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        raise HTTPException(status_code=400, detail="Envie uma imagem JPG, PNG, WEBP ou GIF para o produto.")
+
+    declared_type = (file.content_type or mimetypes.guess_type(original_name)[0] or "").lower()
+    if declared_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        raise HTTPException(status_code=400, detail="Formato de imagem inválido para o produto.")
+
+    try:
+        file.file.seek(0)
+    except Exception:
+        pass
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="Imagem vazia ou inválida.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Imagem muito grande. Envie uma imagem menor.")
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{declared_type};base64,{encoded}"
 
     with engine.begin() as conn:
         inspector = inspect(engine)
@@ -4451,7 +4572,10 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
           (SELECT COUNT(*) FROM users WHERE identity_status = 'pending') AS identity_pending,
           (SELECT COUNT(*) FROM withdrawal_requests WHERE status = 'pending') AS pending_withdrawals,
           (SELECT COALESCE(SUM(total_bid_spent), 0) FROM auction_items) AS total_bid_spent,
-          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS total_fees,
+          ((SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) +
+           (SELECT COALESCE(SUM(fee_amount), 0) FROM withdrawal_requests WHERE status IN ('pending','approved','paid'))) AS total_fees,
+          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS bid_fee_total,
+          (SELECT COALESCE(SUM(fee_amount), 0) FROM withdrawal_requests WHERE status IN ('pending','approved','paid')) AS withdrawal_fee_total,
           (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
           (SELECT COALESCE(SUM(final_price), 0)
              FROM winner_orders
@@ -4480,12 +4604,19 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
 
     total_bid_spent = fv("total_bid_spent")
     total_fees = fv("total_fees")
+    bid_fee_total = fv("bid_fee_total")
+    withdrawal_fee_total = fv("withdrawal_fee_total")
     bid_product_cash = fv("bid_product_cash")
     total_payments = fv("total_payments")
     total_income = BR(total_bid_spent + total_payments)
     estimated_profit = BR(total_fees + total_payments + bid_product_cash)
+    period_finance = build_finance_periods(db)
     finance = {
+        **period_finance,
         "total_fees": total_fees,
+        "bid_fee_total": bid_fee_total,
+        "withdrawal_fee_total": withdrawal_fee_total,
+        "bid_profit_total": bid_product_cash,
         "total_bid_spent": total_bid_spent,
         "bid_product_cash": bid_product_cash,
         "total_payments": total_payments,
@@ -4649,7 +4780,7 @@ def admin_dashboard(request: Request):
             if active_panel == "admin-pending-payments":
                 orders_query = orders_query.filter(WinnerOrder.status == "pending_payment")
             elif active_panel == "admin-shipping":
-                orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "processing", "purchased"]))
+                orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "processing", "purchased", "sent"]))
             elif active_panel == "admin-search-orders":
                 if search:
                     like = f"%{search}%"
@@ -4684,7 +4815,7 @@ def admin_dashboard(request: Request):
             if search:
                 like = f"%{search}%"
                 users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-            user_rows = users_query.order_by(desc(User.created_at)).limit(15).all()
+            user_rows = users_query.order_by(desc(User.wallet_balance), desc(User.created_at)).limit(50).all()
             users = [
                 SimpleNamespace(
                     id=r.id, full_name=r.full_name or "", public_name=r.public_name or "", nickname=r.nickname or "",
@@ -4765,7 +4896,7 @@ async def admin_create_item(
     db = SessionLocal()
     try:
         require_admin(request, db)
-        final_image = save_uploaded_image(image_file) or image_url.strip() or "https://via.placeholder.com/900x600?text=Produto"
+        final_image = save_product_image_data_url(image_file) or image_url.strip() or STATIC_FALLBACK_IMAGE
         now = datetime.utcnow()
         if schedule_mode == "datetime" and scheduled_start_at.strip():
             try:
@@ -4840,7 +4971,7 @@ async def admin_returned_update_relist(
         if turbo_base_value <= 0:
             raise HTTPException(status_code=400, detail="Valor-base do turbo inválido.")
 
-        final_image = save_uploaded_image(image_file) or image_url.strip() or item.image_url
+        final_image = save_product_image_data_url(image_file) or image_url.strip() or item.image_url
 
         turbo_trigger_amount = BR(turbo_base_value / 2.0)
         turbo_trigger_percent = max(1.0, min(95.0, (turbo_trigger_amount / source_price) * 100.0))
@@ -4912,8 +5043,9 @@ def admin_update_order_control(
             order.status = "delivered"
             order.delivered_at = now
             register_product_outgoing_if_needed(db, order, now)
+        nav_cache_clear()
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=admin-shipping", status_code=303)
     finally:
         db.close()
 
@@ -5124,8 +5256,10 @@ def admin_set_order_status(request: Request, order_id: int, status: str = Form(.
         item = db.get(AuctionItem, order.auction_id)
         if item and status == "delivered":
             item.status = "ended"
+        nav_cache_clear()
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        tab = "admin-shipping" if status in {"processing", "purchased", "sent", "delivered"} else "admin-search-orders"
+        return RedirectResponse(f"/admin?tab={tab}", status_code=303)
     finally:
         db.close()
 
@@ -5181,15 +5315,23 @@ def account_request_withdrawal(request: Request, amount: float = Form(...), pix_
                 db.rollback()
                 raise HTTPException(status_code=400, detail="Saldo insuficiente para solicitar saque.")
 
-            req = WithdrawalRequest(user_id=user.id, amount=amount, pix_key=pix_key_clean, status="pending")
+            fee_amount = BR(amount * 0.01)
+            net_amount = BR(amount - fee_amount)
+            req = WithdrawalRequest(user_id=user.id, amount=amount, fee_amount=fee_amount, net_amount=net_amount, pix_key=pix_key_clean, status="pending")
             db.add(req)
             db.add(WalletTransaction(
                 user_id=user.id,
                 amount=-amount,
                 kind="withdrawal_reserved",
-                note=f"Saque solicitado e reservado no caixa para pagamento manual via Pix: {pix_key_clean}",
+                note=f"Saque solicitado: bruto R$ {fmt_money(amount)} | taxa 1% R$ {fmt_money(fee_amount)} | pagar ao cliente R$ {fmt_money(net_amount)} via Pix: {pix_key_clean}",
             ))
-            audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Valor reservado para saque: R$ {fmt_money(amount)}")
+            db.add(WalletTransaction(
+                user_id=user.id,
+                amount=fee_amount,
+                kind="withdrawal_fee",
+                note=f"Taxa de saque 1% referente ao saque solicitado: R$ {fmt_money(amount)}",
+            ))
+            audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Bruto R$ {fmt_money(amount)} | taxa R$ {fmt_money(fee_amount)} | líquido R$ {fmt_money(net_amount)}")
             db.commit()
 
         return RedirectResponse("/minha-conta#account-balance-panel", status_code=303)
@@ -5272,6 +5414,9 @@ def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: st
         req.status = status
         req.admin_note = admin_note.strip()
         req.updated_at = datetime.utcnow()
+        if status == "paid":
+            db.add(WalletTransaction(user_id=req.user_id, amount=-BR(req.net_amount or req.amount or 0.0), kind="withdrawal_paid", note=f"Saque #{req.id} pago manualmente ao cliente"))
+        nav_cache_clear()
         db.commit()
         return RedirectResponse("/admin#admin-withdrawals", status_code=303)
     finally:

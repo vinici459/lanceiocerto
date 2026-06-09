@@ -372,3 +372,12 @@ body.page-loading a,body.page-loading button{cursor:progress;}
     padding-bottom: 12px;
   }
 }
+
+/* Operação/Admin - entrega contábil */
+.admin-scroll-table{max-height:520px;overflow:auto;border-radius:16px;border:1px solid var(--line)}
+.admin-scroll-table table{min-width:900px}
+.admin-operation-form{display:grid;gap:8px;min-width:260px}
+.admin-operation-form input{margin-top:0}
+.admin-action-stack{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.admin-finance-grid .finance-card strong{white-space:nowrap}
+.returned-mini-card img{background:rgba(255,255,255,.05)}

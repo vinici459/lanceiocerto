@@ -809,3 +809,9 @@ button:disabled{opacity:.58;cursor:not-allowed}
 .verified-name{color:#4ade80!important}.pending-name{color:#fbbf24!important}.account-public-name{font-weight:900}
 
 .account-shell{min-height:calc(100vh - 74px);}
+
+.account-dispute-box{margin-top:6px}
+.account-dispute-box summary{list-style:none;width:max-content}
+.account-dispute-box summary::-webkit-details-marker{display:none}
+.account-dispute-box .wallet-card{margin-top:10px;max-width:520px}
+.account-dispute-box textarea{width:100%;min-height:90px;margin-top:7px;padding:12px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff}
