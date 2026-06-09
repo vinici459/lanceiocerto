@@ -408,7 +408,9 @@ class ConnectionManager:
 
 
 app = FastAPI(title=APP_NAME)
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# HTML grande no Railway estava custando ~1,5s só em compressão.
+# Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
+app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
 ASSET_VERSION = os.getenv("ASSET_VERSION", "20260608-nav-cache-v2")
 templates.env.globals["asset_version"] = ASSET_VERSION
@@ -1912,7 +1914,7 @@ def build_returned_items(db: Session) -> list[dict]:
         .outerjoin(User, User.id == WinnerOrder.user_id)
         .filter(WinnerOrder.status == "expired")
         .order_by(desc(WinnerOrder.expired_at), desc(WinnerOrder.created_at))
-        .limit(30)
+        .limit(15)
         .all()
     )
 
@@ -2040,6 +2042,55 @@ def build_finance_dashboard(db: Session) -> dict:
         "refunds": refunds,
     }
 
+
+
+def build_finance_dashboard_light(db: Session) -> dict:
+    """Resumo financeiro enxuto para o Resumo Geral.
+
+    O dashboard precisa abrir rápido e mostrar direção dos números. A visão
+    completa e contábil continua no Fluxo de Caixa. Esta versão evita varrer
+    tabelas grandes de transações/saques na primeira abertura do painel.
+    """
+    paid_statuses = ["paid", "processing", "purchased", "sent", "delivered"]
+
+    auction_row = db.query(
+        func.coalesce(func.sum(AuctionItem.total_bid_spent), 0.0),
+        func.coalesce(func.sum(AuctionItem.total_bid_fees), 0.0),
+        func.coalesce(func.sum(AuctionItem.current_price), 0.0),
+    ).first()
+    total_bid_spent = BR((auction_row[0] if auction_row else 0.0) or 0.0)
+    total_fees = BR((auction_row[1] if auction_row else 0.0) or 0.0)
+    bid_product_cash = BR((auction_row[2] if auction_row else 0.0) or 0.0)
+
+    total_payments = BR(
+        db.query(func.coalesce(func.sum(WinnerOrder.final_price), 0.0))
+        .filter(WinnerOrder.status.in_(paid_statuses))
+        .scalar() or 0.0
+    )
+
+    total_income = BR(total_bid_spent + total_payments)
+    estimated_profit = BR(total_fees + total_payments + bid_product_cash)
+
+    return {
+        "total_fees": total_fees,
+        "total_bid_spent": total_bid_spent,
+        "bid_product_cash": bid_product_cash,
+        "total_payments": total_payments,
+        "user_wallet_total": 0.0,
+        "expected_outgoing": 0.0,
+        "total_income": total_income,
+        "total_outgoing": 0.0,
+        "net_result": total_income,
+        "estimated_profit": estimated_profit,
+        "available_cash": total_income,
+        "accumulated_loss": 0.0,
+        "pending_withdrawals": 0.0,
+        "product_outgoing": 0.0,
+        "expected_products": 0.0,
+        "paid_withdrawals": 0.0,
+        "refunds": 0.0,
+    }
+
 def build_cashflow_movements(db: Session) -> list[dict]:
     """Movimentações do caixa do ponto de vista da plataforma.
 
@@ -2050,7 +2101,16 @@ def build_cashflow_movements(db: Session) -> list[dict]:
     rows: list[dict] = []
     transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(35).all()
     user_ids = {tx.user_id for tx in transactions if tx.user_id}
-    users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    users_by_id = {}
+    if user_ids:
+        for row in db.query(User.id, User.full_name, User.public_name, User.nickname, User.cpf).filter(User.id.in_(user_ids)).all():
+            users_by_id[row.id] = SimpleNamespace(
+                id=row.id,
+                full_name=row.full_name or "",
+                public_name=row.public_name or "",
+                nickname=row.nickname or "",
+                cpf=row.cpf or "",
+            )
 
     type_labels = {
         "bid_spent": "lance_recebido",
@@ -2154,7 +2214,7 @@ def build_auction_results(db: Session) -> list[dict]:
 
 
 
-def cached_returned_items(db: Session, ttl_seconds: int = 180) -> list[dict]:
+def cached_returned_items(db: Session, ttl_seconds: int = 300) -> list[dict]:
     cached = nav_cache_get("admin:returned-items")
     if cached is not None:
         return cached
@@ -2509,6 +2569,10 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_winner_orders_status_expired_created ON winner_orders (status, expired_at, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_auction_items_created ON auction_items (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_cashback_events_status_deadline ON cashback_events (status, join_deadline)",
+            "CREATE INDEX IF NOT EXISTS ix_winner_orders_status_expired_created_desc ON winner_orders (status, expired_at DESC, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_auction_items_status_created_desc ON auction_items (status, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_users_created_desc ON users (created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_audit_logs_created_desc ON audit_logs (created_at DESC)",
         ]:
             try:
                 conn.execute(text(ddl))
@@ -4189,38 +4253,58 @@ def my_expired_orders(request: Request):
 
 
 def build_finished_auctions(db: Session) -> list[dict]:
-    # Evita uma consulta de WinnerOrder para cada leilão finalizado.
+    """Histórico finalizado usando colunas específicas, sem hidratar ORM completo."""
     finished_status = ["ended", "delivered", "expired"]
     items = (
-        db.query(AuctionItem)
-        .options(selectinload(AuctionItem.winner))
+        db.query(
+            AuctionItem.id,
+            AuctionItem.title,
+            AuctionItem.source_price,
+            AuctionItem.current_price,
+            AuctionItem.total_bid_fees,
+            AuctionItem.status,
+            AuctionItem.winner_user_id,
+            User.public_name.label("winner_public_name"),
+            User.full_name.label("winner_full_name"),
+        )
+        .outerjoin(User, User.id == AuctionItem.winner_user_id)
         .filter(AuctionItem.status.in_(finished_status))
         .order_by(desc(AuctionItem.created_at))
-        .limit(40)
+        .limit(25)
         .all()
     )
-    item_ids = [item.id for item in items]
-    latest_order_by_auction: dict[int, WinnerOrder] = {}
+    item_ids = [row.id for row in items]
+    latest_order_by_auction: dict[int, object] = {}
     if item_ids:
         orders = (
-            db.query(WinnerOrder)
+            db.query(
+                WinnerOrder.auction_id,
+                WinnerOrder.final_price,
+                WinnerOrder.status,
+                WinnerOrder.created_at,
+            )
             .filter(WinnerOrder.auction_id.in_(item_ids))
             .order_by(desc(WinnerOrder.created_at))
+            .limit(80)
             .all()
         )
         for order in orders:
             latest_order_by_auction.setdefault(order.auction_id, order)
 
     rows = []
+    paid_statuses = {"paid", "processing", "purchased", "sent", "delivered"}
     for item in items:
         order = latest_order_by_auction.get(item.id)
         source_price = BR(item.source_price or 0.0)
         final_price = BR((order.final_price if order else item.current_price) or 0.0)
         fees_total = BR(item.total_bid_fees or 0.0)
-        result = BR(final_price + fees_total + (final_price if order and order.status in ["paid", "processing", "purchased", "sent", "delivered"] else 0.0) - source_price)
+        paid_total = final_price if order and order.status in paid_statuses else 0.0
+        result = BR(final_price + fees_total + paid_total - source_price)
+        public_name = (item.winner_public_name or "").strip()
+        full_name = (item.winner_full_name or "").strip()
         rows.append({
             "title": item.title,
-            "winner_name": public_user_name(item.winner) if item.winner else "",
+            "winner_name": f"@{public_name}" if public_name else ((full_name.split()[0] if full_name else "") or ""),
             "source_price": source_price,
             "final_price": final_price,
             "fees_total": fees_total,
@@ -4230,44 +4314,30 @@ def build_finished_auctions(db: Session) -> list[dict]:
         })
     return rows
 
+def user_audit_map(db: Session, users: list) -> dict[int, dict]:
+    """Auditoria mínima para a ficha do usuário.
 
-def user_audit_map(db: Session, users: list[User]) -> dict[int, dict]:
-    """Auditoria leve da aba Usuários.
-
-    Mantém a informação recente disponível, mas evita puxar centenas de linhas
-    em toda abertura da aba. Para investigação profunda, use Consulta/Auditoria.
+    A aba Usuários precisa abrir rápido. Por isso carregamos só as últimas
+    movimentações dos usuários visíveis, sem contar tabelas inteiras a cada
+    abertura. A auditoria profunda continua na aba Auditoria/Consulta.
     """
-    user_ids = [u.id for u in users]
+    user_ids = [getattr(u, "id", None) for u in users if getattr(u, "id", None)]
     if not user_ids:
         return {}
 
-    def grouped_count(model, column):
-        return {
-            user_id: int(total or 0)
-            for user_id, total in db.query(column, func.count(model.id)).filter(column.in_(user_ids)).group_by(column).all()
-        }
+    data = {uid: {"bids": 0, "orders": 0, "transactions": [], "withdrawals": [], "tickets": []} for uid in user_ids}
 
-    bid_counts = grouped_count(Bid, Bid.user_id)
-    order_counts = grouped_count(WinnerOrder, WinnerOrder.user_id)
-    data = {u.id: {"bids": bid_counts.get(u.id, 0), "orders": order_counts.get(u.id, 0), "transactions": [], "withdrawals": [], "tickets": []} for u in users}
-
-    # Só as movimentações mais recentes da página, com limite menor por usuário.
-    transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id.in_(user_ids)).order_by(desc(WalletTransaction.created_at)).limit(80).all()
-    withdrawals = db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id.in_(user_ids)).order_by(desc(WithdrawalRequest.created_at)).limit(60).all()
-    tickets = db.query(SupportTicket).filter(SupportTicket.user_id.in_(user_ids)).order_by(desc(SupportTicket.created_at)).limit(60).all()
-
+    transactions = (
+        db.query(WalletTransaction)
+        .filter(WalletTransaction.user_id.in_(user_ids))
+        .order_by(desc(WalletTransaction.created_at))
+        .limit(30)
+        .all()
+    )
     for tx in transactions:
         bucket = data.get(tx.user_id)
-        if bucket is not None and len(bucket["transactions"]) < 3:
+        if bucket is not None and len(bucket["transactions"]) < 2:
             bucket["transactions"].append(tx)
-    for wd in withdrawals:
-        bucket = data.get(wd.user_id)
-        if bucket is not None and len(bucket["withdrawals"]) < 3:
-            bucket["withdrawals"].append(wd)
-    for ticket in tickets:
-        bucket = data.get(ticket.user_id)
-        if bucket is not None and len(bucket["tickets"]) < 3:
-            bucket["tickets"].append(ticket)
     return data
 
 def blank_admin_context() -> dict:
@@ -4365,10 +4435,15 @@ def cached_admin_dashboard_context(db: Session, is_super_admin: bool, ttl_second
         return cached
     value = {"stats": cached_admin_light_stats(db, is_super_admin)}
     if is_super_admin:
-        value["finance"] = cached_admin_finance_summary(db)
+        # Dashboard usa snapshot leve; o Fluxo de Caixa mantém a visão completa.
+        value["finance"] = nav_cache_get("admin:finance-dashboard-light") or nav_cache_set(
+            "admin:finance-dashboard-light",
+            build_finance_dashboard_light(db),
+            ttl_seconds,
+        )
     return nav_cache_set(key, value, ttl_seconds)
 
-def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 180) -> dict:
+def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 300) -> dict:
     """Blocos financeiros completos com cache curto.
 
     O resumo financeiro usa totais cacheados dos leilões. As tabelas detalhadas
@@ -4386,7 +4461,7 @@ def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 180) -> dict:
     return nav_cache_set("admin:cashflow-context", value, ttl_seconds)
 
 
-def cached_finished_auctions(db: Session, ttl_seconds: int = 20) -> list[dict]:
+def cached_finished_auctions(db: Session, ttl_seconds: int = 180) -> list[dict]:
     cached = nav_cache_get("admin:finished-auctions")
     if cached is not None:
         return cached
@@ -4529,11 +4604,30 @@ def admin_dashboard(request: Request):
         elif active_panel == "admin-finished":
             ctx["finished_auctions"] = cached_finished_auctions(db)
         elif active_panel == "admin-users" and is_super_admin:
-            users_query = db.query(User)
+            users_query = db.query(
+                User.id, User.full_name, User.public_name, User.nickname, User.email, User.cpf, User.phone,
+                User.wallet_balance, User.identity_status, User.is_banned, User.chat_muted, User.is_admin,
+                User.is_superadmin, User.street, User.number, User.city, User.state, User.document_type,
+                User.document_number, User.identity_note, User.document_file_url, User.document_back_file_url,
+                User.selfie_file_url, User.created_at,
+            )
             if search:
                 like = f"%{search}%"
                 users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-            users = users_query.order_by(desc(User.created_at)).limit(20).all()
+            user_rows = users_query.order_by(desc(User.created_at)).limit(15).all()
+            users = [
+                SimpleNamespace(
+                    id=r.id, full_name=r.full_name or "", public_name=r.public_name or "", nickname=r.nickname or "",
+                    email=r.email or "", cpf=r.cpf or "", phone=r.phone or "", wallet_balance=float(r.wallet_balance or 0.0),
+                    identity_status=r.identity_status or "pending", is_banned=bool(r.is_banned), chat_muted=bool(r.chat_muted),
+                    is_admin=bool(r.is_admin), is_superadmin=bool(r.is_superadmin), street=r.street or "", number=r.number or "",
+                    city=r.city or "", state=r.state or "", document_type=r.document_type or "CPF", document_number=r.document_number or "",
+                    identity_note=r.identity_note or "", document_file_url=safe_image_url(r.document_file_url or ""),
+                    document_back_file_url=safe_image_url(r.document_back_file_url or ""), selfie_file_url=safe_image_url(r.selfie_file_url or ""),
+                    created_at=r.created_at,
+                )
+                for r in user_rows
+            ]
             ctx["users"] = users
             ctx["user_audit"] = user_audit_map(db, users)
         elif active_panel == "admin-identity-pending" and is_super_admin:
@@ -4545,8 +4639,29 @@ def admin_dashboard(request: Request):
         elif active_panel == "admin-suggestions":
             ctx["suggestion_vote_stats"] = cached_suggestion_vote_stats(db)
         elif active_panel == "admin-audit" and is_super_admin:
-            ctx["audit_logs"] = db.query(AuditLog).options(selectinload(AuditLog.user)).order_by(desc(AuditLog.created_at)).limit(25).all()
-            ctx["recent_chat_messages"] = db.query(ChatMessage).options(selectinload(ChatMessage.user), selectinload(ChatMessage.auction)).order_by(desc(ChatMessage.created_at)).limit(15).all()
+            audit_rows = (
+                db.query(
+                    AuditLog.created_at, AuditLog.action, AuditLog.entity_type, AuditLog.entity_id,
+                    AuditLog.ip_address, AuditLog.details, User.public_name, User.email,
+                )
+                .outerjoin(User, User.id == AuditLog.user_id)
+                .order_by(desc(AuditLog.created_at))
+                .limit(20)
+                .all()
+            )
+            ctx["audit_logs"] = [
+                SimpleNamespace(
+                    created_at=r.created_at,
+                    action=r.action or "",
+                    entity_type=r.entity_type or "",
+                    entity_id=r.entity_id or "",
+                    ip_address=r.ip_address or "",
+                    details=r.details or "",
+                    user=SimpleNamespace(public_name=r.public_name or "", email=r.email or "") if (r.public_name or r.email) else None,
+                )
+                for r in audit_rows
+            ]
+            ctx["recent_chat_messages"] = []
         elif active_panel == "admin-moderation":
             ctx["moderation_users"] = db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all()
 
