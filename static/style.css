@@ -351,3 +351,24 @@ body.page-loading a,body.page-loading button{cursor:progress;}
     overflow:visible !important;
   }
 }
+
+
+/* Ajuste cirúrgico Admin: menu lateral sempre navegável, independente da tabela aberta */
+@media (min-width: 901px){
+  .admin-layout-pro{
+    align-items: start;
+  }
+  .admin-production-sidebar{
+    position: sticky;
+    top: 88px;
+    max-height: calc(100vh - 104px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .admin-sidebar-nav{
+    max-height: none;
+    overflow: visible;
+    padding-bottom: 12px;
+  }
+}

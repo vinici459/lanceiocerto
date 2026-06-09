@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
+from types import SimpleNamespace
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.gzip import GZipMiddleware
@@ -695,6 +696,12 @@ NAV_SKIP_LOG_MEMORY: dict[str, datetime] = {}
 NAV_SKIP_LOG_INTERVAL_SECONDS = 20
 ADMIN_PERF_LOG_THRESHOLD_MS = int(os.getenv("ADMIN_PERF_LOG_THRESHOLD_MS", "700"))
 
+# Cache curtíssimo apenas para navegação GET do Admin.
+# Evita consultar a tabela users em todo clique de aba, que nos logs custava ~645ms.
+# Rotas POST/sensíveis continuam usando current_user() normal com leitura real do banco.
+ADMIN_USER_NAV_CACHE: dict[str, dict[str, object]] = {}
+ADMIN_USER_NAV_CACHE_TTL_SECONDS = int(os.getenv("ADMIN_USER_NAV_CACHE_TTL_SECONDS", "20"))
+
 
 
 def nav_cache_get(key: str):
@@ -807,16 +814,31 @@ def public_display_status(status: str) -> str:
 STATIC_FALLBACK_IMAGE = "/static/lanceio_hero_slide_01.png"
 
 
+SAFE_IMAGE_URL_CACHE: dict[str, str] = {}
+
+
 def safe_image_url(value: str) -> str:
-    """Evita 404 em imagens de produto removidas após redeploy/cópia local."""
+    """Evita 404 em imagens de produto removidas após redeploy/cópia local.
+
+    O teste de existência em disco é cacheado por URL para não repetir stat()
+    em listas grandes do Admin.
+    """
     url = (value or "").strip()
     if not url:
         return STATIC_FALLBACK_IMAGE
+
+    cached = SAFE_IMAGE_URL_CACHE.get(url)
+    if cached:
+        return cached
+
+    result = url
     if url.startswith("/static/uploads/"):
         local_path = BASE_DIR / url.lstrip("/")
         if not local_path.exists():
-            return STATIC_FALLBACK_IMAGE
-    return url
+            result = STATIC_FALLBACK_IMAGE
+
+    SAFE_IMAGE_URL_CACHE[url] = result
+    return result
 
 
 def public_user_name(user: Optional["User"]) -> str:
@@ -1077,6 +1099,75 @@ def current_user(request: Request, db: Session) -> Optional[User]:
     if not user_id:
         return None
     return db.get(User, user_id)
+
+
+def admin_current_user_fast(request: Request, db: Session) -> Optional[SimpleNamespace]:
+    """Usuário leve para navegação GET do Admin.
+
+    O diagnóstico mostrou auth≈645ms em praticamente toda aba. Para navegação
+    do painel não precisamos carregar o objeto ORM completo a cada clique; basta
+    um retrato curto do usuário logado para menu, permissão e cabeçalho.
+    """
+    token = request.cookies.get("session_token")
+    if not token:
+        return None
+
+    user_id = SESSIONS.get(token)
+    if not user_id:
+        return None
+
+    now = datetime.utcnow()
+    cache_key = f"{token}:{user_id}"
+    cached = ADMIN_USER_NAV_CACHE.get(cache_key)
+    if cached:
+        expires_at = cached.get("expires_at")
+        if isinstance(expires_at, datetime) and expires_at > now:
+            data = cached.get("data")
+            if isinstance(data, dict):
+                return SimpleNamespace(**data)
+        else:
+            ADMIN_USER_NAV_CACHE.pop(cache_key, None)
+
+    row = (
+        db.query(
+            User.id,
+            User.full_name,
+            User.public_name,
+            User.nickname,
+            User.email,
+            User.cpf,
+            User.phone,
+            User.is_admin,
+            User.is_superadmin,
+            User.is_banned,
+            User.identity_status,
+            User.wallet_balance,
+        )
+        .filter(User.id == user_id)
+        .first()
+    )
+    if not row:
+        return None
+
+    data = {
+        "id": row.id,
+        "full_name": row.full_name or "",
+        "public_name": row.public_name or "",
+        "nickname": row.nickname or "",
+        "email": row.email or "",
+        "cpf": row.cpf or "",
+        "phone": row.phone or "",
+        "is_admin": bool(row.is_admin),
+        "is_superadmin": bool(row.is_superadmin),
+        "is_banned": bool(row.is_banned),
+        "identity_status": row.identity_status or "pending",
+        "wallet_balance": float(row.wallet_balance or 0.0),
+    }
+    ADMIN_USER_NAV_CACHE[cache_key] = {
+        "data": data,
+        "expires_at": now + timedelta(seconds=ADMIN_USER_NAV_CACHE_TTL_SECONDS),
+    }
+    return SimpleNamespace(**data)
 
 
 def require_user(request: Request, db: Session) -> User:
@@ -1794,38 +1885,64 @@ def user_stats(db: Session, user: User) -> dict:
 
 
 def build_returned_items(db: Session) -> list[dict]:
-    # Carrega os pedidos expirados com produto e usuário em lote.
-    # Antes, order.auction/order.user podiam gerar consultas extras durante o loop.
-    expired_orders = (
-        db.query(WinnerOrder)
-        .options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user))
+    """Produtos retornados em consulta enxuta.
+
+    A versão anterior carregava WinnerOrder + AuctionItem + User via ORM completo.
+    Para a tela de retornados só precisamos de campos específicos, então usamos
+    consulta por colunas e reduzimos peso de hidratação do SQLAlchemy.
+    """
+    rows = (
+        db.query(
+            WinnerOrder.id.label("order_id"),
+            WinnerOrder.final_price,
+            WinnerOrder.expired_at,
+            User.public_name.label("winner_public_name"),
+            User.full_name.label("winner_full_name"),
+            AuctionItem.id.label("item_id"),
+            AuctionItem.title,
+            AuctionItem.description,
+            AuctionItem.image_url,
+            AuctionItem.source_store,
+            AuctionItem.source_url,
+            AuctionItem.source_price,
+            AuctionItem.current_price,
+            AuctionItem.total_bid_fees,
+        )
+        .join(AuctionItem, AuctionItem.id == WinnerOrder.auction_id)
+        .outerjoin(User, User.id == WinnerOrder.user_id)
         .filter(WinnerOrder.status == "expired")
         .order_by(desc(WinnerOrder.expired_at), desc(WinnerOrder.created_at))
         .limit(30)
         .all()
     )
+
     returned = []
-    seen = set()
-    for order in expired_orders:
-        item = order.auction
-        if not item or item.id in seen:
+    seen: set[int] = set()
+    for row in rows:
+        if row.item_id in seen:
             continue
-        seen.add(item.id)
-        source_price = BR(item.source_price or 0.0)
-        final_price = BR(order.final_price or item.current_price or 0.0)
-        fees_total = BR(getattr(item, "total_bid_fees", 0.0) or 0.0)
+        seen.add(row.item_id)
+
+        source_price = BR(row.source_price or 0.0)
+        final_price = BR(row.final_price or row.current_price or 0.0)
+        fees_total = BR(row.total_bid_fees or 0.0)
         reserved_cash = BR(final_price + fees_total)
         expected_total_if_paid = BR(final_price + fees_total + final_price)
         expected_profit_if_paid = BR(expected_total_if_paid - source_price)
         suggested_turbo_base = BR(max(1.0, source_price - reserved_cash))
         suggested_turbo_trigger_amount = BR(suggested_turbo_base / 2.0)
+
+        public_name = (row.winner_public_name or "").strip()
+        full_name = (row.winner_full_name or "").strip()
+        winner_name = f"@{public_name}" if public_name else ((full_name.split()[0] if full_name else "—"))
+
         returned.append({
-            "id": item.id,
-            "title": item.title,
-            "description": item.description,
-            "image_url": safe_image_url(item.image_url),
-            "source_store": item.source_store,
-            "source_url": item.source_url,
+            "id": row.item_id,
+            "title": row.title,
+            "description": row.description,
+            "image_url": safe_image_url(row.image_url),
+            "source_store": row.source_store,
+            "source_url": row.source_url,
             "source_price": source_price,
             "last_final_price": final_price,
             "accumulated_fees": fees_total,
@@ -1834,11 +1951,10 @@ def build_returned_items(db: Session) -> list[dict]:
             "expected_profit_if_paid": expected_profit_if_paid,
             "suggested_turbo_base": suggested_turbo_base,
             "suggested_turbo_trigger_amount": suggested_turbo_trigger_amount,
-            "winner_name": public_user_name(order.user) if order.user else "—",
-            "expired_at": order.expired_at,
+            "winner_name": winner_name,
+            "expired_at": row.expired_at,
         })
     return returned
-
 
 def _sum_scalar(db: Session, expr, *filters) -> float:
     query = db.query(func.coalesce(func.sum(expr), 0.0))
@@ -2388,6 +2504,10 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_admin_direct_messages_order_created ON admin_direct_messages (order_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_chat_messages_created ON chat_messages (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_chat_messages_auction_created ON chat_messages (auction_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_users_created ON users (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_users_admin_banned ON users (is_admin, is_banned)",
+            "CREATE INDEX IF NOT EXISTS ix_winner_orders_status_expired_created ON winner_orders (status, expired_at, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_auction_items_created ON auction_items (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_cashback_events_status_deadline ON cashback_events (status, join_deadline)",
         ]:
             try:
@@ -4112,7 +4232,11 @@ def build_finished_auctions(db: Session) -> list[dict]:
 
 
 def user_audit_map(db: Session, users: list[User]) -> dict[int, dict]:
-    # Versão em lote. A anterior fazia várias consultas por usuário.
+    """Auditoria leve da aba Usuários.
+
+    Mantém a informação recente disponível, mas evita puxar centenas de linhas
+    em toda abertura da aba. Para investigação profunda, use Consulta/Auditoria.
+    """
     user_ids = [u.id for u in users]
     if not user_ids:
         return {}
@@ -4125,27 +4249,26 @@ def user_audit_map(db: Session, users: list[User]) -> dict[int, dict]:
 
     bid_counts = grouped_count(Bid, Bid.user_id)
     order_counts = grouped_count(WinnerOrder, WinnerOrder.user_id)
-
     data = {u.id: {"bids": bid_counts.get(u.id, 0), "orders": order_counts.get(u.id, 0), "transactions": [], "withdrawals": [], "tickets": []} for u in users}
 
-    transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id.in_(user_ids)).order_by(desc(WalletTransaction.created_at)).limit(300).all()
-    withdrawals = db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id.in_(user_ids)).order_by(desc(WithdrawalRequest.created_at)).limit(300).all()
-    tickets = db.query(SupportTicket).filter(SupportTicket.user_id.in_(user_ids)).order_by(desc(SupportTicket.created_at)).limit(300).all()
+    # Só as movimentações mais recentes da página, com limite menor por usuário.
+    transactions = db.query(WalletTransaction).filter(WalletTransaction.user_id.in_(user_ids)).order_by(desc(WalletTransaction.created_at)).limit(80).all()
+    withdrawals = db.query(WithdrawalRequest).filter(WithdrawalRequest.user_id.in_(user_ids)).order_by(desc(WithdrawalRequest.created_at)).limit(60).all()
+    tickets = db.query(SupportTicket).filter(SupportTicket.user_id.in_(user_ids)).order_by(desc(SupportTicket.created_at)).limit(60).all()
 
     for tx in transactions:
         bucket = data.get(tx.user_id)
-        if bucket is not None and len(bucket["transactions"]) < 10:
+        if bucket is not None and len(bucket["transactions"]) < 3:
             bucket["transactions"].append(tx)
     for wd in withdrawals:
         bucket = data.get(wd.user_id)
-        if bucket is not None and len(bucket["withdrawals"]) < 10:
+        if bucket is not None and len(bucket["withdrawals"]) < 3:
             bucket["withdrawals"].append(wd)
     for ticket in tickets:
         bucket = data.get(ticket.user_id)
-        if bucket is not None and len(bucket["tickets"]) < 10:
+        if bucket is not None and len(bucket["tickets"]) < 3:
             bucket["tickets"].append(ticket)
     return data
-
 
 def blank_admin_context() -> dict:
     return {
@@ -4234,6 +4357,17 @@ def cached_admin_finance_summary(db: Session, ttl_seconds: int = 180) -> dict:
     return nav_cache_set("admin:finance-summary", build_finance_dashboard(db), ttl_seconds)
 
 
+
+def cached_admin_dashboard_context(db: Session, is_super_admin: bool, ttl_seconds: int = 180) -> dict:
+    key = f"admin:dashboard-context:{int(is_super_admin)}"
+    cached = nav_cache_get(key)
+    if cached is not None:
+        return cached
+    value = {"stats": cached_admin_light_stats(db, is_super_admin)}
+    if is_super_admin:
+        value["finance"] = cached_admin_finance_summary(db)
+    return nav_cache_set(key, value, ttl_seconds)
+
 def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 180) -> dict:
     """Blocos financeiros completos com cache curto.
 
@@ -4305,7 +4439,7 @@ def admin_dashboard(request: Request):
     timings: list[tuple[str, float]] = []
     db = SessionLocal()
     try:
-        admin = current_user(request, db)
+        admin = admin_current_user_fast(request, db)
         last = _perf_mark(timings, "auth", last)
 
         if not admin:
@@ -4348,9 +4482,7 @@ def admin_dashboard(request: Request):
         # Produto é a aba mais leve e padrão do admin operacional. Não precisa
         # carregar financeiro, auditoria, usuários nem pedidos.
         if active_panel == "admin-dashboard":
-            ctx["stats"] = cached_admin_light_stats(db, is_super_admin)
-            if is_super_admin:
-                ctx["finance"] = cached_admin_finance_summary(db)
+            ctx.update(cached_admin_dashboard_context(db, is_super_admin))
         elif active_panel == "admin-cashflow" and is_super_admin:
             cashflow_ctx = cached_admin_cashflow_context(db)
             ctx.update(cashflow_ctx)
@@ -4401,7 +4533,7 @@ def admin_dashboard(request: Request):
             if search:
                 like = f"%{search}%"
                 users_query = users_query.filter((User.full_name.ilike(like)) | (User.public_name.ilike(like)) | (User.email.ilike(like)) | (User.cpf.ilike(like)) | (User.phone.ilike(like)))
-            users = users_query.order_by(desc(User.created_at)).limit(30).all()
+            users = users_query.order_by(desc(User.created_at)).limit(20).all()
             ctx["users"] = users
             ctx["user_audit"] = user_audit_map(db, users)
         elif active_panel == "admin-identity-pending" and is_super_admin:
