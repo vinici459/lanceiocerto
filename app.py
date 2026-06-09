@@ -693,6 +693,8 @@ HOME_SYNC_INTERVAL_SECONDS = 60
 # O bloqueio continua ativo, mas o mesmo caminho só é logado em janela curta.
 NAV_SKIP_LOG_MEMORY: dict[str, datetime] = {}
 NAV_SKIP_LOG_INTERVAL_SECONDS = 20
+ADMIN_PERF_LOG_THRESHOLD_MS = int(os.getenv("ADMIN_PERF_LOG_THRESHOLD_MS", "700"))
+
 
 
 def nav_cache_get(key: str):
@@ -2380,6 +2382,13 @@ def ensure_columns() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_suggestion_nomination_week_product ON product_suggestion_nominations (week_start, product_key)",
             "CREATE INDEX IF NOT EXISTS ix_suggestion_nomination_week ON product_suggestion_nominations (week_start)",
             "CREATE INDEX IF NOT EXISTS ix_cashback_events_auction ON cashback_events (auction_id)",
+            "CREATE INDEX IF NOT EXISTS ix_auction_items_status_ends ON auction_items (status, ends_at)",
+            "CREATE INDEX IF NOT EXISTS ix_winner_orders_status_deadline ON winner_orders (status, payment_deadline)",
+            "CREATE INDEX IF NOT EXISTS ix_support_tickets_status_created ON support_tickets (status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_admin_direct_messages_order_created ON admin_direct_messages (order_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_chat_messages_created ON chat_messages (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_chat_messages_auction_created ON chat_messages (auction_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_cashback_events_status_deadline ON cashback_events (status, join_deadline)",
         ]:
             try:
                 conn.execute(text(ddl))
@@ -4250,11 +4259,54 @@ def cached_finished_auctions(db: Session, ttl_seconds: int = 20) -> list[dict]:
     return nav_cache_set("admin:finished-auctions", build_finished_auctions(db), ttl_seconds)
 
 
+
+def _perf_mark(timings: list[tuple[str, float]], label: str, last: float) -> float:
+    import time
+    now = time.perf_counter()
+    timings.append((label, (now - last) * 1000))
+    return now
+
+
+def admin_html_response(ctx: dict, timings: list[tuple[str, float]] | None = None) -> HTMLResponse:
+    """Renderiza o Admin de forma mensurável.
+
+    O middleware mede o tempo total da navegação, mas o TemplateResponse padrão
+    renderiza o corpo depois do retorno da rota. Para investigar e reduzir o
+    atraso fixo do /admin, renderizamos aqui e registramos quanto tempo foi
+    gasto em autenticação, dados da aba ativa e template.
+    """
+    import time
+    timings = timings or []
+    render_started = time.perf_counter()
+    html = templates.env.get_template("admin.html").render(ctx)
+    render_ms = (time.perf_counter() - render_started) * 1000
+    timings.append(("render", render_ms))
+
+    total_ms = sum(ms for _, ms in timings)
+    tab = ctx.get("admin_active_panel", "-")
+    if total_ms >= ADMIN_PERF_LOG_THRESHOLD_MS:
+        parts = " ".join(f"{name}={ms:.1f}ms" for name, ms in timings)
+        print(f"[ADMIN-PERF] tab={tab} total={total_ms:.1f}ms {parts}")
+
+    response = HTMLResponse(html)
+    response.headers["X-Admin-Panel"] = str(tab)
+    response.headers["X-Admin-Render-Ms"] = f"{render_ms:.1f}"
+    response.headers["X-Admin-Perf-Ms"] = f"{total_ms:.1f}"
+    return response
+
+
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
+    import time
+    started = time.perf_counter()
+    last = started
+    timings: list[tuple[str, float]] = []
     db = SessionLocal()
     try:
         admin = current_user(request, db)
+        last = _perf_mark(timings, "auth", last)
 
         if not admin:
             return RedirectResponse("/login", status_code=303)
@@ -4291,6 +4343,7 @@ def admin_dashboard(request: Request):
             "is_super_admin": is_super_admin,
             "admin_active_panel": active_panel,
         })
+        last = _perf_mark(timings, "base", last)
 
         # Produto é a aba mais leve e padrão do admin operacional. Não precisa
         # carregar financeiro, auditoria, usuários nem pedidos.
@@ -4365,10 +4418,10 @@ def admin_dashboard(request: Request):
         elif active_panel == "admin-moderation":
             ctx["moderation_users"] = db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all()
 
-        return templates.TemplateResponse("admin.html", ctx)
+        last = _perf_mark(timings, f"data:{active_panel}", last)
+        return admin_html_response(ctx, timings)
     finally:
         db.close()
-
 
 @app.post("/admin/item/create")
 async def admin_create_item(
