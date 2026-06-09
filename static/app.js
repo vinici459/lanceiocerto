@@ -57,8 +57,43 @@
   function initPageTransitions() {
     document.body.classList.add("page-ready");
 
+    const progress = document.createElement("div");
+    progress.className = "page-progress-bar";
+    progress.setAttribute("aria-hidden", "true");
+    document.body.appendChild(progress);
+
     let lastNavHref = "";
     let lastNavAt = 0;
+    let almostTimer = 0;
+
+    function clearProgressTimers() {
+      if (almostTimer) window.clearTimeout(almostTimer);
+      almostTimer = 0;
+    }
+
+    function startNavigationFeedback(url) {
+      document.body.classList.add("page-leaving", "page-loading");
+      document.querySelectorAll(".nav a").forEach((item) => {
+        try {
+          const itemUrl = new URL(item.href, window.location.href);
+          item.classList.toggle("active", itemUrl.pathname === url.pathname);
+        } catch (_) {}
+      });
+      progress.classList.remove("done", "almost");
+      progress.classList.add("active");
+      clearProgressTimers();
+      almostTimer = window.setTimeout(() => progress.classList.add("almost"), 450);
+    }
+
+    function finishNavigationFeedback() {
+      clearProgressTimers();
+      document.body.classList.remove("page-leaving", "page-loading");
+      document.body.classList.add("page-ready");
+      progress.classList.add("done");
+      window.setTimeout(() => progress.classList.remove("active", "almost", "done"), 220);
+      lastNavHref = "";
+      lastNavAt = 0;
+    }
 
     document.addEventListener("click", (event) => {
       const link = event.target.closest("a[href]");
@@ -80,14 +115,22 @@
       lastNavHref = url.href;
       lastNavAt = now;
 
-      document.body.classList.add("page-leaving");
+      startNavigationFeedback(url);
     }, true);
 
-    window.addEventListener("pageshow", () => {
-      document.body.classList.remove("page-leaving");
-      document.body.classList.add("page-ready");
-      lastNavHref = "";
-      lastNavAt = 0;
+    window.addEventListener("pageshow", finishNavigationFeedback);
+    window.addEventListener("pagehide", clearProgressTimers);
+  }
+
+  function initImageFallbacks() {
+    const fallback = "/static/lanceio_hero_slide_01.png";
+    document.querySelectorAll("img").forEach((img) => {
+      if (img.dataset.safeFallbackBound === "true") return;
+      img.dataset.safeFallbackBound = "true";
+      img.addEventListener("error", () => {
+        if (img.src.includes(fallback)) return;
+        img.src = fallback;
+      });
     });
   }
 
@@ -190,6 +233,7 @@
   onReady(() => {
     initNavigationPrefetch();
     initPageTransitions();
+    initImageFallbacks();
     initHomeTabs();
     initCountdowns();
     initAccountHashHelpers();

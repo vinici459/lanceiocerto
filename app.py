@@ -817,6 +817,9 @@ def safe_image_url(value: str) -> str:
     return url
 
 
+
+templates.env.globals["safe_image_url"] = safe_image_url
+
 def public_user_name(user: Optional["User"]) -> str:
     if not user:
         return "—"
@@ -2109,7 +2112,7 @@ def build_order_card(order: WinnerOrder) -> dict:
         "auction_id": order.auction_id,
         "status": order.status,
         "auction_title": order.auction.title,
-        "image_url": order.auction.image_url,
+        "image_url": safe_image_url(order.auction.image_url),
         "final_price": BR(order.final_price),
         "deadline_label": fmt_deadline(order.payment_deadline),
         "remaining_label": remaining_label(order.payment_deadline),
@@ -4213,7 +4216,6 @@ def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0
         stats["users"] = sum(user_rows.values())
         stats["active_users"] = int(db.query(func.count(User.id)).filter(User.is_banned == False).scalar() or 0)
         stats["identity_pending"] = user_rows.get("pending", 0)
-        stats["pending_withdrawals"] = order_counts.get("__unused__", 0)
         stats["pending_withdrawals"] = int(db.query(func.count(WithdrawalRequest.id)).filter(WithdrawalRequest.status == "pending").scalar() or 0)
     return stats
 

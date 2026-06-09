@@ -58,6 +58,19 @@
   <div class="stat"><span>Expirados</span><strong>{{ stats.expired }}</strong></div>
 </div>
 
+<div class="panel-card account-quick-actions">
+  <div>
+    <h2>Ações rápidas</h2>
+    <p class="muted">Acesse as partes mais importantes da sua conta sem procurar no menu lateral.</p>
+  </div>
+  <div class="quick-action-grid">
+    <a class="btn small" href="/minha-conta#account-balance-panel" data-account-target="account-balance-panel">Adicionar saldo</a>
+    <a class="btn small ghost" href="/minha-conta/cadastro">Enviar documentos</a>
+    <a class="btn small ghost" href="/minha-conta/pagamentos">Pagamentos pendentes</a>
+    <a class="btn small ghost" href="/minha-conta/ganhos">Meus ganhos</a>
+  </div>
+</div>
+
 <div class="panel-card account-status-panel {{ 'verified' if user.identity_status == 'verified' else 'pending' }}">
   <div>
     <span class="status-dot"></span>
