@@ -145,12 +145,17 @@
         </div>
       </div>
       <div class="withdraw-fee-box">
-        <strong>Reserva imediata do valor</strong>
-        <span>Depois do pedido, o saldo é descontado e a solicitação aparece para o administrador pagar manualmente via PIX.</span>
+        <strong>Taxa de saque de 1%</strong>
+        <span>O valor solicitado sai integralmente do seu saldo. O administrador paga o valor líquido, já descontada a taxa de 1%.</span>
       </div>
       <label>Valor do saque
-        <input type="number" step="0.01" min="1" name="amount" placeholder="Mínimo R$ 1,00" required>
+        <input type="number" step="0.01" min="1" name="amount" placeholder="Mínimo R$ 1,00" required data-withdraw-amount>
+        <small>Exemplo: pediu R$ 100,00 → taxa R$ 1,00 → recebe R$ 99,00.</small>
       </label>
+      <div class="withdraw-fee-box withdraw-preview-box">
+        <strong>Valor líquido estimado</strong>
+        <span id="withdraw-net-preview">Digite um valor para ver quanto será recebido após a taxa.</span>
+      </div>
       <label>Chave PIX para recebimento
         <input name="pix_key" placeholder="CPF, e-mail, telefone ou chave aleatória" required>
       </label>
@@ -825,6 +830,19 @@
     });
   }
 
+})();
+
+(function(){
+  const input = document.querySelector('[data-withdraw-amount]');
+  const preview = document.getElementById('withdraw-net-preview');
+  if (!input || !preview) return;
+  function money(v){ return Number(v || 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
+  input.addEventListener('input', function(){
+    const gross = Math.max(0, Number(String(input.value || '').replace(',', '.')) || 0);
+    const fee = Math.round(gross * 0.01 * 100) / 100;
+    const net = Math.max(0, Math.round((gross - fee) * 100) / 100);
+    preview.textContent = gross > 0 ? `Taxa: ${money(fee)} • Você recebe: ${money(net)}` : 'Digite um valor para ver quanto será recebido após a taxa.';
+  });
 })();
 </script>
 {% endblock %}

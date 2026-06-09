@@ -103,6 +103,9 @@ class User(Base):
     is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
     chat_muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    ban_count: Mapped[int] = mapped_column(Integer, default=0)
+    banned_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    ban_reason: Mapped[str] = mapped_column(Text, default="")
     identity_status: Mapped[str] = mapped_column(String(30), default="pending")  # pending/verified/rejected
     identity_note: Mapped[str] = mapped_column(Text, default="")
     document_type: Mapped[str] = mapped_column(String(40), default="CPF")
@@ -1187,7 +1190,13 @@ def require_user(request: Request, db: Session) -> User:
     if not user:
         raise HTTPException(status_code=401, detail="Faça login para continuar.")
     if user.is_banned:
-        raise HTTPException(status_code=403, detail="Conta bloqueada.")
+        until = getattr(user, "banned_until", None)
+        if until and until <= datetime.utcnow():
+            user.is_banned = False
+            user.banned_until = None
+            db.commit()
+        else:
+            raise HTTPException(status_code=403, detail="Conta bloqueada.")
     return user
 
 
@@ -2039,9 +2048,12 @@ def build_finance_dashboard(db: Session) -> dict:
           (SELECT COALESCE(SUM(fee_amount), 0) FROM withdrawal_requests WHERE status IN ('pending','approved','paid')) AS withdrawal_fee_total,
           (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
           (SELECT COALESCE(SUM(final_price), 0) FROM winner_orders WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments,
-          (SELECT COALESCE(SUM(a.source_price), 0)
+          (SELECT COALESCE(SUM(CASE
+                    WHEN (a.source_price - (COALESCE(a.current_price,0) + COALESCE(o.final_price,0))) > 0
+                    THEN (a.source_price - (COALESCE(a.current_price,0) + COALESCE(o.final_price,0)))
+                    ELSE 0 END), 0)
              FROM winner_orders o JOIN auction_items a ON a.id = o.auction_id
-            WHERE o.status IN ('paid','processing','purchased','sent','delivered')) AS expected_products,
+            WHERE o.status IN ('paid','processing','purchased','sent')) AS expected_products,
           (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'product_outgoing') AS product_outgoing,
           (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'refund') AS refunds,
           (SELECT COALESCE(SUM(COALESCE(NULLIF(net_amount,0), amount)), 0) FROM withdrawal_requests WHERE status IN ('pending','approved')) AS pending_withdrawals,
@@ -2070,7 +2082,7 @@ def build_finance_dashboard(db: Session) -> dict:
     expected_outgoing = BR(expected_products + pending_withdrawals)
     available_cash = BR(total_income - total_outgoing - pending_withdrawals)
     net_result = BR(total_income - total_outgoing)
-    estimated_profit = BR(total_fees + total_payments + bid_product_cash - product_outgoing - refunds)
+    estimated_profit = BR(total_fees + bid_product_cash + total_payments - product_outgoing - refunds - pending_withdrawals)
 
     period_finance = build_finance_periods(db)
 
@@ -2280,8 +2292,8 @@ def build_auction_results(db: Session) -> list[dict]:
         product_cash = BR(item["current_price"] or 0.0)
         final_price = BR(order["final_price"] if order and order.get("status") in paid_statuses else 0.0)
         outgoing = BR(outgoing_by_order.get(int(order["id"]), 0.0) if order else 0.0)
-        cash_total = BR(gross_bids + final_price)
-        result = BR(cash_total - outgoing)
+        cash_total = BR(product_cash + final_price)
+        result = BR((fees_total + product_cash + final_price) - outgoing)
         rows.append({
             "title": item["title"],
             "source_price": source_price,
@@ -2561,6 +2573,9 @@ def ensure_columns() -> None:
                 "email_verification_token": "VARCHAR(120) DEFAULT ''",
                 "email_verification_code": "VARCHAR(12) DEFAULT ''",
                 "email_verification_expires_at": "TIMESTAMP NULL",
+                "ban_count": "INTEGER DEFAULT 0",
+                "banned_until": "TIMESTAMP NULL",
+                "ban_reason": "TEXT DEFAULT ''",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
@@ -4544,10 +4559,10 @@ def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: 
 
 
 def cached_admin_finance_summary(db: Session, ttl_seconds: int = 180) -> dict:
-    cached = nav_cache_get("admin:finance-summary")
+    cached = nav_cache_get("admin:finance-summary:v2")
     if cached is not None:
         return cached
-    return nav_cache_set("admin:finance-summary", build_finance_dashboard(db), ttl_seconds)
+    return nav_cache_set("admin:finance-summary:v2", build_finance_dashboard(db), ttl_seconds)
 
 
 
@@ -4579,7 +4594,18 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
           (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
           (SELECT COALESCE(SUM(final_price), 0)
              FROM winner_orders
-            WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments
+            WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments,
+          (SELECT COALESCE(SUM(CASE
+                    WHEN (a.source_price - (COALESCE(a.current_price,0) + COALESCE(o.final_price,0))) > 0
+                    THEN (a.source_price - (COALESCE(a.current_price,0) + COALESCE(o.final_price,0)))
+                    ELSE 0 END), 0)
+             FROM winner_orders o JOIN auction_items a ON a.id = o.auction_id
+            WHERE o.status IN ('paid','processing','purchased','sent')) AS expected_products,
+          (SELECT COALESCE(SUM(COALESCE(NULLIF(net_amount,0), amount)), 0) FROM withdrawal_requests WHERE status IN ('pending','approved')) AS pending_withdrawals_value,
+          (SELECT COALESCE(SUM(wallet_balance), 0) FROM users) AS user_wallet_total,
+          (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'product_outgoing') AS product_outgoing,
+          (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'refund') AS refunds,
+          (SELECT COALESCE(SUM(COALESCE(NULLIF(net_amount,0), amount)), 0) FROM withdrawal_requests WHERE status = 'paid') AS paid_withdrawals
     """)).mappings().first()
 
     def iv(name: str) -> int:
@@ -4608,8 +4634,17 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
     withdrawal_fee_total = fv("withdrawal_fee_total")
     bid_product_cash = fv("bid_product_cash")
     total_payments = fv("total_payments")
+    expected_products = fv("expected_products")
+    pending_withdrawals_value = fv("pending_withdrawals_value")
+    user_wallet_total = fv("user_wallet_total")
+    product_outgoing = fv("product_outgoing")
+    refunds = fv("refunds")
+    paid_withdrawals = fv("paid_withdrawals")
     total_income = BR(total_bid_spent + total_payments)
-    estimated_profit = BR(total_fees + total_payments + bid_product_cash)
+    total_outgoing = BR(product_outgoing + refunds + paid_withdrawals)
+    expected_outgoing = BR(expected_products + pending_withdrawals_value)
+    available_cash = BR(total_income - total_outgoing - pending_withdrawals_value)
+    estimated_profit = BR(total_fees + bid_product_cash + total_payments - product_outgoing - refunds - pending_withdrawals_value)
     period_finance = build_finance_periods(db)
     finance = {
         **period_finance,
@@ -4620,25 +4655,25 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
         "total_bid_spent": total_bid_spent,
         "bid_product_cash": bid_product_cash,
         "total_payments": total_payments,
-        "user_wallet_total": 0.0,
-        "expected_outgoing": 0.0,
+        "user_wallet_total": user_wallet_total,
+        "expected_outgoing": expected_outgoing,
         "total_income": total_income,
-        "total_outgoing": 0.0,
-        "net_result": total_income,
+        "total_outgoing": total_outgoing,
+        "net_result": BR(total_income - total_outgoing),
         "estimated_profit": estimated_profit,
-        "available_cash": total_income,
-        "accumulated_loss": 0.0,
-        "pending_withdrawals": 0.0,
-        "product_outgoing": 0.0,
-        "expected_products": 0.0,
-        "paid_withdrawals": 0.0,
-        "refunds": 0.0,
+        "available_cash": available_cash,
+        "accumulated_loss": BR(abs(estimated_profit) if estimated_profit < 0 else 0.0),
+        "pending_withdrawals": pending_withdrawals_value,
+        "product_outgoing": product_outgoing,
+        "expected_products": expected_products,
+        "paid_withdrawals": paid_withdrawals,
+        "refunds": refunds,
     }
     return {"stats": stats, "finance": finance}
 
 
 def cached_admin_dashboard_context(db: Session, is_super_admin: bool, ttl_seconds: int = 300) -> dict:
-    key = f"admin:dashboard-context:v2:{int(is_super_admin)}"
+    key = f"admin:dashboard-context:v3:{int(is_super_admin)}"
     cached = nav_cache_get(key)
     if cached is not None:
         return cached
@@ -4808,7 +4843,7 @@ def admin_dashboard(request: Request):
             users_query = db.query(
                 User.id, User.full_name, User.public_name, User.nickname, User.email, User.cpf, User.phone,
                 User.wallet_balance, User.identity_status, User.is_banned, User.chat_muted, User.is_admin,
-                User.is_superadmin, User.street, User.number, User.city, User.state, User.document_type,
+                User.is_superadmin, User.ban_count, User.banned_until, User.ban_reason, User.street, User.number, User.city, User.state, User.document_type,
                 User.document_number, User.identity_note, User.document_file_url, User.document_back_file_url,
                 User.selfie_file_url, User.created_at,
             )
@@ -4821,7 +4856,7 @@ def admin_dashboard(request: Request):
                     id=r.id, full_name=r.full_name or "", public_name=r.public_name or "", nickname=r.nickname or "",
                     email=r.email or "", cpf=r.cpf or "", phone=r.phone or "", wallet_balance=float(r.wallet_balance or 0.0),
                     identity_status=r.identity_status or "pending", is_banned=bool(r.is_banned), chat_muted=bool(r.chat_muted),
-                    is_admin=bool(r.is_admin), is_superadmin=bool(r.is_superadmin), street=r.street or "", number=r.number or "",
+                    is_admin=bool(r.is_admin), is_superadmin=bool(r.is_superadmin), ban_count=int(r.ban_count or 0), banned_until=r.banned_until, ban_reason=r.ban_reason or "", street=r.street or "", number=r.number or "",
                     city=r.city or "", state=r.state or "", document_type=r.document_type or "CPF", document_number=r.document_number or "",
                     identity_note=r.identity_note or "", document_file_url=safe_image_url(r.document_file_url or ""),
                     document_back_file_url=safe_image_url(r.document_back_file_url or ""), selfie_file_url=safe_image_url(r.selfie_file_url or ""),
@@ -4864,7 +4899,7 @@ def admin_dashboard(request: Request):
             ]
             ctx["recent_chat_messages"] = []
         elif active_panel == "admin-moderation":
-            ctx["moderation_users"] = db.query(User).filter((User.is_banned == True) | (User.chat_muted == True)).order_by(desc(User.created_at)).limit(25).all()
+            ctx["moderation_users"] = db.query(User).order_by(desc(User.is_banned), desc(User.chat_muted), desc(User.created_at)).limit(100).all()
 
         last = _perf_mark(timings, f"data:{active_panel}", last)
         return admin_html_response(ctx, timings)
@@ -4896,7 +4931,7 @@ async def admin_create_item(
     db = SessionLocal()
     try:
         require_admin(request, db)
-        final_image = save_product_image_data_url(image_file) or image_url.strip() or STATIC_FALLBACK_IMAGE
+        final_image = save_product_image_data_url(image_file) or STATIC_FALLBACK_IMAGE
         now = datetime.utcnow()
         if schedule_mode == "datetime" and scheduled_start_at.strip():
             try:
@@ -4971,7 +5006,7 @@ async def admin_returned_update_relist(
         if turbo_base_value <= 0:
             raise HTTPException(status_code=400, detail="Valor-base do turbo inválido.")
 
-        final_image = save_product_image_data_url(image_file) or image_url.strip() or item.image_url
+        final_image = save_product_image_data_url(image_file) or item.image_url
 
         turbo_trigger_amount = BR(turbo_base_value / 2.0)
         turbo_trigger_percent = max(1.0, min(95.0, (turbo_trigger_amount / source_price) * 100.0))
@@ -5181,8 +5216,58 @@ def admin_toggle_ban(request: Request, user_id: int):
         if user.id == admin.id:
             raise HTTPException(status_code=400, detail="Você não pode bloquear a si mesmo.")
         user.is_banned = not user.is_banned
+        user.banned_until = None if user.is_banned else None
+        user.ban_reason = "Bloqueio permanente pelo super admin." if user.is_banned else "Liberado pelo super admin."
+        ADMIN_USER_NAV_CACHE.clear()
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=admin-moderation", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/admin/user/{user_id}/ban-1-day")
+def admin_temp_ban_user(request: Request, user_id: int, reason: str = Form("")):
+    db = SessionLocal()
+    try:
+        admin = require_admin(request, db)
+        user = db.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        if user.id == admin.id or user.is_superadmin:
+            raise HTTPException(status_code=400, detail="Você não pode aplicar essa ação nesse usuário.")
+        user.ban_count = int(getattr(user, "ban_count", 0) or 0) + 1
+        user.ban_reason = (reason or "Banimento temporário aplicado pela moderação.").strip()
+        user.is_banned = True
+        if user.ban_count >= 3:
+            if not admin.is_superadmin:
+                user.banned_until = datetime.utcnow() + timedelta(days=1)
+                user.ban_reason += " Conta com 3 ocorrências; revisão do super admin necessária."
+            else:
+                user.banned_until = None
+        else:
+            user.banned_until = datetime.utcnow() + timedelta(days=1)
+        audit_event(db, request, "moderation.ban_1_day", admin, "user", user.id, f"{user.full_name} | ocorrências: {user.ban_count} | {user.ban_reason}")
+        ADMIN_USER_NAV_CACHE.clear()
+        db.commit()
+        return RedirectResponse("/admin?tab=admin-moderation", status_code=303)
+    finally:
+        db.close()
+
+@app.post("/admin/user/{user_id}/unban")
+def admin_unban_user(request: Request, user_id: int):
+    db = SessionLocal()
+    try:
+        admin = require_superadmin(request, db)
+        user = db.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+        user.is_banned = False
+        user.banned_until = None
+        user.ban_reason = "Liberado pelo super admin."
+        audit_event(db, request, "moderation.unban", admin, "user", user.id, user.full_name)
+        ADMIN_USER_NAV_CACHE.clear()
+        db.commit()
+        return RedirectResponse("/admin?tab=admin-moderation", status_code=303)
     finally:
         db.close()
 
@@ -5406,7 +5491,8 @@ def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: st
             raise HTTPException(status_code=404, detail="Saque não encontrado.")
         if status not in {"pending", "approved", "rejected", "paid"}:
             raise HTTPException(status_code=400, detail="Status inválido.")
-        if req.status == "pending" and status == "rejected":
+        previous_status = req.status
+        if previous_status == "pending" and status == "rejected":
             user = db.get(User, req.user_id)
             if user:
                 user.wallet_balance = BR(user.wallet_balance + req.amount)
@@ -5414,7 +5500,7 @@ def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: st
         req.status = status
         req.admin_note = admin_note.strip()
         req.updated_at = datetime.utcnow()
-        if status == "paid":
+        if status == "paid" and previous_status != "paid":
             db.add(WalletTransaction(user_id=req.user_id, amount=-BR(req.net_amount or req.amount or 0.0), kind="withdrawal_paid", note=f"Saque #{req.id} pago manualmente ao cliente"))
         nav_cache_clear()
         db.commit()

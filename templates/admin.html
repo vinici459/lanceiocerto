@@ -72,13 +72,23 @@
 
         <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
           <div class="stat finance-card positive"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Total bruto que saiu do saldo dos usuários nos leilões</small></div>
-          <div class="stat finance-card positive"><span>Taxas arrecadadas</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que é taxa/receita</small></div>
+          <div class="stat finance-card positive"><span>Taxas arrecadadas</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Taxas dos lances + taxa de saque separadas do lucro</small></div>
+          <div class="stat finance-card positive"><span>Lucro nos lances</span><strong>R$ {{ '%.2f'|format(finance.bid_profit_total if finance is defined and finance.bid_profit_total is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe margem operacional, sem contar taxas</small></div>
           <div class="stat finance-card"><span>Pagamentos recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Valores pagos por vencedores</small></div>
           <div class="stat finance-card warning"><span>Saldo dos usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong><small>Valor em custódia dos clientes</small></div>
           <div class="stat finance-card"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Entradas operacionais menos saídas/reservas</small></div>
-          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Compra/envio de produtos e saques pendentes</small></div>
+          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Complemento do site nos leilões + saques líquidos pendentes</small></div>
           <div class="stat finance-card"><span>Lucro estimado</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit if finance is defined and finance.estimated_profit is defined else 0)|replace('.', ',') }}</strong><small>Resultado operacional estimado</small></div>
           <div class="stat finance-card danger"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Produtos vendidos abaixo do equilíbrio</small></div>
+        </div>
+
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat"><span>Lucro hoje</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit_today if finance is defined and finance.estimated_profit_today is defined else 0)|replace('.', ',') }}</strong><small>Resultado positivo do dia</small></div>
+          <div class="stat"><span>Prejuízo hoje</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss_today if finance is defined and finance.accumulated_loss_today is defined else 0)|replace('.', ',') }}</strong><small>Resultado negativo do dia</small></div>
+          <div class="stat"><span>Lucro semana</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit_week if finance is defined and finance.estimated_profit_week is defined else 0)|replace('.', ',') }}</strong><small>Resultado positivo semanal</small></div>
+          <div class="stat"><span>Prejuízo semana</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss_week if finance is defined and finance.accumulated_loss_week is defined else 0)|replace('.', ',') }}</strong><small>Resultado negativo semanal</small></div>
+          <div class="stat"><span>Lucro mês</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit_month if finance is defined and finance.estimated_profit_month is defined else 0)|replace('.', ',') }}</strong><small>Resultado positivo mensal</small></div>
+          <div class="stat"><span>Prejuízo mês</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss_month if finance is defined and finance.accumulated_loss_month is defined else 0)|replace('.', ',') }}</strong><small>Resultado negativo mensal</small></div>
         </div>
 
         <div class="notice-grid admin-overview-grid">
@@ -124,12 +134,14 @@
           <div class="stat"><span>Taxas de lance</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita separada por taxa</small></div>
           <div class="stat"><span>Caixa dos lances p/ produto</span><strong>R$ {{ '%.2f'|format(finance.bid_product_cash if finance is defined and finance.bid_product_cash is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe o valor do leilão</small></div>
           <div class="stat"><span>Pagamentos de vencedores</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Entradas após vitória</small></div>
-          <div class="stat"><span>Saques pendentes</span><strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong><small>Dinheiro solicitado pelos usuários</small></div>
+          <div class="stat"><span>Saques pendentes</span><strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong><small>Valor líquido a pagar aos usuários</small></div>
+          <div class="stat"><span>Lucro nos lances</span><strong>R$ {{ '%.2f'|format(finance.bid_profit_total if finance is defined and finance.bid_profit_total is defined else 0)|replace('.', ',') }}</strong><small>Lucro operacional dos lances, sem taxas</small></div>
+          <div class="stat"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Quando a operação fecha negativa</small></div>
         </div>
 
         <div class="panel-card admin-card-pro">
-          <div class="card-title-row"><h2>Movimentações financeiras</h2><span class="pill-soft">Contabilidade</span></div>
-          <div class="table-wrap">
+          <div class="card-title-row"><h2>Movimentações financeiras</h2><span class="pill-soft">Últimas 100 na tela</span></div>
+          <div class="table-wrap admin-scroll-table">
             <table>
               <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Entrada</th><th>Saída</th><th>Saldo</th><th>Status</th></tr></thead>
               <tbody>
@@ -152,8 +164,8 @@
         </div>
 
         <div class="panel-card admin-card-pro">
-          <div class="card-title-row"><h2>Resultado por leilão</h2><span class="pill-soft">Produto a produto</span></div>
-          <div class="table-wrap">
+          <div class="card-title-row"><h2>Resultado por leilão</h2><span class="pill-soft">Últimos 100 na tela</span></div>
+          <div class="table-wrap admin-scroll-table">
             <table>
               <thead><tr><th>Produto</th><th>Preço original</th><th>Lances recebidos</th><th>Taxas</th><th>Caixa dos lances</th><th>Pago pelo vencedor</th><th>Saída produto</th><th>Complemento</th><th>Resultado</th><th>Situação</th></tr></thead>
               <tbody>
@@ -199,7 +211,6 @@
               <label>Loja de origem<input name="source_store" value="Mercado Livre"></label>
               <label>Link oficial do produto<input name="source_url" placeholder="https://..."></label>
               <label>Preço original<input type="number" step="0.01" name="source_price" required></label>
-              <label>Imagem por URL<input name="image_url" placeholder="https://..."></label>
               <label>Imagem do computador<input type="file" name="image_file" accept="image/*"></label>
             </div>
             <label>Descrição do produto<textarea name="description" placeholder="Descreva o produto com clareza, sem exageros e com informações reais."></textarea></label>
@@ -241,9 +252,6 @@
               <label>Taxa interna por lance (%)
                 <input type="number" step="0.01" name="bid_fee_percent" value="10" min="0" max="50">
                 <small>Ex.: R$ 1,00 de lance gera R$ 0,10 de taxa para o site.</small>
-              </label>
-              <label>Complemento máximo do site (%)
-                <input type="number" step="0.01" name="max_site_complement_percent" value="50" min="0" max="100">
               </label>
               <label>Cashback opcional no fim do leilão
                 <select name="cashback_enabled">
@@ -310,7 +318,6 @@
                 <label>Preço original<input value="R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}" readonly></label>
                 <label>Loja de origem<input name="source_store" value="{{ item.source_store or '' }}"></label>
                 <label>Link oficial do produto<input name="source_url" value="{{ item.source_url or '' }}" placeholder="https://..."></label>
-                <label>Imagem por URL<input name="image_url" value="{{ item.image_url or '' }}" placeholder="https://..."></label>
                 <label>Nova imagem<input type="file" name="image_file" accept="image/*"></label>
               </div>
 
@@ -770,7 +777,9 @@
                   <th>Usuário</th>
                   <th>CPF</th>
                   <th>E-mail</th>
-                  <th>Valor</th>
+                  <th>Valor pedido</th>
+                  <th>Taxa 1%</th>
+                  <th>Valor a pagar</th>
                   <th>Chave PIX</th>
                   <th>Status</th>
                   <th>Ação</th>
@@ -784,6 +793,8 @@
                   <td>{{ w.user.cpf if w.user and w.user.cpf else '—' }}</td>
                   <td>{{ w.user.email if w.user else '—' }}</td>
                   <td><strong>R$ {{ '%.2f'|format(w.amount)|replace('.', ',') }}</strong></td>
+                  <td>R$ {{ '%.2f'|format(w.fee_amount if w.fee_amount is defined else (w.amount * 0.01))|replace('.', ',') }}</td>
+                  <td><strong class="positive-text">R$ {{ '%.2f'|format(w.net_amount if w.net_amount is defined else (w.amount * 0.99))|replace('.', ',') }}</strong></td>
                   <td><code class="pix-key-code">{{ w.pix_key }}</code></td>
                   <td><span class="status {{ w.status }}">{{ w.status }}</span></td>
                   <td>
@@ -800,7 +811,7 @@
                   </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8">Nenhuma solicitação de saque encontrada.</td></tr>
+                <tr><td colspan="10">Nenhuma solicitação de saque encontrada.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
@@ -1105,11 +1116,18 @@
                   <td>{{ u.full_name }}</td>
                   <td>@{{ u.public_name or u.nickname or '—' }}</td>
                   <td>{{ u.email }}</td>
-                  <td>{% if u.chat_muted %}Chat mutado{% else %}Chat liberado{% endif %}{% if u.is_banned %}<br>Conta banida{% endif %}</td>
+                  <td>{% if u.chat_muted %}Chat mutado{% else %}Chat liberado{% endif %}{% if u.is_banned %}<br>Conta banida{% endif %}<br><small>Ocorrências: {{ u.ban_count if u.ban_count is defined else 0 }}{% if u.banned_until %} • até {{ fmt_br_datetime(u.banned_until) }}{% endif %}{% if u.ban_reason %}<br>{{ u.ban_reason }}{% endif %}</small></td>
                   <td>
                     {% if not u.is_superadmin %}
                       <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
-                      {% if user.is_superadmin %}<form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">{% if u.is_banned %}Desbanir conta{% else %}Banir conta{% endif %}</button></form>{% endif %}
+                      <form method="post" action="/admin/user/{{ u.id }}/ban-1-day" class="inline-form moderation-ban-form">
+                        <input name="reason" placeholder="Motivo da punição" value="Infração nas regras do chat">
+                        <button class="btn small danger" type="submit">Banir 1 dia</button>
+                      </form>
+                      {% if user.is_superadmin %}
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">Banimento permanente</button></form>
+                        {% if u.is_banned %}<form method="post" action="/admin/user/{{ u.id }}/unban" class="inline-form"><button class="btn small ghost" type="submit">Liberar acesso</button></form>{% endif %}
+                      {% endif %}
                     {% else %}
                       —
                     {% endif %}
@@ -1245,6 +1263,9 @@ document.addEventListener("DOMContentLoaded", function () {
 .admin-user-detail-card { padding: 16px; border-radius: 16px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); }
 .admin-user-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .admin-production-page table small { opacity: .72; }
+.admin-scroll-table { max-height: 560px; overflow: auto; scrollbar-gutter: stable; border-radius: 16px; border: 1px solid rgba(255,255,255,.06); }
+.admin-scroll-table table { min-width: 980px; }
+.moderation-ban-form input { min-width: 180px; max-width: 260px; }
 @media (max-width: 980px) { .admin-production-sidebar { position: static; max-height: none; overflow: visible; } .admin-section-head-pro { align-items: flex-start; } }
 
 .suggestion-admin-bar {
