@@ -1914,7 +1914,7 @@ def build_returned_items(db: Session) -> list[dict]:
         .outerjoin(User, User.id == WinnerOrder.user_id)
         .filter(WinnerOrder.status == "expired")
         .order_by(desc(WinnerOrder.expired_at), desc(WinnerOrder.created_at))
-        .limit(15)
+        .limit(8)
         .all()
     )
 
@@ -1966,54 +1966,42 @@ def _sum_scalar(db: Session, expr, *filters) -> float:
 
 
 def build_finance_dashboard(db: Session) -> dict:
-    """Indicadores de caixa usando os totais cacheados dos leilões.
+    """Indicadores completos de caixa com o mínimo de round-trips.
 
-    O painel financeiro não precisa somar a tabela inteira de lances a cada
-    abertura do Admin. Cada lance já atualiza AuctionItem.total_bid_spent,
-    AuctionItem.total_bid_fees e AuctionItem.current_price. Somar a tabela de
-    leilões é muito mais leve e mantém o mesmo resultado operacional.
+    Essa tela era o gargalo principal. O problema não era matemática pesada;
+    era várias viagens ao banco remoto. Consolidamos os totais financeiros em
+    um SELECT com subconsultas escalares e mantemos as mesmas chaves usadas no
+    template.
     """
-    paid_statuses = ["paid", "processing", "purchased", "sent", "delivered"]
+    row = db.execute(text("""
+        SELECT
+          (SELECT COALESCE(SUM(total_bid_spent), 0) FROM auction_items) AS total_bid_spent,
+          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS total_fees,
+          (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
+          (SELECT COALESCE(SUM(final_price), 0) FROM winner_orders WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments,
+          (SELECT COALESCE(SUM(a.source_price), 0)
+             FROM winner_orders o JOIN auction_items a ON a.id = o.auction_id
+            WHERE o.status IN ('paid','processing','purchased','sent','delivered')) AS expected_products,
+          (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'product_outgoing') AS product_outgoing,
+          (SELECT COALESCE(SUM(ABS(amount)), 0) FROM wallet_transactions WHERE kind = 'refund') AS refunds,
+          (SELECT COALESCE(SUM(amount), 0) FROM withdrawal_requests WHERE status = 'pending') AS pending_withdrawals,
+          (SELECT COALESCE(SUM(amount), 0) FROM withdrawal_requests WHERE status = 'paid') AS paid_withdrawals,
+          (SELECT COALESCE(SUM(wallet_balance), 0) FROM users) AS user_wallet_total
+    """)).mappings().first()
 
-    auction_row = db.query(
-        func.coalesce(func.sum(AuctionItem.total_bid_spent), 0.0),
-        func.coalesce(func.sum(AuctionItem.total_bid_fees), 0.0),
-        func.coalesce(func.sum(AuctionItem.current_price), 0.0),
-    ).first()
-    total_bid_spent = BR((auction_row[0] if auction_row else 0.0) or 0.0)
-    total_fees = BR((auction_row[1] if auction_row else 0.0) or 0.0)
-    bid_product_cash = BR((auction_row[2] if auction_row else 0.0) or 0.0)
+    def val(name: str) -> float:
+        return BR((row[name] if row and row[name] is not None else 0.0) or 0.0)
 
-    order_row = db.query(
-        func.coalesce(func.sum(WinnerOrder.final_price), 0.0),
-        func.coalesce(func.sum(AuctionItem.source_price), 0.0),
-    ).join(AuctionItem, AuctionItem.id == WinnerOrder.auction_id).filter(
-        WinnerOrder.status.in_(paid_statuses)
-    ).first()
-    total_payments = BR((order_row[0] if order_row else 0.0) or 0.0)
-    expected_products = BR((order_row[1] if order_row else 0.0) or 0.0)
-
-    tx_rows = db.query(
-        WalletTransaction.kind,
-        func.coalesce(func.sum(WalletTransaction.amount), 0.0),
-    ).filter(
-        WalletTransaction.kind.in_(["product_outgoing", "refund"])
-    ).group_by(WalletTransaction.kind).all()
-    tx_sum = {kind: BR(total or 0.0) for kind, total in tx_rows}
-    product_outgoing = abs(tx_sum.get("product_outgoing", 0.0))
-    refunds = abs(tx_sum.get("refund", 0.0))
-
-    wd_rows = db.query(
-        WithdrawalRequest.status,
-        func.coalesce(func.sum(WithdrawalRequest.amount), 0.0),
-    ).filter(
-        WithdrawalRequest.status.in_(["pending", "paid"])
-    ).group_by(WithdrawalRequest.status).all()
-    wd_sum = {status: BR(total or 0.0) for status, total in wd_rows}
-    pending_withdrawals = wd_sum.get("pending", 0.0)
-    paid_withdrawals = wd_sum.get("paid", 0.0)
-
-    user_wallet_total = _sum_scalar(db, User.wallet_balance)
+    total_bid_spent = val("total_bid_spent")
+    total_fees = val("total_fees")
+    bid_product_cash = val("bid_product_cash")
+    total_payments = val("total_payments")
+    expected_products = val("expected_products")
+    product_outgoing = val("product_outgoing")
+    refunds = val("refunds")
+    pending_withdrawals = val("pending_withdrawals")
+    paid_withdrawals = val("paid_withdrawals")
+    user_wallet_total = val("user_wallet_total")
 
     total_income = BR(total_bid_spent + total_payments)
     total_outgoing = BR(product_outgoing + refunds + paid_withdrawals)
@@ -2045,29 +2033,19 @@ def build_finance_dashboard(db: Session) -> dict:
 
 
 def build_finance_dashboard_light(db: Session) -> dict:
-    """Resumo financeiro enxuto para o Resumo Geral.
+    """Resumo financeiro enxuto para o Resumo Geral em uma ida ao banco."""
+    row = db.execute(text("""
+        SELECT
+          (SELECT COALESCE(SUM(total_bid_spent), 0) FROM auction_items) AS total_bid_spent,
+          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS total_fees,
+          (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
+          (SELECT COALESCE(SUM(final_price), 0) FROM winner_orders WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments
+    """)).mappings().first()
 
-    O dashboard precisa abrir rápido e mostrar direção dos números. A visão
-    completa e contábil continua no Fluxo de Caixa. Esta versão evita varrer
-    tabelas grandes de transações/saques na primeira abertura do painel.
-    """
-    paid_statuses = ["paid", "processing", "purchased", "sent", "delivered"]
-
-    auction_row = db.query(
-        func.coalesce(func.sum(AuctionItem.total_bid_spent), 0.0),
-        func.coalesce(func.sum(AuctionItem.total_bid_fees), 0.0),
-        func.coalesce(func.sum(AuctionItem.current_price), 0.0),
-    ).first()
-    total_bid_spent = BR((auction_row[0] if auction_row else 0.0) or 0.0)
-    total_fees = BR((auction_row[1] if auction_row else 0.0) or 0.0)
-    bid_product_cash = BR((auction_row[2] if auction_row else 0.0) or 0.0)
-
-    total_payments = BR(
-        db.query(func.coalesce(func.sum(WinnerOrder.final_price), 0.0))
-        .filter(WinnerOrder.status.in_(paid_statuses))
-        .scalar() or 0.0
-    )
-
+    total_bid_spent = BR((row["total_bid_spent"] if row else 0.0) or 0.0)
+    total_fees = BR((row["total_fees"] if row else 0.0) or 0.0)
+    bid_product_cash = BR((row["bid_product_cash"] if row else 0.0) or 0.0)
+    total_payments = BR((row["total_payments"] if row else 0.0) or 0.0)
     total_income = BR(total_bid_spent + total_payments)
     estimated_profit = BR(total_fees + total_payments + bid_product_cash)
 
@@ -2092,25 +2070,24 @@ def build_finance_dashboard_light(db: Session) -> dict:
     }
 
 def build_cashflow_movements(db: Session) -> list[dict]:
-    """Movimentações do caixa do ponto de vista da plataforma.
+    """Movimentações recentes do caixa em uma consulta leve.
 
-    WalletTransaction é originalmente extrato do usuário; aqui normalizamos o
-    sinal para o caixa do site. Ex.: bid_spent é negativo para o usuário, mas
-    positivo para o caixa do leilão.
+    Antes esta função fazia uma consulta para transações e outra para usuários.
+    Em banco remoto, isso aparecia como atraso visível. Agora trazemos os dados
+    já com LEFT JOIN e limitamos o histórico inicial; a página completa pode ser
+    paginada depois sem travar a primeira abertura.
     """
     rows: list[dict] = []
-    transactions = db.query(WalletTransaction).order_by(desc(WalletTransaction.created_at)).limit(35).all()
-    user_ids = {tx.user_id for tx in transactions if tx.user_id}
-    users_by_id = {}
-    if user_ids:
-        for row in db.query(User.id, User.full_name, User.public_name, User.nickname, User.cpf).filter(User.id.in_(user_ids)).all():
-            users_by_id[row.id] = SimpleNamespace(
-                id=row.id,
-                full_name=row.full_name or "",
-                public_name=row.public_name or "",
-                nickname=row.nickname or "",
-                cpf=row.cpf or "",
-            )
+    transactions = db.execute(text("""
+        SELECT
+          wt.created_at, wt.kind, wt.amount, wt.note, wt.user_id,
+          u.full_name, u.public_name, u.nickname, u.cpf
+        FROM wallet_transactions wt
+        LEFT JOIN users u ON u.id = wt.user_id
+        WHERE NOT (wt.kind = 'deposit_pending' AND ABS(COALESCE(wt.amount, 0)) < 0.00001)
+        ORDER BY wt.created_at DESC
+        LIMIT 12
+    """)).mappings().all()
 
     type_labels = {
         "bid_spent": "lance_recebido",
@@ -2123,83 +2100,113 @@ def build_cashflow_movements(db: Session) -> list[dict]:
         "deposit_pending": "deposito_pendente",
     }
 
+    tmp: list[dict] = []
     for tx in transactions:
-        raw = BR(tx.amount or 0.0)
-        if tx.kind in {"deposit_pending"} and abs(raw) < 0.00001:
-            continue
-        tx_user = users_by_id.get(tx.user_id)
-        cpf = getattr(tx_user, "cpf", "—") or "—"
-        name = public_user_name(tx_user) if tx_user else f"Usuário #{tx.user_id}"
+        raw = BR(tx["amount"] or 0.0)
+        public_name = (tx["public_name"] or "").strip()
+        full_name = (tx["full_name"] or "").strip()
+        nickname = (tx["nickname"] or "").strip()
+        if public_name:
+            name = f"@{public_name}"
+        elif nickname:
+            name = f"@{nickname}"
+        elif full_name:
+            name = full_name.split()[0]
+        else:
+            name = f"Usuário #{tx['user_id']}"
 
-        if tx.kind in {"bid_spent", "payment"}:
+        if tx["kind"] in {"bid_spent", "payment"}:
             amount = abs(raw)
-        elif tx.kind in {"withdrawal_reversal"}:
-            # Devolução de saque volta para o saldo do cliente: reduz uma saída reservada.
+        elif tx["kind"] in {"withdrawal_reversal"}:
             amount = abs(raw)
-        elif tx.kind in {"product_outgoing", "refund", "withdrawal_reserved"}:
+        elif tx["kind"] in {"product_outgoing", "refund", "withdrawal_reserved"}:
             amount = -abs(raw)
         else:
             amount = raw
 
-        rows.append({
-            "created_at": tx.created_at,
-            "type": type_labels.get(tx.kind, tx.kind),
-            "description": f"{name} • CPF {cpf} • {tx.note or 'Movimentação'}",
+        tmp.append({
+            "created_at": tx["created_at"],
+            "type": type_labels.get(tx["kind"], tx["kind"]),
+            "description": f"{name} • CPF {(tx['cpf'] or '—')} • {tx['note'] or 'Movimentação'}",
             "amount": BR(amount),
             "balance_after": None,
             "status": "registrado",
         })
 
-    rows.sort(key=lambda r: r.get("created_at") or datetime.min)
+    tmp.sort(key=lambda r: r.get("created_at") or datetime.min)
     running = 0.0
-    for r in rows:
+    for r in tmp:
         running = BR(running + BR(r.get("amount") or 0.0))
         r["balance_after"] = running
-    rows.sort(key=lambda r: r.get("created_at") or datetime.min, reverse=True)
-    return rows[:50]
-
+    tmp.sort(key=lambda r: r.get("created_at") or datetime.min, reverse=True)
+    return tmp
 
 def build_auction_results(db: Session) -> list[dict]:
-    rows = []
-    items = db.query(AuctionItem).order_by(desc(AuctionItem.created_at)).limit(25).all()
-    item_ids = [i.id for i in items]
-    if not item_ids:
+    """Resultado resumido por leilão com poucas consultas.
+
+    Mantém a visão produto a produto, mas evita hidratar objetos ORM e reduz o
+    volume inicial para o que o Admin enxerga primeiro.
+    """
+    rows: list[dict] = []
+    items = db.execute(text("""
+        SELECT id, title, source_price, total_bid_spent, total_bid_fees, current_price, status, created_at
+        FROM auction_items
+        ORDER BY created_at DESC
+        LIMIT 8
+    """)).mappings().all()
+    if not items:
         return rows
 
-    orders_by_auction: dict[int, WinnerOrder] = {}
-    for order in db.query(WinnerOrder).filter(WinnerOrder.auction_id.in_(item_ids)).order_by(desc(WinnerOrder.created_at)).all():
-        orders_by_auction.setdefault(order.auction_id, order)
+    item_ids = [int(i["id"]) for i in items]
+    orders_by_auction: dict[int, dict] = {}
+    order_rows = (
+        db.query(
+            WinnerOrder.id,
+            WinnerOrder.auction_id,
+            WinnerOrder.final_price,
+            WinnerOrder.status,
+            WinnerOrder.created_at,
+        )
+        .filter(WinnerOrder.auction_id.in_(item_ids))
+        .order_by(WinnerOrder.auction_id, desc(WinnerOrder.created_at))
+        .all()
+    )
+
+    for o in order_rows:
+        orders_by_auction.setdefault(int(o.auction_id), {
+            "id": o.id,
+            "auction_id": o.auction_id,
+            "final_price": o.final_price,
+            "status": o.status,
+            "created_at": o.created_at,
+        })
 
     outgoing_by_order: dict[int, float] = {}
-    order_ids = [order.id for order in orders_by_auction.values() if order]
+    order_ids = [int(o["id"]) for o in orders_by_auction.values() if o]
     if order_ids:
+        # Mantém compatibilidade com o formato atual do note sem varrer histórico enorme.
+        tx_rows = db.query(WalletTransaction.note, WalletTransaction.amount).filter(WalletTransaction.kind == "product_outgoing").order_by(desc(WalletTransaction.created_at)).limit(30).all()
         wanted_order_ids = set(order_ids)
-        product_txs = (
-            db.query(WalletTransaction)
-            .filter(WalletTransaction.kind == "product_outgoing")
-            .order_by(desc(WalletTransaction.created_at))
-            .limit(120)
-            .all()
-        )
-        for tx in product_txs:
-            m = re.search(r"Pedido #(\d+)", tx.note or "")
+        for note, amount in tx_rows:
+            m = re.search(r"Pedido #(\d+)", note or "")
             if m:
                 order_id = int(m.group(1))
                 if order_id in wanted_order_ids:
-                    outgoing_by_order[order_id] = BR(outgoing_by_order.get(order_id, 0.0) + abs(tx.amount or 0.0))
+                    outgoing_by_order[order_id] = BR(outgoing_by_order.get(order_id, 0.0) + abs(amount or 0.0))
 
+    paid_statuses = {"paid", "processing", "purchased", "sent", "delivered"}
     for item in items:
-        order = orders_by_auction.get(item.id)
-        source_price = BR(item.source_price or 0.0)
-        gross_bids = BR(getattr(item, "total_bid_spent", 0.0) or 0.0)
-        fees_total = BR(getattr(item, "total_bid_fees", 0.0) or 0.0)
-        product_cash = BR(getattr(item, "current_price", 0.0) or 0.0)
-        final_price = BR(order.final_price if order and order.status in ["paid", "processing", "purchased", "sent", "delivered"] else 0.0)
-        outgoing = BR(outgoing_by_order.get(order.id, 0.0) if order else 0.0)
+        order = orders_by_auction.get(int(item["id"]))
+        source_price = BR(item["source_price"] or 0.0)
+        gross_bids = BR(item["total_bid_spent"] or 0.0)
+        fees_total = BR(item["total_bid_fees"] or 0.0)
+        product_cash = BR(item["current_price"] or 0.0)
+        final_price = BR(order["final_price"] if order and order.get("status") in paid_statuses else 0.0)
+        outgoing = BR(outgoing_by_order.get(int(order["id"]), 0.0) if order else 0.0)
         cash_total = BR(gross_bids + final_price)
         result = BR(cash_total - outgoing)
         rows.append({
-            "title": item.title,
+            "title": item["title"],
             "source_price": source_price,
             "final_price": final_price,
             "gross_bids": gross_bids,
@@ -2208,13 +2215,13 @@ def build_auction_results(db: Session) -> list[dict]:
             "site_complement": BR(max(0.0, source_price - cash_total)),
             "outgoing": outgoing,
             "result": result,
-            "status_label": item.status,
+            "status_label": item["status"],
         })
     return rows
 
 
 
-def cached_returned_items(db: Session, ttl_seconds: int = 300) -> list[dict]:
+def cached_returned_items(db: Session, ttl_seconds: int = 600) -> list[dict]:
     cached = nav_cache_get("admin:returned-items")
     if cached is not None:
         return cached
@@ -4372,45 +4379,40 @@ def blank_admin_context() -> dict:
 
 
 def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0) -> dict:
-    """Estatísticas mínimas para o painel abrir rápido."""
-    auction_counts = {
-        status: int(total or 0)
-        for status, total in db.query(AuctionItem.status, func.count(AuctionItem.id)).group_by(AuctionItem.status).all()
-    }
-    order_counts = {
-        status: int(total or 0)
-        for status, total in db.query(WinnerOrder.status, func.count(WinnerOrder.id)).group_by(WinnerOrder.status).all()
-    }
-    ticket_open = int(
-        db.query(func.count(SupportTicket.id))
-        .filter(SupportTicket.status.in_(["open", "in_review", "dispute"]))
-        .scalar() or 0
-    )
+    """Estatísticas mínimas do Admin em uma única ida ao banco.
+
+    Nos logs do Railway, cada consulta simples remota custava perto de 200ms.
+    A versão anterior fazia várias contagens separadas. Aqui usamos subconsultas
+    escalares no mesmo SELECT para reduzir round-trips sem mudar os números.
+    """
+    row = db.execute(text("""
+        SELECT
+          (SELECT COUNT(*) FROM auction_items WHERE status = 'live') AS live,
+          (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
+          (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
+          (SELECT COUNT(*) FROM winner_orders WHERE status = 'pending_payment') AS pending_payment,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased')) AS pending_shipping,
+          (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
+          (SELECT COUNT(*) FROM users) AS users,
+          (SELECT COUNT(*) FROM users WHERE (is_banned IS NULL OR is_banned = false)) AS active_users,
+          (SELECT COUNT(*) FROM users WHERE identity_status = 'pending') AS identity_pending,
+          (SELECT COUNT(*) FROM withdrawal_requests WHERE status = 'pending') AS pending_withdrawals
+    """)).mappings().first()
+
     stats = {
-        "users": 0,
-        "active_users": 0,
-        "live": auction_counts.get("live", 0),
-        "scheduled": auction_counts.get("scheduled", 0) + auction_counts.get("relisted", 0),
-        "pending_payment": order_counts.get("pending_payment", 0),
-        "completed": auction_counts.get("ended", 0),
-        "pending_shipping": order_counts.get("paid", 0) + order_counts.get("processing", 0) + order_counts.get("purchased", 0),
-        "identity_pending": 0,
-        "pending_withdrawals": 0,
-        "open_tickets": ticket_open,
+        "users": int((row["users"] if row else 0) or 0) if is_super_admin else 0,
+        "active_users": int((row["active_users"] if row else 0) or 0) if is_super_admin else 0,
+        "live": int((row["live"] if row else 0) or 0),
+        "scheduled": int((row["scheduled"] if row else 0) or 0),
+        "pending_payment": int((row["pending_payment"] if row else 0) or 0),
+        "completed": int((row["completed"] if row else 0) or 0),
+        "pending_shipping": int((row["pending_shipping"] if row else 0) or 0),
+        "identity_pending": int((row["identity_pending"] if row else 0) or 0) if is_super_admin else 0,
+        "pending_withdrawals": int((row["pending_withdrawals"] if row else 0) or 0) if is_super_admin else 0,
+        "open_tickets": int((row["open_tickets"] if row else 0) or 0),
         "returned_products": returned_count,
     }
-    if is_super_admin:
-        user_rows = {
-            str(key): int(total or 0)
-            for key, total in db.query(User.identity_status, func.count(User.id)).group_by(User.identity_status).all()
-        }
-        stats["users"] = sum(user_rows.values())
-        stats["active_users"] = int(db.query(func.count(User.id)).filter(User.is_banned == False).scalar() or 0)
-        stats["identity_pending"] = user_rows.get("pending", 0)
-        stats["pending_withdrawals"] = order_counts.get("__unused__", 0)
-        stats["pending_withdrawals"] = int(db.query(func.count(WithdrawalRequest.id)).filter(WithdrawalRequest.status == "pending").scalar() or 0)
     return stats
-
 
 def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0, ttl_seconds: int = 120) -> dict:
     key = f"admin:light-stats:{int(is_super_admin)}:{int(returned_count)}"
@@ -4428,20 +4430,88 @@ def cached_admin_finance_summary(db: Session, ttl_seconds: int = 180) -> dict:
 
 
 
-def cached_admin_dashboard_context(db: Session, is_super_admin: bool, ttl_seconds: int = 180) -> dict:
-    key = f"admin:dashboard-context:{int(is_super_admin)}"
+def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) -> dict:
+    """Snapshot do Resumo Geral em uma única ida ao banco.
+
+    Os logs mostraram que o dashboard continuava lento mesmo com cache porque,
+    no primeiro acesso, ele ainda fazia estatísticas + financeiro leve em
+    consultas separadas. Esta função consolida tudo em um SELECT só, reduzindo
+    round-trips no banco remoto sem mudar o template.
+    """
+    row = db.execute(text("""
+        SELECT
+          (SELECT COUNT(*) FROM auction_items WHERE status = 'live') AS live,
+          (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
+          (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
+          (SELECT COUNT(*) FROM winner_orders WHERE status = 'pending_payment') AS pending_payment,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased')) AS pending_shipping,
+          (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
+          (SELECT COUNT(*) FROM users) AS users,
+          (SELECT COUNT(*) FROM users WHERE (is_banned IS NULL OR is_banned = false)) AS active_users,
+          (SELECT COUNT(*) FROM users WHERE identity_status = 'pending') AS identity_pending,
+          (SELECT COUNT(*) FROM withdrawal_requests WHERE status = 'pending') AS pending_withdrawals,
+          (SELECT COALESCE(SUM(total_bid_spent), 0) FROM auction_items) AS total_bid_spent,
+          (SELECT COALESCE(SUM(total_bid_fees), 0) FROM auction_items) AS total_fees,
+          (SELECT COALESCE(SUM(current_price), 0) FROM auction_items) AS bid_product_cash,
+          (SELECT COALESCE(SUM(final_price), 0)
+             FROM winner_orders
+            WHERE status IN ('paid','processing','purchased','sent','delivered')) AS total_payments
+    """)).mappings().first()
+
+    def iv(name: str) -> int:
+        return int((row[name] if row and row[name] is not None else 0) or 0)
+
+    def fv(name: str) -> float:
+        return BR((row[name] if row and row[name] is not None else 0.0) or 0.0)
+
+    stats = {
+        "users": iv("users") if is_super_admin else 0,
+        "active_users": iv("active_users") if is_super_admin else 0,
+        "live": iv("live"),
+        "scheduled": iv("scheduled"),
+        "pending_payment": iv("pending_payment"),
+        "completed": iv("completed"),
+        "pending_shipping": iv("pending_shipping"),
+        "identity_pending": iv("identity_pending") if is_super_admin else 0,
+        "pending_withdrawals": iv("pending_withdrawals") if is_super_admin else 0,
+        "open_tickets": iv("open_tickets"),
+        "returned_products": 0,
+    }
+
+    total_bid_spent = fv("total_bid_spent")
+    total_fees = fv("total_fees")
+    bid_product_cash = fv("bid_product_cash")
+    total_payments = fv("total_payments")
+    total_income = BR(total_bid_spent + total_payments)
+    estimated_profit = BR(total_fees + total_payments + bid_product_cash)
+    finance = {
+        "total_fees": total_fees,
+        "total_bid_spent": total_bid_spent,
+        "bid_product_cash": bid_product_cash,
+        "total_payments": total_payments,
+        "user_wallet_total": 0.0,
+        "expected_outgoing": 0.0,
+        "total_income": total_income,
+        "total_outgoing": 0.0,
+        "net_result": total_income,
+        "estimated_profit": estimated_profit,
+        "available_cash": total_income,
+        "accumulated_loss": 0.0,
+        "pending_withdrawals": 0.0,
+        "product_outgoing": 0.0,
+        "expected_products": 0.0,
+        "paid_withdrawals": 0.0,
+        "refunds": 0.0,
+    }
+    return {"stats": stats, "finance": finance}
+
+
+def cached_admin_dashboard_context(db: Session, is_super_admin: bool, ttl_seconds: int = 300) -> dict:
+    key = f"admin:dashboard-context:v2:{int(is_super_admin)}"
     cached = nav_cache_get(key)
     if cached is not None:
         return cached
-    value = {"stats": cached_admin_light_stats(db, is_super_admin)}
-    if is_super_admin:
-        # Dashboard usa snapshot leve; o Fluxo de Caixa mantém a visão completa.
-        value["finance"] = nav_cache_get("admin:finance-dashboard-light") or nav_cache_set(
-            "admin:finance-dashboard-light",
-            build_finance_dashboard_light(db),
-            ttl_seconds,
-        )
-    return nav_cache_set(key, value, ttl_seconds)
+    return nav_cache_set(key, build_admin_dashboard_context_snapshot(db, is_super_admin), ttl_seconds)
 
 def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 300) -> dict:
     """Blocos financeiros completos com cache curto.
