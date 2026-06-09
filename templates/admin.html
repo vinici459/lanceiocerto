@@ -77,6 +77,8 @@
           <div class="stat finance-card"><span>Pagamentos recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Valores pagos por vencedores</small></div>
           <div class="stat finance-card warning"><span>Saldo dos usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong><small>Valor em custódia dos clientes</small></div>
           <div class="stat finance-card"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Entradas operacionais menos saídas/reservas</small></div>
+          <div class="stat finance-card {% if finance is defined and finance.real_cash is defined and finance.real_cash < 0 %}danger{% else %}positive{% endif %}"><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong><small>Caixa após cobrir todas as saídas previstas</small></div>
+          <div class="stat finance-card {% if finance is defined and finance.coverage_percent is defined and finance.coverage_percent < 100 %}danger{% else %}positive{% endif %}"><span>Índice de cobertura</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong><small>Quanto o caixa cobre das saídas previstas</small></div>
           <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Complemento do site nos leilões + saques líquidos pendentes</small></div>
           <div class="stat finance-card"><span>Lucro estimado</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit if finance is defined and finance.estimated_profit is defined else 0)|replace('.', ',') }}</strong><small>Resultado operacional estimado</small></div>
           <div class="stat finance-card danger"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Produtos vendidos abaixo do equilíbrio</small></div>
@@ -96,6 +98,8 @@
             <div class="card-title-row"><h2>Saúde da operação</h2><span class="pill-soft">Auditoria</span></div>
             <div class="profile-grid">
               <div><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong></div>
+              <div><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong></div>
+              <div><span>Cobertura das saídas</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong></div>
               <div><span>Reservado para usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong></div>
               <div><span>Produtos aguardando compra</span><strong>{{ stats.pending_shipping if stats.pending_shipping is defined else '—' }}</strong></div>
               <div><span>Produtos retornados</span><strong>{{ stats.returned_products if stats.returned_products is defined else '—' }}</strong></div>
@@ -108,6 +112,7 @@
               <div><strong>Pagamentos pendentes</strong><span>{{ stats.pending_payment }} leilões aguardando pagamento.</span></div>
               <div><strong>Envios pendentes</strong><span>{{ stats.pending_shipping if stats.pending_shipping is defined else '—' }} produtos pagos aguardando envio.</span></div>
               <div><strong>Controle de risco</strong><span>Revise lucro/prejuízo antes de relançar produtos retornados.</span></div>
+              <div><strong>Cobertura do caixa</strong><span>{% if finance is defined and finance.coverage_percent is defined and finance.coverage_percent < 100 %}Atenção: caixa abaixo das saídas previstas.{% else %}Caixa cobre as saídas previstas no momento.{% endif %}</span></div>
             </div>
           </div>
         </div>
@@ -130,6 +135,8 @@
           <div class="stat"><span>Total de entradas</span><strong>R$ {{ '%.2f'|format(finance.total_income if finance is defined and finance.total_income is defined else 0)|replace('.', ',') }}</strong><small>Lances recebidos + pagamentos dos vencedores</small></div>
           <div class="stat"><span>Total de saídas</span><strong>R$ {{ '%.2f'|format(finance.total_outgoing if finance is defined and finance.total_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Produtos comprados/enviados, saques pagos e estornos</small></div>
           <div class="stat"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Disponível após saídas e saques pendentes</small></div>
+          <div class="stat"><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong><small>Caixa disponível menos complemento dos leilões</small></div>
+          <div class="stat"><span>Índice de cobertura</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong><small>Capacidade de cobrir saídas previstas</small></div>
           <div class="stat"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Entrada bruta dos leilões</small></div>
           <div class="stat"><span>Taxas de lance</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita separada por taxa</small></div>
           <div class="stat"><span>Caixa dos lances p/ produto</span><strong>R$ {{ '%.2f'|format(finance.bid_product_cash if finance is defined and finance.bid_product_cash is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe o valor do leilão</small></div>
@@ -446,6 +453,8 @@
         </div>
       </section>
 
+      {% endif %}
+
       {% if user.is_superadmin %}
 {% endif %}
 {% if admin_active_panel == 'admin-pending-payments' %}
@@ -491,7 +500,6 @@
       </section>
 
       {% endif %}
-{% endif %}
 {% if admin_active_panel == 'admin-shipping' %}
 
       <section id="admin-shipping" class="admin-panel {% if admin_active_panel == 'admin-shipping' %}active{% endif %}">
@@ -508,7 +516,7 @@
               <thead><tr><th>Produto</th><th>Cliente</th><th>CPF</th><th>Contato</th><th>Endereço</th><th>Valor</th><th>Rastreio</th><th>Status</th></tr></thead>
               <tbody>
                 {% for o in orders %}
-                {% if o.status in ['paid', 'processing', 'purchased'] %}
+                {% if o.status in ['paid', 'processing', 'purchased', 'sent', 'delivered', 'dispute', 'resolved'] %}
                 <tr>
                   <td>{{ o.auction.title }}</td>
                   <td>{{ o.user.full_name }}<br><small>{{ o.user.email }}</small></td>
@@ -531,11 +539,20 @@
                       <select name="status">
                         <option value="processing" {% if o.status == 'processing' %}selected{% endif %}>processing</option>
                         <option value="purchased" {% if o.status == 'purchased' %}selected{% endif %}>purchased</option>
-                        <option value="sent" {% if o.status == 'sent' %}selected{% endif %}>sent</option>
-                        <option value="delivered" {% if o.status == 'delivered' %}selected{% endif %}>delivered</option>
+                        <option value="sent" {% if o.status == 'sent' %}selected{% endif %}>sent / enviado</option>
+                        <option value="delivered" {% if o.status == 'delivered' %}selected{% endif %}>delivered / entregue</option>
+                        <option value="dispute" {% if o.status == 'dispute' %}selected{% endif %}>dispute / em disputa</option>
+                        <option value="resolved" {% if o.status == 'resolved' %}selected{% endif %}>resolved / disputa resolvida</option>
+                        <option value="finalized" {% if o.status == 'finalized' %}selected{% endif %}>finalized / operação finalizada</option>
                       </select>
                       <button class="btn small ghost" type="submit">Atualizar</button>
                     </form>
+                    {% if o.status in ['delivered', 'resolved'] %}
+                    <form method="post" action="/admin/order/{{ o.id }}/finalize-operation" class="inline-form">
+                      <input name="admin_note" placeholder="Observação final" value="Operação conferida e finalizada.">
+                      <button class="btn small" type="submit">Finalizar operação</button>
+                    </form>
+                    {% endif %}
                   </td>
                 </tr>
                 {% endif %}
@@ -547,6 +564,8 @@
           </div>
         </div>
       </section>
+
+      {% endif %}
 
       {% if user.is_superadmin %}
 {% endif %}
@@ -808,6 +827,13 @@
                       <input name="admin_note" value="{{ w.admin_note or '' }}" placeholder="Observação do admin">
                       <button class="btn small" type="submit">Salvar</button>
                     </form>
+                    {% if w.status in ['pending', 'approved'] %}
+                    <form method="post" action="/admin/withdrawal/{{ w.id }}/set-status" class="inline-form">
+                      <input type="hidden" name="status" value="paid">
+                      <input type="hidden" name="admin_note" value="Saque pago manualmente pelo administrador.">
+                      <button class="btn small" type="submit">Concluir saque</button>
+                    </form>
+                    {% endif %}
                   </td>
                 </tr>
                 {% else %}
@@ -821,7 +847,6 @@
 
 
       {% endif %}
-{% endif %}
 {% if admin_active_panel == 'admin-tickets' %}
 
       <section id="admin-tickets" class="admin-panel {% if admin_active_panel == 'admin-tickets' %}active{% endif %}">
@@ -849,9 +874,16 @@
                       <select name="status">
                         <option value="open" {% if t.status == 'open' %}selected{% endif %}>Aberto</option>
                         <option value="in_review" {% if t.status == 'in_review' %}selected{% endif %}>Em análise</option>
+                        <option value="awaiting_customer" {% if t.status == 'awaiting_customer' %}selected{% endif %}>Aguardando cliente</option>
                         <option value="dispute" {% if t.status == 'dispute' %}selected{% endif %}>Disputa</option>
                         <option value="resolved" {% if t.status == 'resolved' %}selected{% endif %}>Resolvido</option>
                         <option value="closed" {% if t.status == 'closed' %}selected{% endif %}>Fechado</option>
+                      </select>
+                      <select name="result">
+                        <option value="">Resultado</option>
+                        <option value="client">Favorável ao cliente</option>
+                        <option value="site">Favorável ao site</option>
+                        <option value="agreement">Acordo</option>
                       </select>
                       <input name="admin_note" value="{{ t.admin_note or '' }}" placeholder="Observação">
                       <button class="btn small" type="submit">Salvar</button>
@@ -1017,8 +1049,15 @@
                         <label><input type="checkbox" name="mark_purchased" value="1"> Marcar comprado</label>
                         <label><input type="checkbox" name="mark_sent" value="1"> Marcar enviado</label>
                         <label><input type="checkbox" name="mark_delivered" value="1"> Marcar entregue</label>
+                        <label><input type="checkbox" name="mark_finalized" value="1"> Finalizar operação</label>
                       </div>
                       <button class="btn" type="submit">Salvar controle</button>
+                      {% if o.status in ['delivered', 'resolved'] %}
+                      <form method="post" action="/admin/order/{{ o.id }}/finalize-operation" class="inline-form">
+                        <input name="admin_note" placeholder="Observação final" value="Operação conferida e finalizada.">
+                        <button class="btn small" type="submit">Finalizar operação agora</button>
+                      </form>
+                      {% endif %}
                     </form>
                   </div>
 
@@ -1057,10 +1096,11 @@
 
 {% if user.is_superadmin %}
 {% endif %}
+{% endif %}
 {% if admin_active_panel == 'admin-audit' %}
 <section id="admin-audit" class="admin-panel {% if admin_active_panel == 'admin-audit' %}active{% endif %}">
   <div class="section-head admin-section-head-pro">
-    <div><h1>Auditoria Geral</h1><p>Registro cronológico de ações sensíveis da plataforma: cadastro, KYC, depósitos pendentes, saques, pagamentos e decisões administrativas.</p></div>
+    <div><h1>Auditoria Geral</h1><p>Registro cronológico de ações sensíveis da plataforma: cadastro, KYC, saques, pagamentos, compra/envio/entrega, finalização de operação, disputas, estornos e moderação.</p></div>
   </div>
   <div class="panel-card admin-card-pro">
     <div class="card-title-row"><h2>Eventos recentes</h2><span class="pill-soft">Rastreabilidade</span></div>
@@ -1072,7 +1112,6 @@
   </div>
 </section>
 
-{% endif %}
 {% endif %}
 {% if admin_active_panel == 'admin-moderation' %}
 

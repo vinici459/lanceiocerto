@@ -2006,7 +2006,7 @@ def build_finance_periods(db: Session) -> dict:
         bid_profit = BR((bid_row[1] if bid_row else 0.0) or 0.0)
         bid_total = BR((bid_row[2] if bid_row else 0.0) or 0.0)
         payments = BR(db.query(func.coalesce(func.sum(WinnerOrder.final_price), 0.0)).filter(
-            WinnerOrder.status.in_(["paid", "processing", "purchased", "sent", "delivered"]),
+            WinnerOrder.status.in_(["paid", "processing", "purchased", "sent", "delivered", "dispute", "resolved"]),
             func.coalesce(WinnerOrder.paid_at, WinnerOrder.created_at) >= start,
         ).scalar() or 0.0)
         outgoings = BR(db.query(func.coalesce(func.sum(func.abs(WalletTransaction.amount)), 0.0)).filter(
@@ -2082,6 +2082,11 @@ def build_finance_dashboard(db: Session) -> dict:
     expected_outgoing = BR(expected_products + pending_withdrawals)
     available_cash = BR(total_income - total_outgoing - pending_withdrawals)
     net_result = BR(total_income - total_outgoing)
+    # Caixa real: dinheiro estimado depois de considerar todas as saídas ainda previstas
+    # (complemento dos produtos + saques líquidos pendentes). Não confundir com saldo
+    # dos usuários, que continua separado como custódia.
+    real_cash = BR(total_income - total_outgoing - expected_outgoing)
+    coverage_percent = BR((available_cash / expected_outgoing * 100.0) if expected_outgoing > 0 else 100.0)
     estimated_profit = BR(total_fees + bid_product_cash + total_payments - product_outgoing - refunds - pending_withdrawals)
 
     period_finance = build_finance_periods(db)
@@ -2102,6 +2107,8 @@ def build_finance_dashboard(db: Session) -> dict:
         "net_result": net_result,
         "estimated_profit": estimated_profit,
         "available_cash": available_cash,
+        "real_cash": real_cash,
+        "coverage_percent": coverage_percent,
         "accumulated_loss": BR(abs(estimated_profit) if estimated_profit < 0 else 0),
         "pending_withdrawals": pending_withdrawals,
         "product_outgoing": product_outgoing,
@@ -2132,6 +2139,9 @@ def build_finance_dashboard_light(db: Session) -> dict:
     bid_product_cash = BR((row["bid_product_cash"] if row else 0.0) or 0.0)
     total_payments = BR((row["total_payments"] if row else 0.0) or 0.0)
     total_income = BR(total_bid_spent + total_payments)
+    expected_outgoing = 0.0
+    real_cash = total_income
+    coverage_percent = 100.0
     estimated_profit = BR(total_fees + total_payments + bid_product_cash)
 
     return {
@@ -2149,6 +2159,8 @@ def build_finance_dashboard_light(db: Session) -> dict:
         "net_result": total_income,
         "estimated_profit": estimated_profit,
         "available_cash": total_income,
+        "real_cash": real_cash,
+        "coverage_percent": coverage_percent,
         "accumulated_loss": 0.0,
         "pending_withdrawals": 0.0,
         "product_outgoing": 0.0,
@@ -4530,7 +4542,7 @@ def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0
           (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
           (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
           (SELECT COUNT(*) FROM winner_orders WHERE status = 'pending_payment') AS pending_payment,
-          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased')) AS pending_shipping,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
           (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
           (SELECT COUNT(*) FROM users) AS users,
           (SELECT COUNT(*) FROM users WHERE (is_banned IS NULL OR is_banned = false)) AS active_users,
@@ -4562,10 +4574,10 @@ def cached_admin_light_stats(db: Session, is_super_admin: bool, returned_count: 
 
 
 def cached_admin_finance_summary(db: Session, ttl_seconds: int = 180) -> dict:
-    cached = nav_cache_get("admin:finance-summary:v2")
+    cached = nav_cache_get("admin:finance-summary:v3")
     if cached is not None:
         return cached
-    return nav_cache_set("admin:finance-summary:v2", build_finance_dashboard(db), ttl_seconds)
+    return nav_cache_set("admin:finance-summary:v3", build_finance_dashboard(db), ttl_seconds)
 
 
 
@@ -4583,7 +4595,7 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
           (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
           (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
           (SELECT COUNT(*) FROM winner_orders WHERE status = 'pending_payment') AS pending_payment,
-          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased')) AS pending_shipping,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
           (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
           (SELECT COUNT(*) FROM users) AS users,
           (SELECT COUNT(*) FROM users WHERE (is_banned IS NULL OR is_banned = false)) AS active_users,
@@ -4647,6 +4659,8 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
     total_outgoing = BR(product_outgoing + refunds + paid_withdrawals)
     expected_outgoing = BR(expected_products + pending_withdrawals_value)
     available_cash = BR(total_income - total_outgoing - pending_withdrawals_value)
+    real_cash = BR(total_income - total_outgoing - expected_outgoing)
+    coverage_percent = BR((available_cash / expected_outgoing * 100.0) if expected_outgoing > 0 else 100.0)
     estimated_profit = BR(total_fees + bid_product_cash + total_payments - product_outgoing - refunds - pending_withdrawals_value)
     period_finance = build_finance_periods(db)
     finance = {
@@ -4665,6 +4679,8 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
         "net_result": BR(total_income - total_outgoing),
         "estimated_profit": estimated_profit,
         "available_cash": available_cash,
+        "real_cash": real_cash,
+        "coverage_percent": coverage_percent,
         "accumulated_loss": BR(abs(estimated_profit) if estimated_profit < 0 else 0.0),
         "pending_withdrawals": pending_withdrawals_value,
         "product_outgoing": product_outgoing,
@@ -4676,7 +4692,7 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
 
 
 def cached_admin_dashboard_context(db: Session, is_super_admin: bool, ttl_seconds: int = 300) -> dict:
-    key = f"admin:dashboard-context:v3:{int(is_super_admin)}"
+    key = f"admin:dashboard-context:v4:{int(is_super_admin)}"
     cached = nav_cache_get(key)
     if cached is not None:
         return cached
@@ -4818,7 +4834,7 @@ def admin_dashboard(request: Request):
             if active_panel == "admin-pending-payments":
                 orders_query = orders_query.filter(WinnerOrder.status == "pending_payment")
             elif active_panel == "admin-shipping":
-                orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "processing", "purchased", "sent"]))
+                orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "processing", "purchased", "sent", "delivered", "dispute", "resolved"]))
             elif active_panel == "admin-search-orders":
                 if search:
                     like = f"%{search}%"
@@ -4834,7 +4850,8 @@ def admin_dashboard(request: Request):
                     )
                 else:
                     orders_query = orders_query.filter(WinnerOrder.status.in_(["sent", "delivered", "dispute", "resolved", "closed"]))
-            orders = orders_query.order_by(desc(WinnerOrder.created_at)).limit(20).all()
+            orders_limit = 100 if active_panel in {"admin-shipping", "admin-pending-payments"} else 20
+            orders = orders_query.order_by(desc(WinnerOrder.created_at)).limit(orders_limit).all()
             ctx["orders"] = orders
             ctx["admin_order_cards"] = build_admin_order_cards(db, orders)
             ctx["pending_payment_orders"] = orders if active_panel == "admin-pending-payments" else []
@@ -4928,7 +4945,6 @@ async def admin_create_item(
     turbo_fee_target_percent: float = Form(10),
     winner_min_percent: float = Form(50),
     bid_fee_percent: float = Form(10),
-    max_site_complement_percent: float = Form(50),
     cashback_enabled: int = Form(0),
 ):
     db = SessionLocal()
@@ -5057,10 +5073,11 @@ def admin_update_order_control(
     mark_purchased: int = Form(0),
     mark_sent: int = Form(0),
     mark_delivered: int = Form(0),
+    mark_finalized: int = Form(0),
 ):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        admin_user = require_admin(request, db)
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
@@ -5073,14 +5090,26 @@ def admin_update_order_control(
             order.status = "purchased"
             order.purchased_at = now
             register_product_outgoing_if_needed(db, order, now)
+            audit_event(db, request, "order.purchased", admin_user, "order", order.id, f"Produto comprado. Pedido #{order.id}")
         if int(mark_sent or 0):
             order.status = "sent"
             order.sent_at = now
             register_product_outgoing_if_needed(db, order, now)
+            audit_event(db, request, "order.sent", admin_user, "order", order.id, f"Produto enviado. Rastreio: {order.tracking_code or 'sem código'}")
         if int(mark_delivered or 0):
             order.status = "delivered"
             order.delivered_at = now
             register_product_outgoing_if_needed(db, order, now)
+            audit_event(db, request, "order.delivered", admin_user, "order", order.id, f"Produto entregue. Pedido #{order.id}")
+        if int(mark_finalized or 0):
+            if order.status not in {"delivered", "resolved"}:
+                raise HTTPException(status_code=400, detail="A operação só pode ser finalizada depois da entrega ou resolução da disputa.")
+            order.status = "finalized"
+            order.admin_note = ((order.admin_note or "") + "\nOperação finalizada administrativamente.").strip()
+            item = db.get(AuctionItem, order.auction_id)
+            if item:
+                item.status = "ended"
+            audit_event(db, request, "order.finalized", admin_user, "order", order.id, f"Operação finalizada. Pedido #{order.id}")
         nav_cache_clear()
         db.commit()
         return RedirectResponse("/admin?tab=admin-shipping", status_code=303)
@@ -5203,7 +5232,7 @@ def admin_credit_user(request: Request, user_id: int, amount: float = Form(...))
         user.wallet_balance = BR(user.wallet_balance + amount)
         db.add(WalletTransaction(user_id=user.id, amount=amount, kind="manual_adjustment", note="Crédito admin"))
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=admin-users", status_code=303)
     finally:
         db.close()
 
@@ -5287,7 +5316,7 @@ def admin_toggle_mute(request: Request, user_id: int):
             raise HTTPException(status_code=400, detail="Você não pode mutar a si mesmo.")
         user.chat_muted = not user.chat_muted
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=admin-moderation", status_code=303)
     finally:
         db.close()
 
@@ -5300,16 +5329,19 @@ def admin_set_tracking(request: Request, order_id: int, tracking_code: str = For
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        admin_user = require_admin(request, db)
         if tracking_code.strip():
             order.tracking_code = tracking_code.strip()
             if order.status in {"paid", "processing", "purchased"}:
                 order.status = "sent"
                 order.sent_at = datetime.utcnow()
                 register_product_outgoing_if_needed(db, order, order.sent_at)
+            audit_event(db, request, "order.tracking_updated", admin_user, "order", order.id, f"Rastreio atualizado: {order.tracking_code}")
         if admin_note.strip():
             order.admin_note = admin_note.strip()
+        nav_cache_clear()
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=admin-shipping", status_code=303)
     finally:
         db.close()
 
@@ -5322,7 +5354,7 @@ def admin_set_order_status(request: Request, order_id: int, status: str = Form(.
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
-        allowed = {"pending_payment", "paid", "processing", "purchased", "sent", "delivered", "expired"}
+        allowed = {"pending_payment", "paid", "processing", "purchased", "sent", "delivered", "dispute", "resolved", "finalized", "expired"}
         if status not in allowed:
             raise HTTPException(status_code=400, detail="Status inválido.")
         if not admin_user.is_superadmin and status in {"pending_payment", "paid", "expired"}:
@@ -5339,14 +5371,19 @@ def admin_set_order_status(request: Request, order_id: int, status: str = Form(.
         if status == "delivered" and previous_status != "delivered":
             order.delivered_at = order.delivered_at or now
             register_product_outgoing_if_needed(db, order, now)
+        if status == "finalized":
+            if previous_status not in {"delivered", "resolved", "finalized"}:
+                raise HTTPException(status_code=400, detail="Finalize somente depois da entrega ou resolução da disputa.")
+            order.admin_note = ((order.admin_note or "") + "\nOperação finalizada administrativamente.").strip()
         if admin_note.strip():
             order.admin_note = admin_note.strip()
         item = db.get(AuctionItem, order.auction_id)
-        if item and status == "delivered":
+        if item and status in {"delivered", "finalized"}:
             item.status = "ended"
+        audit_event(db, request, "order.status_changed", admin_user, "order", order.id, f"{previous_status} -> {status}. {admin_note.strip()}")
         nav_cache_clear()
         db.commit()
-        tab = "admin-shipping" if status in {"processing", "purchased", "sent", "delivered"} else "admin-search-orders"
+        tab = "admin-shipping" if status in {"processing", "purchased", "sent", "delivered", "dispute", "resolved"} else "admin-search-orders"
         return RedirectResponse(f"/admin?tab={tab}", status_code=303)
     finally:
         db.close()
@@ -5505,26 +5542,56 @@ def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: st
         req.updated_at = datetime.utcnow()
         if status == "paid" and previous_status != "paid":
             db.add(WalletTransaction(user_id=req.user_id, amount=-BR(req.net_amount or req.amount or 0.0), kind="withdrawal_paid", note=f"Saque #{req.id} pago manualmente ao cliente"))
+        admin_user = require_superadmin(request, db)
+        audit_event(db, request, "withdrawal.status_changed", admin_user, "withdrawal", req.id, f"{previous_status} -> {status}. Bruto R$ {fmt_money(req.amount)} | taxa R$ {fmt_money(req.fee_amount)} | líquido R$ {fmt_money(req.net_amount or req.amount)}")
         nav_cache_clear()
         db.commit()
-        return RedirectResponse("/admin#admin-withdrawals", status_code=303)
+        return RedirectResponse("/admin?tab=admin-withdrawals", status_code=303)
     finally:
         db.close()
 
+
+
+
+@app.post("/admin/order/{order_id}/finalize-operation")
+def admin_finalize_order_operation(request: Request, order_id: int, admin_note: str = Form("")):
+    db = SessionLocal()
+    try:
+        admin_user = require_admin(request, db)
+        order = db.get(WinnerOrder, order_id)
+        if not order:
+            raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        if order.status not in {"delivered", "resolved", "finalized"}:
+            raise HTTPException(status_code=400, detail="A operação só pode ser finalizada depois da entrega ou resolução da disputa.")
+        previous_status = order.status
+        order.status = "finalized"
+        note = admin_note.strip() or "Operação conferida e finalizada administrativamente."
+        order.admin_note = ((order.admin_note or "") + f"\n{note}").strip()
+        item = db.get(AuctionItem, order.auction_id)
+        if item:
+            item.status = "ended"
+        audit_event(db, request, "order.finalized", admin_user, "order", order.id, f"{previous_status} -> finalized. {note}")
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse("/admin?tab=admin-search-orders", status_code=303)
+    finally:
+        db.close()
 
 @app.post("/admin/order/{order_id}/extend-payment")
 def admin_extend_payment(request: Request, order_id: int, extra_minutes: int = Form(10)):
     db = SessionLocal()
     try:
-        require_superadmin(request, db)
+        admin_user = require_superadmin(request, db)
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
         base = order.payment_deadline if order.payment_deadline and order.payment_deadline > datetime.utcnow() else datetime.utcnow()
         order.payment_deadline = base + timedelta(minutes=max(1, int(extra_minutes)))
         order.status = "pending_payment"
+        audit_event(db, request, "order.payment_extended", admin_user, "order", order.id, f"Prazo estendido em {max(1, int(extra_minutes))} minutos")
+        nav_cache_clear()
         db.commit()
-        return RedirectResponse("/admin#admin-pending-payments", status_code=303)
+        return RedirectResponse("/admin?tab=admin-pending-payments", status_code=303)
     finally:
         db.close()
 
@@ -5533,7 +5600,7 @@ def admin_extend_payment(request: Request, order_id: int, extra_minutes: int = F
 def admin_refund_order(request: Request, order_id: int, amount: float = Form(...), admin_note: str = Form("")):
     db = SessionLocal()
     try:
-        require_superadmin(request, db)
+        admin_user = require_superadmin(request, db)
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
@@ -5553,24 +5620,30 @@ def admin_refund_order(request: Request, order_id: int, amount: float = Form(...
 
 
 @app.post("/admin/ticket/{ticket_id}/set-status")
-def admin_set_ticket_status(request: Request, ticket_id: int, status: str = Form(...), admin_note: str = Form("")):
+def admin_set_ticket_status(request: Request, ticket_id: int, status: str = Form(...), admin_note: str = Form(""), result: str = Form("")):
     db = SessionLocal()
     try:
-        require_admin(request, db)
+        admin_user = require_admin(request, db)
         ticket = db.get(SupportTicket, ticket_id)
         if not ticket:
             raise HTTPException(status_code=404, detail="Chamado não encontrado.")
-        if status not in {"open", "in_review", "dispute", "resolved", "closed"}:
+        if status not in {"open", "in_review", "awaiting_customer", "dispute", "resolved", "closed"}:
             raise HTTPException(status_code=400, detail="Status inválido.")
+        if result and result not in {"client", "site", "agreement"}:
+            raise HTTPException(status_code=400, detail="Resultado inválido.")
+        previous_status = ticket.status
         ticket.status = status
-        ticket.admin_note = admin_note.strip()
+        result_label = {"client": "Favorável ao cliente", "site": "Favorável ao site", "agreement": "Acordo"}.get(result, "")
+        ticket.admin_note = (admin_note.strip() + (("\nResultado: " + result_label) if result_label else "")).strip()
         ticket.updated_at = datetime.utcnow()
         if ticket.order_id:
             order = db.get(WinnerOrder, ticket.order_id)
-            if order and status in {"dispute", "resolved"}:
-                order.status = status
+            if order and status in {"dispute", "resolved", "closed"}:
+                order.status = "resolved" if status in {"resolved", "closed"} else "dispute"
+        audit_event(db, request, "ticket.status_changed", admin_user, "ticket", ticket.id, f"{previous_status} -> {status}. {ticket.admin_note}")
+        nav_cache_clear()
         db.commit()
-        return RedirectResponse("/admin#admin-search-orders", status_code=303)
+        return RedirectResponse("/admin?tab=admin-tickets", status_code=303)
     finally:
         db.close()
 
