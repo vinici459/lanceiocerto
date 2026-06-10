@@ -2373,22 +2373,132 @@ def build_admin_order_cards(db: Session, orders: list[WinnerOrder]) -> list[dict
     return [{"order": o, "finance": admin_order_finance(o), "messages": messages_by_order.get(o.id, [])} for o in orders]
 
 
+ORDER_STATUS_LABELS = {
+    "pending_payment": "Aguardando pagamento",
+    "paid": "Pagamento aprovado",
+    "processing": "Preparando compra",
+    "purchased": "Produto comprado",
+    "sent": "Produto enviado",
+    "delivered": "Entregue",
+    "finalized": "Pedido concluído",
+    "completed": "Pedido concluído",
+    "expired": "Prazo expirado",
+    "resolved": "Resolvido",
+}
+
+ORDER_STATUS_DESCRIPTIONS = {
+    "pending_payment": "Finalize o pagamento para a equipe iniciar a compra e o envio do produto.",
+    "paid": "Pagamento aprovado. O produto será comprado e preparado para envio.",
+    "processing": "Pedido em preparação. A equipe está organizando a compra do produto.",
+    "purchased": "Produto comprado. O próximo passo é registrar o envio e informar o rastreio.",
+    "sent": "Produto enviado. Acompanhe o rastreio informado nesta página.",
+    "delivered": "Produto marcado como entregue. Confirme o recebimento ou abra uma disputa se houver problema.",
+    "finalized": "Pedido concluído com sucesso.",
+    "completed": "Pedido concluído com sucesso.",
+    "expired": "O prazo para pagamento expirou.",
+    "resolved": "Pedido resolvido após análise da equipe.",
+}
+
+
+def order_status_label(status: str) -> str:
+    return ORDER_STATUS_LABELS.get((status or "").strip().lower(), status or "—")
+
+
+def order_status_description(status: str) -> str:
+    return ORDER_STATUS_DESCRIPTIONS.get((status or "").strip().lower(), "Acompanhe as atualizações deste pedido por aqui.")
+
+
+def build_order_timeline(order: WinnerOrder) -> list[dict]:
+    status = (order.status or "").strip().lower()
+    finalized = status in {"finalized", "completed"}
+    paid_done = bool(order.paid_at) or status in {"paid", "processing", "purchased", "sent", "delivered", "finalized", "completed"}
+    purchased_done = bool(order.purchased_at) or status in {"purchased", "sent", "delivered", "finalized", "completed"}
+    sent_done = bool(order.sent_at) or status in {"sent", "delivered", "finalized", "completed"}
+    delivered_done = bool(order.delivered_at) or status in {"delivered", "finalized", "completed"}
+    steps = [
+        ("Leilão vencido", order.created_at, True, "Produto arrematado na sua conta."),
+        ("Pagamento aprovado", order.paid_at, paid_done, "Aguardando confirmação do pagamento."),
+        ("Produto comprado", order.purchased_at, purchased_done, "Aguardando compra do produto."),
+        ("Produto enviado", order.sent_at, sent_done, "Aguardando envio e rastreio."),
+        ("Produto entregue", order.delivered_at, delivered_done, "Aguardando entrega."),
+        ("Pedido concluído", None, finalized, "Finalize após receber o produto."),
+    ]
+    active_set = False
+    timeline = []
+    for label, dt, done, helper in steps:
+        if done:
+            state = "done"
+        elif not active_set and status != "expired":
+            state = "active"
+            active_set = True
+        else:
+            state = "pending"
+        timeline.append({
+            "label": label,
+            "date_label": fmt_br_datetime(dt) if dt else "",
+            "state": state,
+            "helper": helper,
+        })
+    if status == "expired":
+        timeline.append({"label": "Prazo expirado", "date_label": fmt_br_datetime(order.expired_at), "state": "danger", "helper": "O prazo de pagamento terminou."})
+    return timeline
+
+
+def build_order_history(order: WinnerOrder) -> list[dict]:
+    events = [
+        (order.created_at, "Leilão vencido", "Você foi o vencedor deste leilão."),
+        (order.paid_at, "Pagamento aprovado", "Pagamento confirmado na plataforma."),
+        (order.purchased_at, "Produto comprado", "A equipe registrou a compra do produto."),
+        (order.sent_at, "Produto enviado", f"Envio registrado. Rastreio: {order.tracking_code or 'aguardando código'}."),
+        (order.delivered_at, "Produto entregue", "Entrega marcada como concluída."),
+        (order.expired_at, "Prazo expirado", "O prazo de pagamento do pedido expirou."),
+    ]
+    history = []
+    for dt, title, description in events:
+        if dt:
+            history.append({"date_label": fmt_br_datetime(dt), "title": title, "description": description})
+    return history
+
+
 def build_order_card(order: WinnerOrder) -> dict:
+    item = order.auction
+    source_price = BR(getattr(item, "source_price", 0.0) or 0.0)
+    final_price = BR(order.final_price)
+    savings = BR(max(0.0, source_price - final_price)) if source_price else 0.0
     return {
         "id": order.id,
         "auction_id": order.auction_id,
         "status": order.status,
-        "auction_title": order.auction.title,
-        "image_url": order.auction.image_url,
-        "final_price": BR(order.final_price),
+        "status_label": order_status_label(order.status),
+        "status_description": order_status_description(order.status),
+        "auction_title": item.title if item else "Produto",
+        "image_url": safe_image_url(item.image_url if item else ""),
+        "final_price": final_price,
+        "source_price": source_price,
+        "savings": savings,
         "deadline_label": fmt_deadline(order.payment_deadline),
         "remaining_label": remaining_label(order.payment_deadline),
         "payment_link": order.payment_link,
         "tracking_code": order.tracking_code,
+        "purchase_status": order.purchase_status,
+        "purchase_link": order.purchase_link,
         "admin_note": order.admin_note,
-        "source_store": order.auction.source_store,
-        "source_url": order.auction.source_url,
-        "created_at": order.created_at.strftime("%d/%m/%Y %H:%M"),
+        "source_store": item.source_store if item else "",
+        "source_url": item.source_url if item else "",
+        "created_at": fmt_br_datetime(order.created_at),
+        "paid_at": fmt_br_datetime(order.paid_at),
+        "purchased_at": fmt_br_datetime(order.purchased_at),
+        "sent_at": fmt_br_datetime(order.sent_at),
+        "delivered_at": fmt_br_datetime(order.delivered_at),
+        "timeline": build_order_timeline(order),
+        "history": build_order_history(order),
+        "delivery_name": order.delivery_name,
+        "delivery_cep": order.delivery_cep,
+        "delivery_street": order.delivery_street,
+        "delivery_number": order.delivery_number,
+        "delivery_district": order.delivery_district,
+        "delivery_city": order.delivery_city,
+        "delivery_state": order.delivery_state,
     }
 
 
@@ -4270,6 +4380,51 @@ def my_wins(request: Request):
             data = [build_order_card(x) for x in orders]
             nav_cache_set(cache_key, data, 90)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wins", "orders": data})
+    finally:
+        db.close()
+
+
+@app.get("/minha-conta/pedido/{order_id}", response_class=HTMLResponse)
+def my_order_detail(request: Request, order_id: int):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        order = (
+            db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
+            .filter(WinnerOrder.id == order_id, WinnerOrder.user_id == user.id)
+            .first()
+        )
+        if not order:
+            raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        return templates.TemplateResponse(
+            "account_pages.html",
+            {"request": request, "user": user, "section": "order_detail", "order": build_order_card(order)},
+        )
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/pedido/{order_id}/confirmar-recebimento")
+def account_confirm_order_received(request: Request, order_id: int):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        order = (
+            db.query(WinnerOrder)
+            .filter(WinnerOrder.id == order_id, WinnerOrder.user_id == user.id)
+            .first()
+        )
+        if not order:
+            raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        if order.status != "delivered":
+            raise HTTPException(status_code=400, detail="O recebimento só pode ser confirmado após a entrega ser registrada.")
+        order.status = "finalized"
+        order.admin_note = ((order.admin_note or "") + "\nCliente confirmou o recebimento do produto.").strip()
+        audit_event(db, request, "order.received_confirmed", user, "order", order.id, f"Cliente confirmou recebimento do pedido #{order.id}.")
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/minha-conta/pedido/{order.id}", status_code=303)
     finally:
         db.close()
 

@@ -27,8 +27,8 @@
       Leilões Participados
     </a>
 
-    <a href="/minha-conta/ganhos" class="account-side-link {% if section == 'wins' %}active{% endif %}">
-      Leilões Ganhos
+    <a href="/minha-conta/ganhos" class="account-side-link {% if section in ['wins','order_detail'] %}active{% endif %}">
+      Meus Pedidos
     </a>
 
     <a href="/minha-conta/pagamentos" class="account-side-link {% if section == 'payments' %}active{% endif %}">
@@ -67,7 +67,7 @@
     <a class="btn small" href="/minha-conta#account-balance-panel" data-account-target="account-balance-panel">Adicionar saldo</a>
     <a class="btn small ghost" href="/minha-conta/cadastro">Enviar documentos</a>
     <a class="btn small ghost" href="/minha-conta/pagamentos">Pagamentos pendentes</a>
-    <a class="btn small ghost" href="/minha-conta/ganhos">Meus ganhos</a>
+    <a class="btn small ghost" href="/minha-conta/ganhos">Meus pedidos</a>
   </div>
 </div>
 
@@ -320,114 +320,205 @@
 </div>
 
 {% elif section == 'wins' %}
-<div class="wins-page-pro">
-  <div class="section-head wins-head-pro">
+<div class="orders-page-marketplace">
+  <div class="section-head orders-head-marketplace">
     <div>
-      <span class="wins-eyebrow">Minha área de compras</span>
-      <h1>Leilões Ganhos</h1>
-      <p> acompanhe seus produtos arrematados como pedidos reais: pagamento, preparação, envio, entrega e disputa.</p>
+      <span class="orders-eyebrow">Área de compras</span>
+      <h1>Meus Pedidos</h1>
+      <p>Acompanhe seus produtos arrematados com status de pagamento, compra, envio, entrega e suporte.</p>
     </div>
-    <a class="btn small ghost" href="/minha-conta/pagamentos">Ver pagamentos pendentes</a>
+    <a class="btn small ghost" href="/minha-conta/pagamentos">Pagamentos pendentes</a>
   </div>
 
-  <div class="wins-order-grid">
+  <div class="orders-list-marketplace">
     {% for o in orders %}
-      {% set status_label = 'Aguardando pagamento' if o.status == 'pending_payment' else 'Pagamento confirmado' if o.status == 'paid' else 'Produto comprado' if o.status == 'purchased' else 'Em preparação' if o.status == 'processing' else 'Enviado' if o.status == 'sent' else 'Entregue' if o.status == 'delivered' else 'Operação finalizada' if o.status == 'completed' else 'Prazo expirado' if o.status == 'expired' else o.status %}
-      {% set is_paid_step = o.status in ['paid','processing','purchased','sent','delivered','completed'] %}
-      {% set is_purchased_step = o.status in ['purchased','sent','delivered','completed'] %}
-      {% set is_sent_step = o.status in ['sent','delivered','completed'] %}
-      {% set is_delivered_step = o.status in ['delivered','completed'] %}
-      {% set is_completed_step = o.status == 'completed' %}
-
-      <article class="win-order-card status-{{ o.status }}">
-        <div class="win-order-media">
+      {% set market_value = o.source_price if o.source_price is defined else 0 %}
+      {% set savings = (market_value - o.final_price) if market_value and market_value > o.final_price else 0 %}
+      <article class="order-summary-card status-{{ o.status }}">
+        <div class="order-summary-left">
           <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
-          <span class="win-status-pill status-{{ o.status }}">{{ status_label }}</span>
         </div>
 
-        <div class="win-order-body">
-          <div class="win-order-title-row">
+        <div class="order-summary-center">
+          <div class="order-summary-title-row">
             <div>
+              <span class="order-number">Pedido #{{ '%06d'|format(o.id) }}</span>
               <h2>{{ o.auction_title }}</h2>
-              <p>Pedido #{{ o.id }} • Arremate confirmado na sua conta</p>
             </div>
-            <div class="win-price-box">
-              <span>Valor final</span>
-              <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong>
-            </div>
+            <span class="order-status-chip status-{{ o.status }}">{{ o.status_label }}</span>
           </div>
 
-          <div class="win-order-timeline">
-            <div class="win-step {{ 'done' if is_paid_step else 'active' if o.status == 'pending_payment' else '' }}">
-              <strong>1</strong><span>Pagamento</span>
-            </div>
-            <div class="win-step {{ 'done' if is_purchased_step else 'active' if o.status in ['paid','processing'] else '' }}">
-              <strong>2</strong><span>Compra</span>
-            </div>
-            <div class="win-step {{ 'done' if is_sent_step else 'active' if o.status == 'purchased' else '' }}">
-              <strong>3</strong><span>Envio</span>
-            </div>
-            <div class="win-step {{ 'done' if is_delivered_step else 'active' if o.status == 'sent' else '' }}">
-              <strong>4</strong><span>Entrega</span>
-            </div>
-            <div class="win-step {{ 'done' if is_completed_step else 'active' if o.status == 'delivered' else '' }}">
-              <strong>5</strong><span>Finalização</span>
-            </div>
+          <div class="order-summary-progress">
+            {% for step in o.timeline %}
+              <span class="order-dot {{ step.state }}" title="{{ step.label }}"></span>
+            {% endfor %}
           </div>
 
-          <div class="win-info-grid">
-            <div>
-              <span>Prazo / atualização</span>
-              <strong>{{ o.remaining_label if o.status == 'pending_payment' else o.deadline_label }}</strong>
-            </div>
-            <div>
-              <span>Rastreio</span>
-              {% if o.tracking_code %}
-                <strong class="tracking-code">{{ o.tracking_code }}</strong>
-              {% else %}
-                <strong>Será informado pelo admin</strong>
-              {% endif %}
-            </div>
-            <div>
-              <span>Status do pedido</span>
-              <strong>{{ status_label }}</strong>
-            </div>
+          <div class="order-summary-meta">
+            <div><span>Arrematado por</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
+            <div><span>Valor de mercado</span><strong>{% if market_value %}R$ {{ '%.2f'|format(market_value)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
+            <div><span>Economia</span><strong class="order-saving">{% if savings %}R$ {{ '%.2f'|format(savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
+            <div><span>Rastreio</span><strong>{{ o.tracking_code or 'Aguardando envio' }}</strong></div>
           </div>
 
-          <div class="win-order-actions">
-            {% if o.status == 'pending_payment' %}
-              <a class="btn" href="{{ o.payment_link }}">Pagar agora</a>
-              <small class="highlight-warn">Finalize dentro do prazo para não perder o produto.</small>
-            {% elif o.status == 'delivered' %}
-              <details class="account-dispute-box win-dispute-box">
-                <summary class="btn small ghost">Abrir disputa sobre a entrega</summary>
-                <form method="post" action="/minha-conta/chamado" enctype="multipart/form-data" class="wallet-card">
-                  <input type="hidden" name="order_id" value="{{ o.id }}">
-                  <input type="hidden" name="subject" value="Problema após entrega">
-                  <label>Descreva o problema<textarea name="message" required placeholder="Conte o que aconteceu com o produto entregue."></textarea></label>
-                  <label>Comprovante/foto opcional<input type="file" name="proof_file" accept="image/*,application/pdf"></label>
-                  <button class="btn small" type="submit">Enviar disputa</button>
-                </form>
-              </details>
-              <small>Produto entregue. Caso tenha ocorrido algum problema, abra uma disputa para análise.</small>
-            {% elif o.status == 'completed' %}
-              <span class="win-success-note">Operação finalizada com sucesso.</span>
-            {% elif o.status == 'expired' %}
-              <span class="win-expired-note">Prazo de pagamento expirado.</span>
-            {% else %}
-              <span class="win-progress-note">Seu pedido está em andamento. Acompanhe as atualizações por aqui.</span>
-            {% endif %}
-          </div>
+          {% if o.admin_note %}<p class="order-admin-note">{{ o.admin_note }}</p>{% endif %}
+        </div>
+
+        <div class="order-summary-actions">
+          {% if o.status == 'pending_payment' %}
+            <a class="btn small" href="{{ o.payment_link }}">Pagar agora</a>
+          {% endif %}
+          <a class="btn small ghost" href="/minha-conta/pedido/{{ o.id }}">Acompanhar pedido</a>
         </div>
       </article>
     {% else %}
-      <div class="panel-card empty-card wins-empty-pro">
-        <h2>Você ainda não ganhou nenhum leilão.</h2>
-        <p class="muted">Quando vencer um produto, ele aparecerá aqui com visual de pedido, pagamento, envio e rastreio.</p>
+      <div class="panel-card empty-card orders-empty-marketplace">
+        <h2>Você ainda não tem pedidos.</h2>
+        <p class="muted">Quando vencer um leilão, ele aparecerá aqui como um pedido para acompanhar pagamento, envio e entrega.</p>
         <a class="btn small" href="/">Ver leilões disponíveis</a>
       </div>
     {% endfor %}
   </div>
+</div>
+
+{% elif section == 'order_detail' %}
+{% set o = order %}
+<div class="order-detail-page">
+  <div class="order-detail-topbar">
+    <a class="btn small ghost" href="/minha-conta/ganhos">← Voltar aos pedidos</a>
+    <span class="order-status-chip status-{{ o.status }}">{{ o.status_label }}</span>
+  </div>
+
+  <section class="order-detail-hero">
+    <div class="order-detail-product">
+      <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
+      <div>
+        <span class="order-number">Pedido #{{ '%06d'|format(o.id) }}</span>
+        <h1>{{ o.auction_title }}</h1>
+        <p>{{ o.status_description }}</p>
+      </div>
+    </div>
+
+    <div class="order-detail-values">
+      <div><span>Arrematado por</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
+      <div><span>Valor de mercado</span><strong>{% if o.source_price %}R$ {{ '%.2f'|format(o.source_price)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
+      <div><span>Economia obtida</span><strong class="order-saving">{% if o.savings %}R$ {{ '%.2f'|format(o.savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
+    </div>
+  </section>
+
+  <section class="panel-card order-tracking-panel">
+    <div class="order-panel-title">
+      <h2>Acompanhe seu pedido</h2>
+      <p>Status atualizado conforme o administrador confirma compra, envio e entrega.</p>
+    </div>
+
+    <div class="order-detail-timeline">
+      {% for step in o.timeline %}
+      <div class="order-detail-step {{ step.state }}">
+        <strong>{{ loop.index }}</strong>
+        <div>
+          <span>{{ step.label }}</span>
+          <small>{{ step.date_label or step.helper }}</small>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <div class="order-detail-grid">
+    <section class="panel-card order-history-card">
+      <div class="order-panel-title"><h2>Histórico do pedido</h2></div>
+      <div class="order-history-list">
+        {% for event in o.history %}
+        <div class="order-history-item">
+          <span>{{ event.date_label }}</span>
+          <strong>{{ event.title }}</strong>
+          <p>{{ event.description }}</p>
+        </div>
+        {% else %}
+        <p class="muted">Assim que houver novas atualizações, elas aparecerão aqui.</p>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="panel-card order-shipping-card">
+      <div class="order-panel-title"><h2>Rastreamento</h2></div>
+      {% if o.tracking_code %}
+        <div class="tracking-code-box">
+          <span>Código de rastreio</span>
+          <strong>{{ o.tracking_code }}</strong>
+        </div>
+        <p class="muted">Use esse código no site da transportadora ou Correios para acompanhar a entrega.</p>
+      {% else %}
+        <div class="tracking-code-box muted-box">
+          <span>Rastreio</span>
+          <strong>Aguardando envio</strong>
+        </div>
+        <p class="muted">O código aparecerá aqui quando o administrador registrar o envio.</p>
+      {% endif %}
+
+      {% if o.purchase_status %}
+      <div class="purchase-status-box">
+        <span>Status interno da compra</span>
+        <strong>{{ o.purchase_status }}</strong>
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="panel-card order-address-card">
+      <div class="order-panel-title"><h2>Endereço de entrega</h2></div>
+      <div class="order-address-lines">
+        <strong>{{ o.delivery_name or user.full_name }}</strong>
+        <span>{{ user.phone or 'Telefone não informado' }}</span>
+        <span>{{ o.delivery_street or user.street or 'Rua não informada' }}, {{ o.delivery_number or user.number or 's/n' }}</span>
+        <span>{{ o.delivery_district or user.district or 'Bairro não informado' }}</span>
+        <span>{{ o.delivery_city or user.city or 'Cidade não informada' }} - {{ o.delivery_state or user.state or 'UF' }}</span>
+        <span>CEP: {{ o.delivery_cep or user.cep or 'Não informado' }}</span>
+      </div>
+    </section>
+
+    <section class="panel-card order-finance-card">
+      <div class="order-panel-title"><h2>Resumo financeiro</h2></div>
+      <div class="order-finance-list">
+        <div><span>Valor arrematado</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
+        <div><span>Frete</span><strong>A calcular / conforme envio</strong></div>
+        <div><span>Total pago</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
+        <div><span>Economia</span><strong>{% if o.savings %}R$ {{ '%.2f'|format(o.savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel-card order-support-panel">
+    <div class="order-panel-title">
+      <h2>Precisa de ajuda?</h2>
+      <p>Use esta área se houver problema com entrega, produto ou pagamento.</p>
+    </div>
+
+    <div class="order-support-actions">
+      {% if o.status == 'pending_payment' %}
+        <a class="btn" href="{{ o.payment_link }}">Pagar agora</a>
+      {% elif o.status == 'delivered' %}
+        <form method="post" action="/minha-conta/pedido/{{ o.id }}/confirmar-recebimento">
+          <button class="btn" type="submit">Recebi meu produto</button>
+        </form>
+      {% elif o.status in ['finalized','completed'] %}
+        <span class="order-finished-note">Pedido concluído. Obrigado por comprar com a Lanceio Certo.</span>
+      {% endif %}
+
+      {% if o.status in ['delivered','sent','purchased','processing','paid','finalized'] %}
+      <details class="account-dispute-box order-detail-dispute">
+        <summary class="btn small ghost">Abrir disputa ou chamado</summary>
+        <form method="post" action="/minha-conta/chamado" enctype="multipart/form-data" class="wallet-card">
+          <input type="hidden" name="order_id" value="{{ o.id }}">
+          <input type="hidden" name="subject" value="Problema no pedido #{{ o.id }}">
+          <label>Descreva o problema<textarea name="message" required placeholder="Explique o que aconteceu com seu pedido."></textarea></label>
+          <label>Comprovante/foto opcional<input type="file" name="proof_file" accept="image/*,application/pdf"></label>
+          <button class="btn small" type="submit">Enviar chamado</button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+  </section>
 </div>
 
 {% elif section == 'expired' %}
@@ -736,6 +827,10 @@
 {% endblock %}
 
 <style>
+
+/* Área de pedidos estilo marketplace */
+.orders-page-marketplace,.order-detail-page{display:grid;gap:18px}.orders-head-marketplace{padding:22px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:linear-gradient(135deg,rgba(37,99,235,.15),rgba(15,23,42,.94));box-shadow:0 16px 42px rgba(0,0,0,.22)}.orders-eyebrow{display:inline-flex;margin-bottom:8px;color:#93c5fd;font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.orders-head-marketplace h1{font-size:34px;margin:0 0 6px}.orders-list-marketplace{display:grid;gap:14px}.order-summary-card{display:grid;grid-template-columns:118px minmax(0,1fr) 170px;gap:16px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.18);border-radius:22px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(15,23,42,.86));box-shadow:0 14px 36px rgba(0,0,0,.20)}.order-summary-left img{width:118px;height:118px;border-radius:18px;object-fit:cover;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04)}.order-summary-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.order-number{display:inline-flex;color:#93c5fd;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.07em}.order-summary-title-row h2{font-size:20px;line-height:1.2;margin:4px 0 0}.order-status-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 11px;border-radius:999px;font-size:12px;font-weight:950;border:1px solid rgba(96,165,250,.28);background:rgba(59,130,246,.13);color:#bfdbfe;white-space:nowrap}.order-status-chip.status-pending_payment{border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.11);color:#fde68a}.order-status-chip.status-sent,.order-status-chip.status-purchased,.order-status-chip.status-processing,.order-status-chip.status-paid{border-color:rgba(56,189,248,.34);background:rgba(14,165,233,.10);color:#bae6fd}.order-status-chip.status-delivered,.order-status-chip.status-finalized,.order-status-chip.status-completed{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.10);color:#bbf7d0}.order-status-chip.status-expired{border-color:rgba(248,113,113,.36);background:rgba(239,68,68,.12);color:#fecaca}.order-summary-progress{position:relative;display:flex;gap:8px;margin:13px 0}.order-summary-progress:before{content:"";position:absolute;left:8px;right:8px;top:50%;height:2px;background:rgba(148,163,184,.18);transform:translateY(-50%)}.order-dot{position:relative;z-index:1;width:16px;height:16px;border-radius:50%;border:2px solid rgba(148,163,184,.4);background:#0f172a}.order-dot.done{background:#22c55e;border-color:#86efac}.order-dot.active{background:#f59e0b;border-color:#fde68a}.order-dot.danger{background:#ef4444;border-color:#fecaca}.order-summary-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.order-summary-meta div{padding:10px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.13)}.order-summary-meta span,.order-detail-values span,.tracking-code-box span,.purchase-status-box span{display:block;color:#b7c6e6;font-size:12px;font-weight:800;margin-bottom:4px}.order-summary-meta strong{font-size:14px}.order-saving{color:#bbf7d0!important}.order-admin-note{margin:10px 0 0;color:#dbeafe;background:rgba(59,130,246,.08);border:1px solid rgba(96,165,250,.18);border-radius:13px;padding:9px 11px}.order-summary-actions{display:flex;flex-direction:column;align-items:stretch;gap:9px}.orders-empty-marketplace{text-align:center;padding:34px}.order-detail-topbar{display:flex;justify-content:space-between;align-items:center;gap:12px}.order-detail-hero{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;padding:18px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:linear-gradient(135deg,rgba(37,99,235,.14),rgba(15,23,42,.94));box-shadow:0 16px 42px rgba(0,0,0,.22)}.order-detail-product{display:flex;gap:16px;align-items:center}.order-detail-product img{width:126px;height:126px;border-radius:20px;object-fit:cover;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04)}.order-detail-product h1{margin:5px 0 6px;font-size:30px;line-height:1.1}.order-detail-product p{margin:0;color:#cbd5e1}.order-detail-values{display:grid;gap:9px}.order-detail-values div{border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;text-align:right}.order-detail-values strong{font-size:22px}.order-panel-title h2{margin:0 0 4px}.order-panel-title p{margin:0;color:#b7c6e6}.order-detail-timeline{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:16px}.order-detail-step{position:relative;display:grid;gap:8px;padding:13px;border-radius:17px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.16)}.order-detail-step strong{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff}.order-detail-step span{font-weight:900}.order-detail-step small{display:block;color:#b7c6e6;line-height:1.35}.order-detail-step.done{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08)}.order-detail-step.done strong{background:#22c55e}.order-detail-step.active{border-color:rgba(251,191,36,.34);background:rgba(251,191,36,.09)}.order-detail-step.active strong{background:#f59e0b}.order-detail-step.danger{border-color:rgba(239,68,68,.34);background:rgba(239,68,68,.09)}.order-detail-grid{display:grid;grid-template-columns:1.3fr .9fr;gap:16px}.order-history-list{display:grid;gap:11px;margin-top:10px}.order-history-item{position:relative;padding:12px 12px 12px 18px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.14)}.order-history-item:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:4px;border-radius:99px;background:#3b82f6}.order-history-item span{color:#93c5fd;font-size:12px;font-weight:900}.order-history-item strong{display:block;margin:3px 0}.order-history-item p{margin:0;color:#cbd5e1}.tracking-code-box,.purchase-status-box{border:1px solid rgba(96,165,250,.24);background:rgba(59,130,246,.09);border-radius:17px;padding:14px;margin-top:10px}.tracking-code-box strong{font-size:20px;color:#bfdbfe;word-break:break-all}.muted-box{border-color:rgba(148,163,184,.18);background:rgba(255,255,255,.04)}.order-address-lines{display:grid;gap:7px;color:#dbeafe}.order-address-lines strong{font-size:17px;color:#fff}.order-finance-list{display:grid;gap:8px}.order-finance-list div{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.12)}.order-finance-list div:last-child{border-bottom:none}.order-support-panel{display:grid;gap:14px}.order-support-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.order-detail-dispute{width:100%}.order-detail-dispute summary{width:max-content;list-style:none}.order-detail-dispute summary::-webkit-details-marker{display:none}.order-finished-note{display:inline-flex;padding:10px 12px;border-radius:14px;border:1px solid rgba(74,222,128,.30);background:rgba(74,222,128,.09);color:#bbf7d0;font-weight:900}@media(max-width:980px){.order-summary-card{grid-template-columns:90px minmax(0,1fr)}.order-summary-left img{width:90px;height:90px}.order-summary-actions{grid-column:1/-1;flex-direction:row}.order-summary-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.order-detail-hero,.order-detail-grid{grid-template-columns:1fr}.order-detail-values div{text-align:left}.order-detail-timeline{grid-template-columns:1fr 1fr}.order-detail-product{align-items:flex-start}}@media(max-width:620px){.order-summary-card{grid-template-columns:1fr}.order-summary-left img{width:100%;height:180px}.order-summary-title-row{flex-direction:column}.order-summary-meta,.order-detail-timeline{grid-template-columns:1fr}.order-detail-product{flex-direction:column}.order-detail-product img{width:100%;height:210px}.order-detail-topbar{align-items:flex-start;flex-direction:column}}
+
 
 .wins-page-pro{display:grid;gap:18px}.wins-head-pro{padding:22px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:linear-gradient(135deg,rgba(37,99,235,.16),rgba(15,23,42,.92));box-shadow:0 18px 45px rgba(0,0,0,.22)}.wins-eyebrow{display:inline-flex;margin-bottom:8px;color:#93c5fd;font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.wins-head-pro h1{font-size:36px;margin:0 0 6px}.wins-head-pro p{max-width:760px}.wins-order-grid{display:grid;gap:16px}.win-order-card{display:grid;grid-template-columns:230px minmax(0,1fr);gap:0;border:1px solid rgba(148,163,184,.20);background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(15,23,42,.84));border-radius:24px;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.26)}.win-order-media{position:relative;min-height:210px;background:rgba(255,255,255,.04)}.win-order-media img{width:100%;height:100%;min-height:210px;object-fit:cover;display:block}.win-status-pill{position:absolute;left:12px;top:12px;display:inline-flex;padding:8px 11px;border-radius:999px;font-size:12px;font-weight:900;background:rgba(59,130,246,.88);border:1px solid rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(0,0,0,.24)}.win-status-pill.status-expired{background:rgba(239,68,68,.88)}.win-status-pill.status-delivered,.win-status-pill.status-completed{background:rgba(34,197,94,.88)}.win-status-pill.status-purchased,.win-status-pill.status-sent,.win-status-pill.status-processing{background:rgba(14,165,233,.88)}.win-order-body{padding:18px;display:grid;gap:16px}.win-order-title-row{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.win-order-title-row h2{margin:0 0 5px;font-size:24px}.win-order-title-row p{margin:0;color:#b7c6e6}.win-price-box{min-width:135px;border:1px solid rgba(74,222,128,.25);background:rgba(74,222,128,.08);border-radius:18px;padding:12px;text-align:right}.win-price-box span,.win-info-grid span{display:block;color:#b7c6e6;font-size:12px;font-weight:800;margin-bottom:5px}.win-price-box strong{font-size:22px;color:#dcfce7}.win-order-timeline{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.win-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#94a3b8;font-weight:900}.win-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff;font-size:12px}.win-step.done{border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.09);color:#dcfce7}.win-step.done strong{background:#22c55e}.win-step.active{border-color:rgba(251,191,36,.38);background:rgba(251,191,36,.10);color:#fde68a}.win-step.active strong{background:#f59e0b}.win-info-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.win-info-grid div{border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.04);border-radius:16px;padding:12px}.win-info-grid strong{font-size:14px}.tracking-code{color:#bfdbfe}.win-order-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:2px}.win-progress-note,.win-success-note,.win-expired-note{display:inline-flex;padding:10px 12px;border-radius:14px;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);color:#dbeafe;font-weight:800}.win-success-note{border-color:rgba(74,222,128,.32);background:rgba(74,222,128,.08);color:#bbf7d0}.win-expired-note{border-color:rgba(239,68,68,.34);background:rgba(239,68,68,.09);color:#fecaca}.win-dispute-box{width:100%}.win-dispute-box summary{width:max-content;list-style:none}.win-dispute-box summary::-webkit-details-marker{display:none}.wins-empty-pro{text-align:center;padding:34px}.wins-empty-pro h2{margin-top:0}@media(max-width:900px){.win-order-card{grid-template-columns:1fr}.win-order-media img,.win-order-media{min-height:230px}.win-order-title-row{flex-direction:column}.win-price-box{text-align:left}.win-order-timeline,.win-info-grid{grid-template-columns:1fr}.wins-head-pro{flex-direction:column}}
 
