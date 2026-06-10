@@ -211,10 +211,14 @@
     <section class="auction-lane suggestion-lane suggestion-pro-lane">
       <div class="lane-head suggestion-head-pro">
         <div>
-          <h3>Indicação de produtos da semana</h3>
-          <p>Todo usuário pode indicar 1 produto por semana. A votação é pública, zera toda semana e cada conta pode votar 1 vez por dia.</p>
+          <h3>Indicação da Semana</h3>
         </div>
-        <span class="lane-count scheduled">{{ suggestion_week_count if suggestion_week_count is defined else 0 }}/{{ suggestion_week_limit if suggestion_week_limit is defined else 20 }}</span>
+        <div class="suggestion-progress-box">
+          <div class="suggestion-progress-bar">
+            <span style="width: {{ ((suggestion_week_count if suggestion_week_count is defined else 0) * 100 / (suggestion_week_limit if suggestion_week_limit is defined else 20)) }}%"></span>
+          </div>
+          <small>{{ suggestion_week_count if suggestion_week_count is defined else 0 }} de {{ suggestion_week_limit if suggestion_week_limit is defined else 20 }} vagas preenchidas</small>
+        </div>
       </div>
 
       {% set msg = request.query_params.get('indicacao') %}
@@ -237,14 +241,14 @@
       {% if user %}
       <div class="suggestion-interactive-panel">
         <div class="suggestion-panel-copy">
-          <span class="eyebrow">Participação pública</span>
-          <h3>Indicar produto para votação</h3>
+          
+          <h3>Indique o próximo produto do leilão</h3>
           {% if user_week_nomination %}
             <p>Você já indicou nesta semana: <strong>{{ user_week_nomination.product_name }}</strong>. Volte na próxima semana para indicar outro.</p>
           {% elif suggestion_week_count >= suggestion_week_limit %}
             <p>A lista desta semana já atingiu o limite de {{ suggestion_week_limit }} produtos.</p>
           {% else %}
-            <p>Selecione um produto do catálogo. Não precisa digitar nada e o sistema impede repetição na semana.</p>
+            
           {% endif %}
         </div>
 
@@ -255,9 +259,6 @@
                 <option value="">Todas as categorias</option>
                 {% for cat in suggestion_categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}
               </select>
-            </label>
-            <label>Buscar produto
-              <input id="suggestionSearchInput" type="search" placeholder="Ex: fone, air fryer, notebook...">
             </label>
             <label>Produto para indicar
               <select name="product_key" id="suggestionProductSelect" required {% if user_week_nomination or suggestion_week_count >= suggestion_week_limit %}disabled{% endif %}>
@@ -274,16 +275,10 @@
         </form>
       </div>
 
-      <div class="suggestion-rules-grid">
-        <div><strong>1 indicação por semana</strong><span>Cada conta só pode colocar um produto na lista semanal.</span></div>
-        <div><strong>20 produtos por semana</strong><span>Após preencher 20 indicações, a lista fecha até a próxima semana.</span></div>
-        <div><strong>1 voto por dia</strong><span>Quem indicou hoje só começa a votar amanhã.</span></div>
-      </div>
-
       <div class="suggestion-week-title">
         <div>
-          <h3>Produtos indicados para votação</h3>
-          <p>Ranking transparente dos produtos mais votados da semana.</p>
+          <h3>Produtos Mais Votados</h3>
+          
         </div>
       </div>
 
@@ -293,10 +288,10 @@
           <div class="card-body">
             <div class="suggestion-card-top">
               <span class="suggestion-category">{{ product.category }}</span>
-              <span class="suggestion-votes-pill">{{ product.votes }} voto{{ 's' if product.votes != 1 else '' }}</span>
+              <span class="suggestion-votes-pill">🔥 {{ product.votes }} voto{{ 's' if product.votes != 1 else '' }}</span>
             </div>
             <h3>{{ product.name }}</h3>
-            <p class="suggestion-indicated-by">Indicado por <strong>@{{ product.indicated_by }}</strong></p>
+            
             <div class="price-line">
               <div><span>Faixa</span><strong>{{ product.price_level }}</strong></div>
               <div><span>Semana</span><strong>{{ product.percent }}%</strong></div>

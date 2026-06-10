@@ -320,25 +320,87 @@
 </div>
 
 {% elif section == 'wins' %}
-<div class="panel-card">
-  <div class="section-head"><div><h1>Leilões Ganhos</h1><p>Todos os produtos vencidos por você.</p></div></div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Produto</th><th>Status</th><th>Valor</th><th>Prazo</th><th>Rastreio</th><th>Ação</th></tr></thead>
-      <tbody>
-        {% for o in orders %}
-        <tr>
-          <td>{{ o.auction_title }}</td>
-          <td>{{ o.status }}</td>
-          <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
-          <td>{{ o.remaining_label if o.status == 'pending_payment' else o.deadline_label }}</td>
-          <td>{{ o.tracking_code or '—' }}</td>
-          <td>
+<div class="wins-page-pro">
+  <div class="section-head wins-head-pro">
+    <div>
+      <span class="wins-eyebrow">Minha área de compras</span>
+      <h1>Leilões Ganhos</h1>
+      <p> acompanhe seus produtos arrematados como pedidos reais: pagamento, preparação, envio, entrega e disputa.</p>
+    </div>
+    <a class="btn small ghost" href="/minha-conta/pagamentos">Ver pagamentos pendentes</a>
+  </div>
+
+  <div class="wins-order-grid">
+    {% for o in orders %}
+      {% set status_label = 'Aguardando pagamento' if o.status == 'pending_payment' else 'Pagamento confirmado' if o.status == 'paid' else 'Produto comprado' if o.status == 'purchased' else 'Em preparação' if o.status == 'processing' else 'Enviado' if o.status == 'sent' else 'Entregue' if o.status == 'delivered' else 'Operação finalizada' if o.status == 'completed' else 'Prazo expirado' if o.status == 'expired' else o.status %}
+      {% set is_paid_step = o.status in ['paid','processing','purchased','sent','delivered','completed'] %}
+      {% set is_purchased_step = o.status in ['purchased','sent','delivered','completed'] %}
+      {% set is_sent_step = o.status in ['sent','delivered','completed'] %}
+      {% set is_delivered_step = o.status in ['delivered','completed'] %}
+      {% set is_completed_step = o.status == 'completed' %}
+
+      <article class="win-order-card status-{{ o.status }}">
+        <div class="win-order-media">
+          <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
+          <span class="win-status-pill status-{{ o.status }}">{{ status_label }}</span>
+        </div>
+
+        <div class="win-order-body">
+          <div class="win-order-title-row">
+            <div>
+              <h2>{{ o.auction_title }}</h2>
+              <p>Pedido #{{ o.id }} • Arremate confirmado na sua conta</p>
+            </div>
+            <div class="win-price-box">
+              <span>Valor final</span>
+              <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong>
+            </div>
+          </div>
+
+          <div class="win-order-timeline">
+            <div class="win-step {{ 'done' if is_paid_step else 'active' if o.status == 'pending_payment' else '' }}">
+              <strong>1</strong><span>Pagamento</span>
+            </div>
+            <div class="win-step {{ 'done' if is_purchased_step else 'active' if o.status in ['paid','processing'] else '' }}">
+              <strong>2</strong><span>Compra</span>
+            </div>
+            <div class="win-step {{ 'done' if is_sent_step else 'active' if o.status == 'purchased' else '' }}">
+              <strong>3</strong><span>Envio</span>
+            </div>
+            <div class="win-step {{ 'done' if is_delivered_step else 'active' if o.status == 'sent' else '' }}">
+              <strong>4</strong><span>Entrega</span>
+            </div>
+            <div class="win-step {{ 'done' if is_completed_step else 'active' if o.status == 'delivered' else '' }}">
+              <strong>5</strong><span>Finalização</span>
+            </div>
+          </div>
+
+          <div class="win-info-grid">
+            <div>
+              <span>Prazo / atualização</span>
+              <strong>{{ o.remaining_label if o.status == 'pending_payment' else o.deadline_label }}</strong>
+            </div>
+            <div>
+              <span>Rastreio</span>
+              {% if o.tracking_code %}
+                <strong class="tracking-code">{{ o.tracking_code }}</strong>
+              {% else %}
+                <strong>Será informado pelo admin</strong>
+              {% endif %}
+            </div>
+            <div>
+              <span>Status do pedido</span>
+              <strong>{{ status_label }}</strong>
+            </div>
+          </div>
+
+          <div class="win-order-actions">
             {% if o.status == 'pending_payment' %}
-              <a class="btn small" href="{{ o.payment_link }}">Pagar agora</a>
+              <a class="btn" href="{{ o.payment_link }}">Pagar agora</a>
+              <small class="highlight-warn">Finalize dentro do prazo para não perder o produto.</small>
             {% elif o.status == 'delivered' %}
-              <details class="account-dispute-box">
-                <summary class="btn small ghost">Abrir disputa</summary>
+              <details class="account-dispute-box win-dispute-box">
+                <summary class="btn small ghost">Abrir disputa sobre a entrega</summary>
                 <form method="post" action="/minha-conta/chamado" enctype="multipart/form-data" class="wallet-card">
                   <input type="hidden" name="order_id" value="{{ o.id }}">
                   <input type="hidden" name="subject" value="Problema após entrega">
@@ -347,16 +409,24 @@
                   <button class="btn small" type="submit">Enviar disputa</button>
                 </form>
               </details>
+              <small>Produto entregue. Caso tenha ocorrido algum problema, abra uma disputa para análise.</small>
+            {% elif o.status == 'completed' %}
+              <span class="win-success-note">Operação finalizada com sucesso.</span>
+            {% elif o.status == 'expired' %}
+              <span class="win-expired-note">Prazo de pagamento expirado.</span>
             {% else %}
-              <span class="muted">Acompanhar status</span>
+              <span class="win-progress-note">Seu pedido está em andamento. Acompanhe as atualizações por aqui.</span>
             {% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="6">Você ainda não ganhou nenhum leilão.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+          </div>
+        </div>
+      </article>
+    {% else %}
+      <div class="panel-card empty-card wins-empty-pro">
+        <h2>Você ainda não ganhou nenhum leilão.</h2>
+        <p class="muted">Quando vencer um produto, ele aparecerá aqui com visual de pedido, pagamento, envio e rastreio.</p>
+        <a class="btn small" href="/">Ver leilões disponíveis</a>
+      </div>
+    {% endfor %}
   </div>
 </div>
 
@@ -666,6 +736,9 @@
 {% endblock %}
 
 <style>
+
+.wins-page-pro{display:grid;gap:18px}.wins-head-pro{padding:22px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:linear-gradient(135deg,rgba(37,99,235,.16),rgba(15,23,42,.92));box-shadow:0 18px 45px rgba(0,0,0,.22)}.wins-eyebrow{display:inline-flex;margin-bottom:8px;color:#93c5fd;font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.wins-head-pro h1{font-size:36px;margin:0 0 6px}.wins-head-pro p{max-width:760px}.wins-order-grid{display:grid;gap:16px}.win-order-card{display:grid;grid-template-columns:230px minmax(0,1fr);gap:0;border:1px solid rgba(148,163,184,.20);background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(15,23,42,.84));border-radius:24px;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.26)}.win-order-media{position:relative;min-height:210px;background:rgba(255,255,255,.04)}.win-order-media img{width:100%;height:100%;min-height:210px;object-fit:cover;display:block}.win-status-pill{position:absolute;left:12px;top:12px;display:inline-flex;padding:8px 11px;border-radius:999px;font-size:12px;font-weight:900;background:rgba(59,130,246,.88);border:1px solid rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(0,0,0,.24)}.win-status-pill.status-expired{background:rgba(239,68,68,.88)}.win-status-pill.status-delivered,.win-status-pill.status-completed{background:rgba(34,197,94,.88)}.win-status-pill.status-purchased,.win-status-pill.status-sent,.win-status-pill.status-processing{background:rgba(14,165,233,.88)}.win-order-body{padding:18px;display:grid;gap:16px}.win-order-title-row{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.win-order-title-row h2{margin:0 0 5px;font-size:24px}.win-order-title-row p{margin:0;color:#b7c6e6}.win-price-box{min-width:135px;border:1px solid rgba(74,222,128,.25);background:rgba(74,222,128,.08);border-radius:18px;padding:12px;text-align:right}.win-price-box span,.win-info-grid span{display:block;color:#b7c6e6;font-size:12px;font-weight:800;margin-bottom:5px}.win-price-box strong{font-size:22px;color:#dcfce7}.win-order-timeline{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.win-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#94a3b8;font-weight:900}.win-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff;font-size:12px}.win-step.done{border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.09);color:#dcfce7}.win-step.done strong{background:#22c55e}.win-step.active{border-color:rgba(251,191,36,.38);background:rgba(251,191,36,.10);color:#fde68a}.win-step.active strong{background:#f59e0b}.win-info-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.win-info-grid div{border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.04);border-radius:16px;padding:12px}.win-info-grid strong{font-size:14px}.tracking-code{color:#bfdbfe}.win-order-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:2px}.win-progress-note,.win-success-note,.win-expired-note{display:inline-flex;padding:10px 12px;border-radius:14px;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);color:#dbeafe;font-weight:800}.win-success-note{border-color:rgba(74,222,128,.32);background:rgba(74,222,128,.08);color:#bbf7d0}.win-expired-note{border-color:rgba(239,68,68,.34);background:rgba(239,68,68,.09);color:#fecaca}.win-dispute-box{width:100%}.win-dispute-box summary{width:max-content;list-style:none}.win-dispute-box summary::-webkit-details-marker{display:none}.wins-empty-pro{text-align:center;padding:34px}.wins-empty-pro h2{margin-top:0}@media(max-width:900px){.win-order-card{grid-template-columns:1fr}.win-order-media img,.win-order-media{min-height:230px}.win-order-title-row{flex-direction:column}.win-price-box{text-align:left}.win-order-timeline,.win-info-grid{grid-template-columns:1fr}.wins-head-pro{flex-direction:column}}
+
 .account-doc-status-card{border-color:rgba(96,165,250,.28);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(15,23,42,.82))}.doc-status-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}.doc-status-header h2{margin:4px 0 6px;font-size:24px}.doc-status-header p{margin:0;color:#b7c6e6;line-height:1.45}.doc-status-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:999px;font-weight:900;white-space:nowrap;border:1px solid rgba(251,191,36,.38);background:rgba(251,191,36,.12);color:#fde68a}.doc-status-pill.verified{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.12);color:#bbf7d0}.doc-status-pill.rejected{border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.12);color:#fecaca}.doc-admin-note{display:grid;gap:5px;margin:12px 0 16px;padding:13px 14px;border-radius:15px;border:1px solid rgba(96,165,250,.26);background:rgba(37,99,235,.10)}.doc-admin-note span{color:#dbeafe}.doc-progress-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}.doc-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#b7c6e6;font-weight:800}.doc-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff}.doc-step.done{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08);color:#dcfce7}.doc-step.done strong{background:#22c55e;color:#fff}.doc-check-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.doc-check-grid div{border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);border-radius:15px;padding:12px}.doc-check-grid span{display:block;color:#bfdbfe;font-size:13px;margin-bottom:5px}.doc-actions-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}.doc-actions-row small{color:#b7c6e6}@media(max-width:850px){.doc-progress-line,.doc-check-grid{grid-template-columns:1fr}.doc-status-header{flex-direction:column}}
 </style>
 {% block extra_scripts %}
