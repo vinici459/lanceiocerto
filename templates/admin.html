@@ -25,7 +25,7 @@
           <a class="side-link admin-link {% if admin_active_panel == 'admin-auctions' %}active{% endif %}" href="/admin?tab=admin-auctions" data-target="admin-auctions" data-no-prefetch="true">Gerenciar Leilões</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-finished' %}active{% endif %}" href="/admin?tab=admin-finished" data-target="admin-finished" data-no-prefetch="true">Leilões Finalizados</a>
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}" href="/admin?tab=admin-pending-payments" data-target="admin-pending-payments" data-no-prefetch="true">Leilões Pendentes</a>{% endif %}
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-shipping' %}active{% endif %}" href="/admin?tab=admin-shipping" data-target="admin-shipping" data-no-prefetch="true">Envios Pendentes</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-shipping' %}active{% endif %}" href="/admin?tab=admin-shipping" data-target="admin-shipping" data-no-prefetch="true">Pedidos dos Vencedores</a>
         </div>
 
         <div class="admin-menu-group">
@@ -505,65 +505,129 @@
       <section id="admin-shipping" class="admin-panel {% if admin_active_panel == 'admin-shipping' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
-            <h1>Envios Pendentes</h1>
-            <p>Produtos já pagos que precisam ser comprados, separados e enviados ao vencedor.</p>
+            <h1>Pedidos dos Vencedores</h1>
+            <p>Central organizada dos produtos pagos: escolha do vencedor, validação de link, autorização de pagamento, compra assistida, envio e entrega.</p>
           </div>
         </div>
 
-        <div class="panel-card admin-card-pro">
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Produto</th><th>Cliente</th><th>CPF</th><th>Contato</th><th>Endereço</th><th>Valor</th><th>Rastreio</th><th>Status</th></tr></thead>
-              <tbody>
-                {% for o in orders %}
-                {% if o.status in ['paid', 'processing', 'purchased', 'sent', 'delivered', 'dispute', 'resolved'] %}
-                <tr>
-                  <td>{{ o.auction.title }}</td>
-                  <td>{{ o.user.full_name }}<br><small>{{ o.user.email }}</small></td>
-                  <td>{{ o.user.cpf or '—' }}</td>
-                  <td>{{ o.user.phone or '—' }}</td>
-                  <td>
-                    {{ o.delivery_street or o.user.street or '—' }}, {{ o.delivery_number or o.user.number or '—' }}<br>
-                    {{ o.delivery_district or o.user.district or '—' }} - {{ o.delivery_city or o.user.city or '—' }}/{{ o.delivery_state or o.user.state or '—' }}<br>
-                    CEP: {{ o.delivery_cep or o.user.cep or '—' }}
-                  </td>
-                  <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
-                  <td>
-                    <form method="post" action="/admin/order/{{ o.id }}/tracking" class="inline-form">
-                      <input type="text" name="tracking_code" value="{{ o.tracking_code or '' }}" placeholder="Código">
-                      <button class="btn small" type="submit">Salvar</button>
-                    </form>
-                  </td>
-                  <td>
-                    <form method="post" action="/admin/order/{{ o.id }}/set-status" class="inline-form">
-                      <select name="status">
-                        <option value="pending_gateway" {% if o.status == 'pending_gateway' %}selected{% endif %}>pending_gateway / aguardando gateway</option>
-                        <option value="paid" {% if o.status == 'paid' %}selected{% endif %}>paid / pagamento aprovado</option>
-                        <option value="processing" {% if o.status == 'processing' %}selected{% endif %}>processing</option>
-                        <option value="purchased" {% if o.status == 'purchased' %}selected{% endif %}>purchased</option>
-                        <option value="sent" {% if o.status == 'sent' %}selected{% endif %}>sent / enviado</option>
-                        <option value="delivered" {% if o.status == 'delivered' %}selected{% endif %}>delivered / entregue</option>
-                        <option value="dispute" {% if o.status == 'dispute' %}selected{% endif %}>dispute / em disputa</option>
-                        <option value="resolved" {% if o.status == 'resolved' %}selected{% endif %}>resolved / disputa resolvida</option>
-                        <option value="finalized" {% if o.status == 'finalized' %}selected{% endif %}>finalized / operação finalizada</option>
-                      </select>
-                      <button class="btn small ghost" type="submit">Atualizar</button>
-                    </form>
-                    {% if o.status in ['delivered', 'resolved'] %}
-                    <form method="post" action="/admin/order/{{ o.id }}/finalize-operation" class="inline-form">
-                      <input name="admin_note" placeholder="Observação final" value="Operação conferida e finalizada.">
-                      <button class="btn small" type="submit">Finalizar operação</button>
-                    </form>
-                    {% endif %}
-                  </td>
-                </tr>
-                {% endif %}
+        <div class="winner-orders-grid">
+          {% set visible_statuses = ['paid','aguardando_escolha','aguardando_link','link_recebido','link_rejeitado','aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','processing','purchased','sent','delivered','dispute','resolved'] %}
+          {% for o in orders %}
+          {% if o.status in visible_statuses %}
+          <details class="winner-order-card status-{{ o.status }}">
+            <summary class="winner-order-summary">
+              <div class="winner-order-product">
+                <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
+                <div>
+                  <span class="order-number">Pedido #{{ '%06d'|format(o.id) }}</span>
+                  <h3>{{ o.auction.title }}</h3>
+                  <small>{{ o.auction.source_store or 'Loja não informada' }} • {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</small>
+                </div>
+              </div>
+              <div class="winner-order-client">
+                <span>Vencedor</span>
+                <strong>{{ o.user.full_name }}</strong>
+                <small>{{ o.user.email }}</small>
+              </div>
+              <div class="winner-order-value">
+                <span>Valor pago</span>
+                <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong>
+              </div>
+              <div>
+                <span class="order-status-chip status-{{ o.status }}">{{ order_status_label(o.status) if order_status_label is defined else o.status }}</span>
+              </div>
+              <span class="btn small ghost">Ver mais</span>
+            </summary>
+
+            <div class="winner-order-details">
+              <div class="panel-card admin-card-pro">
+                <h3>Resumo operacional</h3>
+                <div class="profile-grid">
+                  <div><span>Modo de atendimento</span><strong>{% if o.fulfillment_mode == 'customer_purchase' %}Cliente faz o pedido{% elif o.fulfillment_mode == 'site_purchase' %}LanceioCerto compra/envia{% else %}Aguardando escolha{% endif %}</strong></div>
+                  <div><span>Status</span><strong>{{ order_status_label(o.status) if order_status_label is defined else o.status }}</strong></div>
+                  <div><span>Data do pedido</span><strong>{{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</strong></div>
+                  <div><span>Produto original</span><strong><a href="{{ o.auction.source_url or '#' }}" target="_blank" rel="noopener">Abrir link cadastrado</a></strong></div>
+                </div>
+              </div>
+
+              <div class="panel-card admin-card-pro">
+                <h3>Link enviado pelo vencedor</h3>
+                <div class="profile-grid">
+                  <div><span>Domínio validado</span><strong>{{ o.submitted_link_domain or '—' }}</strong></div>
+                  <div><span>Validação</span><strong>{% if o.submitted_link_valid %}Compatível{% elif o.submitted_purchase_link %}Recusado/pendente{% else %}Aguardando envio{% endif %}</strong></div>
+                  <div><span>Conferido em</span><strong>{{ o.submitted_link_checked_at.strftime('%d/%m/%Y %H:%M') if o.submitted_link_checked_at else '—' }}</strong></div>
+                  <div><span>Aprovado em</span><strong>{{ o.approved_at.strftime('%d/%m/%Y %H:%M') if o.approved_at else '—' }}</strong></div>
+                </div>
+                {% if o.submitted_purchase_link %}
+                  <p><strong>Link/código:</strong> <a href="{{ o.submitted_purchase_link }}" target="_blank" rel="noopener">{{ o.submitted_purchase_link }}</a></p>
                 {% else %}
-                <tr><td colspan="8">Nenhum envio pendente.</td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
+                  <p class="muted">O vencedor ainda não enviou link ou código de pagamento.</p>
+                {% endif %}
+                {% if o.submitted_link_validation_note %}
+                  <p class="admin-fee-note">{{ o.submitted_link_validation_note }}</p>
+                {% endif %}
+              </div>
+
+              <div class="panel-card admin-card-pro">
+                <h3>Dados completos do vencedor</h3>
+                <div class="profile-grid">
+                  <div><span>Nome</span><strong>{{ o.user.full_name }}</strong></div>
+                  <div><span>E-mail</span><strong>{{ o.user.email }}</strong></div>
+                  <div><span>CPF</span><strong>{{ o.user.cpf or '—' }}</strong></div>
+                  <div><span>Contato</span><strong>{{ o.user.phone or '—' }}</strong></div>
+                  <div><span>Endereço</span><strong>{{ o.delivery_street or o.user.street or '—' }}, {{ o.delivery_number or o.user.number or '—' }}</strong></div>
+                  <div><span>Cidade/UF</span><strong>{{ o.delivery_city or o.user.city or '—' }}/{{ o.delivery_state or o.user.state or '—' }}</strong></div>
+                  <div><span>CEP</span><strong>{{ o.delivery_cep or o.user.cep or '—' }}</strong></div>
+                </div>
+              </div>
+
+              <div class="panel-card admin-card-pro">
+                <h3>Controle do pedido</h3>
+                <form method="post" action="/admin/order/{{ o.id }}/admin-update" class="order-admin-form">
+                  <div class="profile-grid admin-form-grid">
+                    <label>Link de compra/admin
+                      <input name="purchase_link" value="{{ o.purchase_link or o.auction.source_url or '' }}" placeholder="https://...">
+                    </label>
+                    <label>Status interno
+                      <select name="purchase_status">
+                        <option value="" {% if not o.purchase_status %}selected{% endif %}>Não iniciado</option>
+                        <option value="aguardando_escolha" {% if o.purchase_status == 'aguardando_escolha' %}selected{% endif %}>Aguardando escolha</option>
+                        <option value="aguardando_link" {% if o.purchase_status == 'aguardando_link' %}selected{% endif %}>Aguardando link</option>
+                        <option value="aguardando_aprovacao" {% if o.purchase_status == 'aguardando_aprovacao' %}selected{% endif %}>Aguardando aprovação</option>
+                        <option value="pedido_pago" {% if o.purchase_status == 'pedido_pago' %}selected{% endif %}>Pedido pago</option>
+                        <option value="compra_realizada" {% if o.purchase_status == 'compra_realizada' %}selected{% endif %}>Compra realizada</option>
+                        <option value="produto_enviado" {% if o.purchase_status == 'produto_enviado' %}selected{% endif %}>Produto enviado</option>
+                        <option value="produto_entregue" {% if o.purchase_status == 'produto_entregue' %}selected{% endif %}>Produto entregue</option>
+                      </select>
+                    </label>
+                    <label>Código de rastreio
+                      <input name="tracking_code" value="{{ o.tracking_code or '' }}" placeholder="Ex.: BR123456789BR">
+                    </label>
+                  </div>
+                  <label>Observação interna
+                    <textarea name="admin_note">{{ o.admin_note or '' }}</textarea>
+                  </label>
+
+                  <div class="admin-checkbox-row">
+                    {% if o.fulfillment_mode == 'customer_purchase' or o.submitted_purchase_link %}
+                      <label><input type="checkbox" name="approve_customer_link" value="1"> Aprovar link validado</label>
+                      <label><input type="checkbox" name="reject_customer_link" value="1"> Recusar link</label>
+                      <label><input type="checkbox" name="mark_customer_payment_done" value="1"> Marcar pagamento do pedido</label>
+                    {% endif %}
+                    <label><input type="checkbox" name="mark_purchased" value="1"> Marcar compra realizada</label>
+                    <label><input type="checkbox" name="mark_sent" value="1"> Marcar produto enviado</label>
+                    <label><input type="checkbox" name="mark_delivered" value="1"> Marcar produto entregue</label>
+                    <label><input type="checkbox" name="mark_finalized" value="1"> Finalizar operação</label>
+                  </div>
+                  <button class="btn" type="submit">Salvar controle</button>
+                </form>
+              </div>
+            </div>
+          </details>
+          {% endif %}
+          {% else %}
+            <div class="panel-card empty-card"><h2>Nenhum pedido de vencedor em andamento.</h2></div>
+          {% endfor %}
         </div>
       </section>
 

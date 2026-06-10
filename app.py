@@ -22,6 +22,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.gzip import GZipMiddleware
@@ -229,6 +230,15 @@ class WinnerOrder(Base):
     tracking_code: Mapped[str] = mapped_column(String(120), default="")
     purchase_link: Mapped[str] = mapped_column(String(600), default="")
     purchase_status: Mapped[str] = mapped_column(String(40), default="")
+    fulfillment_mode: Mapped[str] = mapped_column(String(40), default="")  # site_purchase/customer_purchase
+    submitted_purchase_link: Mapped[str] = mapped_column(String(900), default="")
+    submitted_link_domain: Mapped[str] = mapped_column(String(160), default="")
+    submitted_link_valid: Mapped[bool] = mapped_column(Boolean, default=False)
+    submitted_link_validation_note: Mapped[str] = mapped_column(Text, default="")
+    submitted_link_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approved_by_admin: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    order_choice_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     purchased_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -2535,30 +2545,45 @@ ORDER_STATUS_LABELS = {
     "pending_payment": "Aguardando pagamento",
     "pending_gateway": "Aguardando confirmação do gateway",
     "paid": "Pagamento aprovado",
+    "aguardando_escolha": "Aguardando escolha",
+    "aguardando_link": "Aguardando link de pagamento",
+    "link_recebido": "Link recebido",
+    "link_rejeitado": "Link rejeitado",
+    "aguardando_aprovacao": "Aguardando aprovação",
+    "aprovado_para_pagamento": "Aprovado para pagamento",
+    "pagamento_pedido_realizado": "Pagamento do pedido realizado",
     "processing": "Preparando compra",
-    "purchased": "Produto comprado",
+    "purchased": "Compra realizada",
     "sent": "Produto enviado",
-    "delivered": "Entregue",
+    "delivered": "Produto entregue",
     "finalized": "Pedido concluído",
     "completed": "Pedido concluído",
     "expired": "Prazo expirado",
+    "dispute": "Problema informado",
     "resolved": "Resolvido",
 }
 
 ORDER_STATUS_DESCRIPTIONS = {
-    "pending_payment": "Finalize o pagamento para a equipe iniciar a compra e o envio do produto.",
-    "pending_gateway": "Pagamento iniciado por Pix/cartão. Aguardando confirmação oficial antes de liberar compra/envio.",
-    "paid": "Pagamento aprovado. O produto será comprado e preparado para envio.",
-    "processing": "Pedido em preparação. A equipe está organizando a compra do produto.",
-    "purchased": "Produto comprado. O próximo passo é registrar o envio e informar o rastreio.",
+    "pending_payment": "Finalize o pagamento para liberar as opções de recebimento do produto.",
+    "pending_gateway": "Pagamento iniciado por Pix/cartão. Aguardando confirmação oficial antes de liberar o pedido.",
+    "paid": "Pagamento aprovado. Escolha como deseja seguir com o recebimento do produto.",
+    "aguardando_escolha": "Escolha se prefere que o LanceioCerto faça a compra ou se você mesmo fará o pedido no site original.",
+    "aguardando_link": "Faça o pedido no site original do produto, escolha Pix e envie o link ou código de pagamento para validação.",
+    "link_recebido": "Seu link foi recebido e está sendo validado.",
+    "link_rejeitado": "O link enviado não passou na validação. Confira o motivo e envie novamente.",
+    "aguardando_aprovacao": "O link é compatível com o produto cadastrado. Aguarde a aprovação do administrador.",
+    "aprovado_para_pagamento": "O link foi aprovado. A equipe fará o pagamento do pedido.",
+    "pagamento_pedido_realizado": "O pagamento do pedido foi registrado pela equipe.",
+    "processing": "Pedido em preparação.",
+    "purchased": "Compra realizada. O próximo passo é o envio.",
     "sent": "Produto enviado. Acompanhe o rastreio informado nesta página.",
     "delivered": "Produto marcado como entregue. Confirme o recebimento ou abra uma disputa se houver problema.",
     "finalized": "Pedido concluído com sucesso.",
     "completed": "Pedido concluído com sucesso.",
     "expired": "O prazo para pagamento expirou.",
+    "dispute": "Problema informado. A equipe acompanhará o chamado.",
     "resolved": "Pedido resolvido após análise da equipe.",
 }
-
 
 def order_status_label(status: str) -> str:
     return ORDER_STATUS_LABELS.get((status or "").strip().lower(), status or "—")
@@ -2568,21 +2593,139 @@ def order_status_description(status: str) -> str:
     return ORDER_STATUS_DESCRIPTIONS.get((status or "").strip().lower(), "Acompanhe as atualizações deste pedido por aqui.")
 
 
+templates.env.globals["order_status_label"] = order_status_label
+templates.env.globals["order_status_description"] = order_status_description
+
+def normalize_domain_from_url(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if not re.match(r"^https?://", raw, re.I):
+        raw = "https://" + raw
+    try:
+        host = (urlparse(raw).netloc or "").lower()
+    except Exception:
+        return ""
+    host = host.split("@")[-1].split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def compatible_store_domains(source_store: str, source_url: str) -> set[str]:
+    store = (source_store or "").strip().lower()
+    base_domain = normalize_domain_from_url(source_url)
+    domains = {base_domain} if base_domain else set()
+    if "mercado" in store or "mercadolivre" in base_domain:
+        domains.update({"mercadolivre.com.br", "mercadolivre.com", "mercadopago.com.br", "mercadopago.com"})
+    if "shopee" in store or "shopee" in base_domain:
+        domains.update({"shopee.com.br", "shopee.com"})
+    if "amazon" in store or "amazon" in base_domain:
+        domains.update({"amazon.com.br", "amazon.com"})
+    return {d for d in domains if d}
+
+
+def extract_marketplace_product_token(url: str) -> str:
+    raw = (url or "").strip()
+    try:
+        parsed = urlparse(raw if re.match(r"^https?://", raw, re.I) else "https://" + raw)
+    except Exception:
+        return ""
+    candidate = (parsed.path or "") + "?" + (parsed.query or "")
+    patterns = [
+        r"(MLB-?\d+)",
+        r"(/[^/?#]+-)?(MLB\d+)",
+        r"i\.(\d+)\.(\d+)",
+        r"/dp/([A-Z0-9]{8,})",
+        r"/gp/product/([A-Z0-9]{8,})",
+    ]
+    for pat in patterns:
+        m = re.search(pat, candidate, re.I)
+        if m:
+            return "-".join([g for g in m.groups() if g]).upper()
+    # fallback: primeira parte relevante do caminho para evitar aprovar domínios iguais com produto totalmente diferente
+    parts = [p for p in (parsed.path or "").split("/") if p and p not in {"p", "product", "produto"}]
+    return (parts[-1][:80].lower() if parts else "")
+
+
+def validate_customer_purchase_link(order: WinnerOrder) -> tuple[bool, str, str]:
+    item = order.auction
+    submitted = (getattr(order, "submitted_purchase_link", "") or "").strip()
+    if not submitted:
+        return False, "", "Envie o link ou código de pagamento do pedido."
+    submitted_domain = normalize_domain_from_url(submitted)
+    if not submitted_domain:
+        return False, "", "Link inválido. Envie um endereço completo do site original."
+    blocked_domains = {"bit.ly", "tinyurl.com", "cutt.ly", "goo.gl", "t.co", "is.gd", "encurtador.com.br"}
+    if submitted_domain in blocked_domains:
+        return False, submitted_domain, "Links encurtados não são aceitos por segurança."
+
+    source_url = getattr(item, "source_url", "") if item else ""
+    source_store = getattr(item, "source_store", "") if item else ""
+    allowed_domains = compatible_store_domains(source_store, source_url)
+    if allowed_domains and not any(submitted_domain == d or submitted_domain.endswith("." + d) for d in allowed_domains):
+        allowed_text = ", ".join(sorted(allowed_domains))
+        return False, submitted_domain, f"Link incompatível. Este produto deve usar um domínio oficial compatível com: {allowed_text}."
+
+    original_token = extract_marketplace_product_token(source_url)
+    submitted_token = extract_marketplace_product_token(submitted)
+    payment_domains = {"mercadopago.com.br", "mercadopago.com"}
+    is_payment_domain = any(submitted_domain == d or submitted_domain.endswith("." + d) for d in payment_domains)
+    # Links de pagamento do Mercado Pago nem sempre carregam o token do produto. Nesse caso validamos domínio,
+    # mas deixamos o admin conferir manualmente antes de autorizar.
+    if original_token and submitted_token and original_token != submitted_token and not is_payment_domain:
+        return False, submitted_domain, "O domínio é compatível, mas o produto do link parece ser diferente do produto vencido."
+
+    if is_payment_domain:
+        return True, submitted_domain, "Domínio de pagamento compatível. Conferência manual do admin necessária antes de pagar."
+    return True, submitted_domain, "Link compatível com o produto cadastrado. Aguardando aprovação do admin."
+
+
+
 def build_order_timeline(order: WinnerOrder) -> list[dict]:
     status = (order.status or "").strip().lower()
     finalized = status in {"finalized", "completed"}
-    paid_done = bool(order.paid_at) or status in {"paid", "processing", "purchased", "sent", "delivered", "finalized", "completed"}
-    purchased_done = bool(order.purchased_at) or status in {"purchased", "sent", "delivered", "finalized", "completed"}
-    sent_done = bool(order.sent_at) or status in {"sent", "delivered", "finalized", "completed"}
-    delivered_done = bool(order.delivered_at) or status in {"delivered", "finalized", "completed"}
-    steps = [
-        ("Leilão vencido", order.created_at, True, "Produto arrematado na sua conta."),
-        ("Pagamento aprovado", order.paid_at, paid_done, "Aguardando confirmação do pagamento."),
-        ("Produto comprado", order.purchased_at, purchased_done, "Aguardando compra do produto."),
-        ("Produto enviado", order.sent_at, sent_done, "Aguardando envio e rastreio."),
-        ("Produto entregue", order.delivered_at, delivered_done, "Aguardando entrega."),
-        ("Pedido concluído", None, finalized, "Finalize após receber o produto."),
-    ]
+    paid_done = bool(order.paid_at) or status in {
+        "paid", "aguardando_escolha", "aguardando_link", "link_recebido", "link_rejeitado",
+        "aguardando_aprovacao", "aprovado_para_pagamento", "pagamento_pedido_realizado",
+        "processing", "purchased", "sent", "delivered", "finalized", "completed"
+    }
+
+    customer_flow = (getattr(order, "fulfillment_mode", "") == "customer_purchase") or status in {
+        "aguardando_link", "link_recebido", "link_rejeitado", "aguardando_aprovacao",
+        "aprovado_para_pagamento", "pagamento_pedido_realizado"
+    }
+
+    if customer_flow:
+        link_done = bool(getattr(order, "submitted_purchase_link", "")) or status in {
+            "link_recebido", "link_rejeitado", "aguardando_aprovacao", "aprovado_para_pagamento",
+            "pagamento_pedido_realizado", "finalized", "completed"
+        }
+        approved_done = status in {"aprovado_para_pagamento", "pagamento_pedido_realizado", "finalized", "completed"}
+        paid_order_done = status in {"pagamento_pedido_realizado", "finalized", "completed"}
+        steps = [
+            ("Leilão vencido", order.created_at, True, "Produto arrematado na sua conta."),
+            ("Pagamento aprovado", order.paid_at, paid_done, "Aguardando confirmação do pagamento."),
+            ("Forma escolhida", getattr(order, "order_choice_at", None), bool(getattr(order, "order_choice_at", None)), "Escolha como quer seguir com o pedido."),
+            ("Link enviado", getattr(order, "submitted_link_checked_at", None), link_done, "Envie o link/código Pix do site original."),
+            ("Aprovação admin", getattr(order, "approved_at", None), approved_done, "Aguardando conferência da equipe."),
+            ("Pedido pago", order.purchased_at, paid_order_done, "Aguardando registro do pagamento do pedido."),
+            ("Concluído", None, finalized, "Operação finalizada."),
+        ]
+    else:
+        purchased_done = bool(order.purchased_at) or status in {"purchased", "sent", "delivered", "finalized", "completed"}
+        sent_done = bool(order.sent_at) or status in {"sent", "delivered", "finalized", "completed"}
+        delivered_done = bool(order.delivered_at) or status in {"delivered", "finalized", "completed"}
+        steps = [
+            ("Leilão vencido", order.created_at, True, "Produto arrematado na sua conta."),
+            ("Pagamento aprovado", order.paid_at, paid_done, "Aguardando confirmação do pagamento."),
+            ("Forma escolhida", getattr(order, "order_choice_at", None), bool(getattr(order, "order_choice_at", None)), "Escolha como quer receber."),
+            ("Compra realizada", order.purchased_at, purchased_done, "Aguardando compra do produto."),
+            ("Produto enviado", order.sent_at, sent_done, "Aguardando envio e rastreio."),
+            ("Produto entregue", order.delivered_at, delivered_done, "Aguardando entrega."),
+            ("Pedido concluído", None, finalized, "Finalize após receber o produto."),
+        ]
+
     active_set = False
     timeline = []
     for label, dt, done, helper in steps:
@@ -2600,15 +2743,19 @@ def build_order_timeline(order: WinnerOrder) -> list[dict]:
             "helper": helper,
         })
     if status == "expired":
-        timeline.append({"label": "Prazo expirado", "date_label": fmt_br_datetime(order.expired_at), "state": "danger", "helper": "O prazo de pagamento terminou."})
+        timeline.append({"label": "Prazo expirado", "date_label": fmt_br_datetime(order.expired_at), "state": "danger", "helper": "O prazo de pagamento expirou."})
+    if status == "link_rejeitado":
+        timeline.append({"label": "Link recusado", "date_label": fmt_br_datetime(getattr(order, "submitted_link_checked_at", None)), "state": "danger", "helper": getattr(order, "submitted_link_validation_note", "") or "Link incompatível."})
     return timeline
-
 
 def build_order_history(order: WinnerOrder) -> list[dict]:
     events = [
         (order.created_at, "Leilão vencido", "Você foi o vencedor deste leilão."),
         (order.paid_at, "Pagamento aprovado", "Pagamento confirmado na plataforma."),
-        (order.purchased_at, "Produto comprado", "A equipe registrou a compra do produto."),
+        (getattr(order, "order_choice_at", None), "Forma de recebimento escolhida", "O modo de atendimento do pedido foi definido."),
+        (getattr(order, "submitted_link_checked_at", None), "Link de pagamento enviado", getattr(order, "submitted_link_validation_note", "") or "Link recebido para validação."),
+        (getattr(order, "approved_at", None), "Link aprovado pelo admin", "A equipe aprovou o link para pagamento."),
+        (order.purchased_at, "Compra realizada", "A equipe registrou a compra/pagamento do pedido."),
         (order.sent_at, "Produto enviado", f"Envio registrado. Rastreio: {order.tracking_code or 'aguardando código'}."),
         (order.delivered_at, "Produto entregue", "Entrega marcada como concluída."),
         (order.expired_at, "Prazo expirado", "O prazo de pagamento do pedido expirou."),
@@ -2618,7 +2765,6 @@ def build_order_history(order: WinnerOrder) -> list[dict]:
         if dt:
             history.append({"date_label": fmt_br_datetime(dt), "title": title, "description": description})
     return history
-
 
 def build_order_card(order: WinnerOrder) -> dict:
     item = order.auction
@@ -2642,6 +2788,13 @@ def build_order_card(order: WinnerOrder) -> dict:
         "tracking_code": order.tracking_code,
         "purchase_status": order.purchase_status,
         "purchase_link": order.purchase_link,
+        "fulfillment_mode": getattr(order, "fulfillment_mode", "") or "",
+        "submitted_purchase_link": getattr(order, "submitted_purchase_link", "") or "",
+        "submitted_link_domain": getattr(order, "submitted_link_domain", "") or "",
+        "submitted_link_valid": bool(getattr(order, "submitted_link_valid", False)),
+        "submitted_link_validation_note": getattr(order, "submitted_link_validation_note", "") or "",
+        "submitted_link_checked_at": fmt_br_datetime(getattr(order, "submitted_link_checked_at", None)),
+        "approved_at": fmt_br_datetime(getattr(order, "approved_at", None)),
         "admin_note": order.admin_note,
         "source_store": item.source_store if item else "",
         "source_url": item.source_url if item else "",
@@ -2909,6 +3062,15 @@ def ensure_columns() -> None:
             for name, ddl in {
                 "purchase_link": "VARCHAR(600) DEFAULT ''",
                 "purchase_status": "VARCHAR(40) DEFAULT ''",
+                "fulfillment_mode": "VARCHAR(40) DEFAULT ''",
+                "submitted_purchase_link": "VARCHAR(900) DEFAULT ''",
+                "submitted_link_domain": "VARCHAR(160) DEFAULT ''",
+                "submitted_link_valid": "BOOLEAN DEFAULT FALSE",
+                "submitted_link_validation_note": "TEXT DEFAULT ''",
+                "submitted_link_checked_at": "TIMESTAMP NULL",
+                "approved_by_admin": "INTEGER NULL",
+                "approved_at": "TIMESTAMP NULL",
+                "order_choice_at": "TIMESTAMP NULL",
                 "purchased_at": "TIMESTAMP NULL",
                 "sent_at": "TIMESTAMP NULL",
                 "delivered_at": "TIMESTAMP NULL",
@@ -4555,6 +4717,75 @@ def my_order_detail(request: Request, order_id: int):
         db.close()
 
 
+
+@app.post("/minha-conta/pedido/{order_id}/escolher-atendimento")
+def account_choose_order_fulfillment(request: Request, order_id: int, fulfillment_mode: str = Form(...)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        order = (
+            db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
+            .filter(WinnerOrder.id == order_id, WinnerOrder.user_id == user.id)
+            .first()
+        )
+        if not order:
+            raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        if order.status not in {"paid", "aguardando_escolha"}:
+            raise HTTPException(status_code=400, detail="Este pedido ainda não está liberado para escolha.")
+        now = datetime.utcnow()
+        if fulfillment_mode == "customer_purchase":
+            order.fulfillment_mode = "customer_purchase"
+            order.status = "aguardando_link"
+            order.order_choice_at = now
+            order.admin_note = ((order.admin_note or "") + "\nCliente escolheu fazer o próprio pedido no site original.").strip()
+            audit_event(db, request, "order.fulfillment.customer_purchase", user, "order", order.id, "Cliente escolheu enviar link/código de pagamento do pedido.")
+        elif fulfillment_mode == "site_purchase":
+            order.fulfillment_mode = "site_purchase"
+            order.status = "processing"
+            order.order_choice_at = now
+            order.admin_note = ((order.admin_note or "") + "\nCliente escolheu compra assistida pelo LanceioCerto.").strip()
+            audit_event(db, request, "order.fulfillment.site_purchase", user, "order", order.id, "Cliente escolheu compra e envio pelo site.")
+        else:
+            raise HTTPException(status_code=400, detail="Opção inválida.")
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/minha-conta/pedido/{order.id}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/pedido/{order_id}/enviar-link-pagamento")
+def account_submit_customer_purchase_link(request: Request, order_id: int, submitted_purchase_link: str = Form(...)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        order = (
+            db.query(WinnerOrder)
+            .options(selectinload(WinnerOrder.auction))
+            .filter(WinnerOrder.id == order_id, WinnerOrder.user_id == user.id)
+            .first()
+        )
+        if not order:
+            raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        if order.fulfillment_mode != "customer_purchase" and order.status not in {"aguardando_link", "link_rejeitado"}:
+            raise HTTPException(status_code=400, detail="Este pedido não está aguardando link do cliente.")
+        order.fulfillment_mode = "customer_purchase"
+        order.submitted_purchase_link = (submitted_purchase_link or "").strip()
+        valid, domain, note = validate_customer_purchase_link(order)
+        order.submitted_link_domain = domain
+        order.submitted_link_valid = bool(valid)
+        order.submitted_link_validation_note = note
+        order.submitted_link_checked_at = datetime.utcnow()
+        order.status = "aguardando_aprovacao" if valid else "link_rejeitado"
+        audit_event(db, request, "order.customer_link_validated" if valid else "order.customer_link_rejected", user, "order", order.id, f"Domínio: {domain or '—'} | Resultado: {note}")
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/minha-conta/pedido/{order.id}", status_code=303)
+    finally:
+        db.close()
+
+
 @app.post("/minha-conta/pedido/{order_id}/confirmar-recebimento")
 def account_confirm_order_received(request: Request, order_id: int):
     db = SessionLocal()
@@ -4684,9 +4915,9 @@ def confirm_payment_flow(
             return RedirectResponse("/minha-conta/ganhos", status_code=303)
 
         # Pagamento com saldo interno confirmado.
-        order.status = "paid"
+        order.status = "aguardando_escolha"
         order.paid_at = datetime.utcnow()
-        order.admin_note = "Pagamento confirmado com saldo interno."
+        order.admin_note = "Pagamento confirmado com saldo interno. Aguardando escolha do modo de recebimento."
         audit_event(db, request, "order.payment_wallet_confirmed", user, "order", order.id, f"Valor: R$ {fmt_money(order.final_price)}")
 
         db.commit()
@@ -4859,7 +5090,7 @@ def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0
           (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
           (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
           (SELECT COUNT(*) FROM winner_orders WHERE status IN ('pending_payment','pending_gateway')) AS pending_payment,
-          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid','aguardando_escolha','aguardando_link','link_recebido','link_rejeitado','aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','processing','purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
           (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
           (SELECT COUNT(*) FROM users) AS users,
           (SELECT COUNT(*) FROM users WHERE (is_banned IS NULL OR is_banned = false)) AS active_users,
@@ -4912,7 +5143,7 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
           (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
           (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
           (SELECT COUNT(*) FROM winner_orders WHERE status IN ('pending_payment','pending_gateway')) AS pending_payment,
-          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid','aguardando_escolha','aguardando_link','link_recebido','link_rejeitado','aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','processing','purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
           (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
           (SELECT COUNT(*) FROM users) AS users,
           (SELECT COUNT(*) FROM users WHERE (is_banned IS NULL OR is_banned = false)) AS active_users,
@@ -5189,7 +5420,7 @@ def admin_dashboard(request: Request):
             if active_panel == "admin-pending-payments":
                 orders_query = orders_query.filter(WinnerOrder.status.in_(["pending_payment", "pending_gateway"]))
             elif active_panel == "admin-shipping":
-                orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "processing", "purchased", "sent", "delivered", "dispute", "resolved"]))
+                orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "aguardando_escolha", "aguardando_link", "link_recebido", "link_rejeitado", "aguardando_aprovacao", "aprovado_para_pagamento", "pagamento_pedido_realizado", "processing", "purchased", "sent", "delivered", "dispute", "resolved"]))
             elif active_panel == "admin-search-orders":
                 if search:
                     like = f"%{search}%"
@@ -5408,11 +5639,14 @@ def admin_update_order_control(
     mark_sent: int = Form(0),
     mark_delivered: int = Form(0),
     mark_finalized: int = Form(0),
+    approve_customer_link: int = Form(0),
+    reject_customer_link: int = Form(0),
+    mark_customer_payment_done: int = Form(0),
 ):
     db = SessionLocal()
     try:
         admin_user = require_admin(request, db)
-        order = db.get(WinnerOrder, order_id)
+        order = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.id == order_id).first()
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
         order.purchase_link = purchase_link.strip()
@@ -5420,6 +5654,31 @@ def admin_update_order_control(
         order.tracking_code = tracking_code.strip()
         order.admin_note = admin_note.strip()
         now = datetime.utcnow()
+
+        if int(approve_customer_link or 0):
+            if not getattr(order, "submitted_link_valid", False):
+                raise HTTPException(status_code=400, detail="O link do cliente ainda não passou na validação automática.")
+            order.status = "aprovado_para_pagamento"
+            order.approved_by_admin = admin_user.id
+            order.approved_at = now
+            audit_event(db, request, "order.customer_link_approved", admin_user, "order", order.id, f"Link aprovado para pagamento: {order.submitted_purchase_link}")
+
+        if int(reject_customer_link or 0):
+            order.status = "link_rejeitado"
+            order.submitted_link_valid = False
+            order.submitted_link_validation_note = (order.submitted_link_validation_note or "Link recusado pelo administrador após conferência.").strip()
+            audit_event(db, request, "order.customer_link_admin_rejected", admin_user, "order", order.id, f"Link recusado: {order.submitted_purchase_link}")
+
+        if int(mark_customer_payment_done or 0):
+            if order.fulfillment_mode != "customer_purchase":
+                raise HTTPException(status_code=400, detail="Este pedido não está no fluxo de compra feita pelo vencedor.")
+            if order.status not in {"aprovado_para_pagamento", "pagamento_pedido_realizado"}:
+                raise HTTPException(status_code=400, detail="Aprove o link antes de marcar o pagamento do pedido.")
+            order.status = "pagamento_pedido_realizado"
+            order.purchased_at = now
+            register_product_outgoing_if_needed(db, order, now)
+            audit_event(db, request, "order.customer_purchase_paid", admin_user, "order", order.id, f"Pagamento do pedido do cliente registrado. Link: {order.submitted_purchase_link}")
+
         if int(mark_purchased or 0):
             order.status = "purchased"
             order.purchased_at = now
@@ -5436,8 +5695,8 @@ def admin_update_order_control(
             register_product_outgoing_if_needed(db, order, now)
             audit_event(db, request, "order.delivered", admin_user, "order", order.id, f"Produto entregue. Pedido #{order.id}")
         if int(mark_finalized or 0):
-            if order.status not in {"delivered", "resolved"}:
-                raise HTTPException(status_code=400, detail="A operação só pode ser finalizada depois da entrega ou resolução da disputa.")
+            if order.status not in {"delivered", "resolved", "pagamento_pedido_realizado"}:
+                raise HTTPException(status_code=400, detail="A operação só pode ser finalizada depois da entrega, resolução da disputa ou pagamento do pedido do cliente.")
             order.status = "finalized"
             order.admin_note = ((order.admin_note or "") + "\nOperação finalizada administrativamente.").strip()
             item = db.get(AuctionItem, order.auction_id)

@@ -339,7 +339,7 @@
     <div>
       <span class="orders-eyebrow">Área de compras</span>
       <h1>Meus Pedidos</h1>
-      <p>Acompanhe seus produtos arrematados com status de pagamento, compra, envio, entrega e suporte.</p>
+      <p>Acompanhe seus produtos arrematados, escolha como deseja receber e envie link de pagamento quando preferir fazer o próprio pedido.</p>
     </div>
     <a class="btn small ghost" href="/minha-conta/pagamentos">Pagamentos pendentes</a>
   </div>
@@ -372,7 +372,7 @@
             <div><span>Arrematado por</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
             <div><span>Valor de mercado</span><strong>{% if market_value %}R$ {{ '%.2f'|format(market_value)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
             <div><span>Economia</span><strong class="order-saving">{% if savings %}R$ {{ '%.2f'|format(savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
-            <div><span>Rastreio</span><strong>{{ o.tracking_code or 'Aguardando envio' }}</strong></div>
+            <div><span>Atendimento</span><strong>{% if o.fulfillment_mode == "customer_purchase" %}Pedido feito por você{% elif o.fulfillment_mode == "site_purchase" %}Compra assistida{% else %}Aguardando escolha{% endif %}</strong></div>
           </div>
 
           {% if o.admin_note %}<p class="order-admin-note">{{ o.admin_note }}</p>{% endif %}
@@ -439,6 +439,72 @@
     </div>
   </section>
 
+  <section class="panel-card order-fulfillment-card">
+    <div class="order-panel-title">
+      <h2>Como deseja receber este produto?</h2>
+      <p>Após o pagamento aprovado, você pode deixar o LanceioCerto comprar/enviar ou fazer o pedido no site original e enviar o link/código Pix para validação.</p>
+    </div>
+
+    {% if o.status in ['paid','aguardando_escolha'] %}
+      <div class="fulfillment-choice-grid">
+        <form method="post" action="/minha-conta/pedido/{{ o.id }}/escolher-atendimento" class="wallet-card">
+          <input type="hidden" name="fulfillment_mode" value="site_purchase">
+          <h3>Compra assistida pelo LanceioCerto</h3>
+          <p class="muted">A equipe faz a compra e atualiza envio, rastreio e entrega dentro da sua conta.</p>
+          <button class="btn" type="submit">Quero que o LanceioCerto compre</button>
+        </form>
+
+        <form method="post" action="/minha-conta/pedido/{{ o.id }}/escolher-atendimento" class="wallet-card">
+          <input type="hidden" name="fulfillment_mode" value="customer_purchase">
+          <h3>Quero fazer meu próprio pedido</h3>
+          <p class="muted">Você abre o link original, faz o pedido em seu nome/endereço, escolhe Pix e envia o link/código para validação.</p>
+          <button class="btn ghost" type="submit">Vou fazer o pedido</button>
+        </form>
+      </div>
+    {% elif o.fulfillment_mode == 'customer_purchase' %}
+      <div class="customer-purchase-box">
+        <div class="profile-grid">
+          <div><span>Loja original</span><strong>{{ o.source_store or 'Loja cadastrada' }}</strong></div>
+          <div><span>Status do link</span><strong>{{ o.status_label }}</strong></div>
+          <div><span>Domínio validado</span><strong>{{ o.submitted_link_domain or 'Aguardando envio' }}</strong></div>
+          <div><span>Conferido em</span><strong>{{ o.submitted_link_checked_at or '—' }}</strong></div>
+        </div>
+
+        <p><strong>Link original do produto:</strong>
+          {% if o.source_url %}<a href="{{ o.source_url }}" target="_blank" rel="noopener">Abrir site original</a>{% else %}<span class="muted">não informado</span>{% endif %}
+        </p>
+
+        {% if o.status in ['aguardando_link','link_rejeitado'] %}
+          {% if o.submitted_link_validation_note %}
+            <div class="alert">{{ o.submitted_link_validation_note }}</div>
+          {% endif %}
+          <form method="post" action="/minha-conta/pedido/{{ o.id }}/enviar-link-pagamento" class="wallet-card">
+            <label>Link ou código de pagamento do pedido
+              <input name="submitted_purchase_link" value="{{ o.submitted_purchase_link or '' }}" placeholder="Cole aqui o link/código Pix gerado no site original" required>
+            </label>
+            <small>O sistema confere automaticamente se o domínio é compatível com a loja cadastrada do produto. Links encurtados ou de outra plataforma são recusados.</small>
+            <button class="btn" type="submit">Enviar para validação</button>
+          </form>
+        {% elif o.status in ['aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','finalized'] %}
+          <div class="tracking-code-box">
+            <span>Link enviado</span>
+            <strong>{{ o.submitted_link_domain or 'Domínio validado' }}</strong>
+          </div>
+          {% if o.submitted_link_validation_note %}<p class="muted">{{ o.submitted_link_validation_note }}</p>{% endif %}
+          <p class="muted">Agora aguarde a conferência e atualização da equipe.</p>
+        {% endif %}
+      </div>
+    {% elif o.fulfillment_mode == 'site_purchase' %}
+      <div class="tracking-code-box">
+        <span>Atendimento escolhido</span>
+        <strong>Compra assistida pelo LanceioCerto</strong>
+      </div>
+      <p class="muted">A equipe seguirá com compra, envio, rastreio e entrega por aqui.</p>
+    {% else %}
+      <p class="muted">Esta opção ficará disponível assim que o pagamento for aprovado.</p>
+    {% endif %}
+  </section>
+
   <div class="order-detail-grid">
     <section class="panel-card order-history-card">
       <div class="order-panel-title"><h2>Histórico do pedido</h2></div>
@@ -456,8 +522,14 @@
     </section>
 
     <section class="panel-card order-shipping-card">
-      <div class="order-panel-title"><h2>Rastreamento</h2></div>
-      {% if o.tracking_code %}
+      <div class="order-panel-title"><h2>{% if o.fulfillment_mode == 'customer_purchase' %}Pedido feito por você{% else %}Rastreamento{% endif %}</h2></div>
+      {% if o.fulfillment_mode == 'customer_purchase' %}
+        <div class="tracking-code-box">
+          <span>Status</span>
+          <strong>{{ o.status_label }}</strong>
+        </div>
+        <p class="muted">Neste modelo você faz o pedido em seu nome no site original. O LanceioCerto valida o link e registra as etapas de aprovação/pagamento.</p>
+      {% elif o.tracking_code %}
         <div class="tracking-code-box">
           <span>Código de rastreio</span>
           <strong>{{ o.tracking_code }}</strong>
@@ -519,7 +591,7 @@
         <span class="order-finished-note">Pedido concluído. Obrigado por comprar com a Lanceio Certo.</span>
       {% endif %}
 
-      {% if o.status in ['delivered','sent','purchased','processing','paid','finalized'] %}
+      {% if o.status in ['delivered','sent','purchased','processing','paid','aguardando_escolha','aguardando_link','link_rejeitado','aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','finalized'] %}
       <details class="account-dispute-box order-detail-dispute">
         <summary class="btn small ghost">Abrir disputa ou chamado</summary>
         <form method="post" action="/minha-conta/chamado" enctype="multipart/form-data" class="wallet-card">

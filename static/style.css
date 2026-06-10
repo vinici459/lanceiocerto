@@ -384,3 +384,29 @@ body.page-loading a,body.page-loading button{cursor:progress;}
 
 /* Central de Auditoria */
 .audit-folder-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:16px 0 18px}.audit-folder-card{display:grid;gap:7px;padding:15px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.045);text-decoration:none;box-shadow:0 12px 28px rgba(0,0,0,.18)}.audit-folder-card:hover,.audit-folder-card.active{border-color:rgba(96,165,250,.55);background:rgba(59,130,246,.14)}.audit-folder-card span{font-weight:950}.audit-folder-card strong{font-size:28px;color:#fff}.audit-folder-card small{line-height:1.35}.audit-search-form{display:grid;grid-template-columns:minmax(240px,1.6fr) minmax(160px,.8fr) 140px 140px auto auto;gap:12px;align-items:end}.audit-search-form label{margin:0}.audit-archive-layout{grid-template-columns:1fr 1fr}.audit-table-wrap{max-height:620px;overflow:auto}.audit-table th{position:sticky;top:0;background:#0f172a;z-index:1}.audit-folder-pill{display:inline-flex;padding:6px 9px;border-radius:999px;background:rgba(96,165,250,.14);border:1px solid rgba(96,165,250,.25);font-size:12px;font-weight:900;color:#bfdbfe;white-space:nowrap}.audit-details-cell{min-width:320px;white-space:normal;line-height:1.4}.audit-row-archived{opacity:.86}.audit-row-archived td:first-child small{color:#fde68a;font-weight:900}@media(max-width:900px){.audit-search-form{grid-template-columns:1fr}.audit-archive-layout{grid-template-columns:1fr}}
+
+
+/* Central profissional de pedidos dos vencedores */
+.winner-orders-grid{display:grid;gap:14px}
+.winner-order-card{border:1px solid rgba(148,163,184,.20);background:rgba(15,23,42,.88);border-radius:22px;overflow:hidden;box-shadow:0 14px 36px rgba(0,0,0,.20)}
+.winner-order-card summary{list-style:none}
+.winner-order-card summary::-webkit-details-marker{display:none}
+.winner-order-summary{display:grid;grid-template-columns:minmax(260px,1.5fr) minmax(180px,.9fr) minmax(120px,.5fr) minmax(150px,.6fr) auto;gap:14px;align-items:center;padding:14px;cursor:pointer}
+.winner-order-product{display:flex;align-items:center;gap:13px;min-width:0}
+.winner-order-product img{width:72px;height:72px;border-radius:16px;object-fit:cover;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.05)}
+.winner-order-product h3{margin:3px 0 2px;font-size:18px;line-height:1.15}
+.winner-order-product small,.winner-order-client small{color:var(--muted);display:block}
+.winner-order-client span,.winner-order-value span{display:block;color:var(--muted);font-size:12px;font-weight:900;margin-bottom:4px}
+.winner-order-client strong,.winner-order-value strong{display:block}
+.winner-order-details{display:grid;gap:14px;padding:0 14px 14px}
+.admin-checkbox-row{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.admin-checkbox-row label{display:inline-flex;align-items:center;gap:7px;margin:0;padding:9px 11px;border:1px solid rgba(148,163,184,.16);border-radius:999px;background:rgba(255,255,255,.04)}
+.admin-checkbox-row input{width:auto;margin:0}
+.order-fulfillment-card{display:grid;gap:14px}
+.fulfillment-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:12px}
+.customer-purchase-box{display:grid;gap:12px}
+.customer-purchase-box a,.winner-order-details a{color:#93c5fd;font-weight:900}
+@media(max-width:900px){
+  .winner-order-summary{grid-template-columns:1fr}
+  .fulfillment-choice-grid{grid-template-columns:1fr}
+}
