@@ -12,6 +12,8 @@ import base64
 import hashlib
 import hmac
 import smtplib
+import csv
+import io
 from email.message import EmailMessage
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -528,7 +530,39 @@ async def navigation_guard_and_static_cache(request: Request, call_next):
             f"dest={request.headers.get('sec-fetch-dest') or '-'}"
         )
     return response
-SESSIONS: dict[str, int] = {}
+SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(60 * 60 * 24 * 7)))
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "auto").lower() in {"1", "true", "yes"}
+SESSIONS: dict[str, tuple[int, datetime]] = {}
+
+
+def _session_user_id(token: str | None) -> Optional[int]:
+    if not token:
+        return None
+    value = SESSIONS.get(token)
+    if not value:
+        return None
+    # Compatibilidade com sessões criadas antes desta correção.
+    if isinstance(value, int):
+        return value
+    user_id, expires_at = value
+    if expires_at <= datetime.utcnow():
+        SESSIONS.pop(token, None)
+        return None
+    return user_id
+
+
+def _create_session_response(response: Response, user_id: int) -> Response:
+    token = secrets.token_urlsafe(32)
+    SESSIONS[token] = (user_id, datetime.utcnow() + timedelta(seconds=SESSION_MAX_AGE_SECONDS))
+    response.set_cookie(
+        "session_token",
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=SESSION_COOKIE_SECURE,
+        max_age=SESSION_MAX_AGE_SECONDS,
+    )
+    return response
 BANNED_WORDS = {
     "idiota", "burro", "otario", "otário", "droga", "merda", "porra", "fdp", "puta",
     "imbecil", "lixo", "desgraça", "arrombado", "vagabundo"
@@ -911,6 +945,130 @@ def audit_event(db: Session, request: Request, action: str, user: Optional[User]
         pass
 
 
+AUDIT_FOLDERS = {
+    "geral": {"label": "Tudo", "description": "Todos os registros arquivados na central."},
+    "financeiro": {"label": "Financeiro", "description": "Entradas, saídas, taxas, saques, estornos, cashback e ajustes de saldo."},
+    "leiloes": {"label": "Leilões", "description": "Criação, início, encerramento, relançamento, vencedor e mudanças críticas."},
+    "pedidos": {"label": "Pedidos", "description": "Pagamento do vencedor, compra do produto, envio, entrega, disputa e finalização."},
+    "usuarios": {"label": "Usuários", "description": "Cadastro, dados, KYC, banimentos, moderação e conta."},
+    "admin": {"label": "Admin", "description": "Ações feitas por administradores e alterações sensíveis."},
+    "arquivo_morto": {"label": "Arquivo morto", "description": "Registros antigos e operações concluídas para consulta histórica."},
+}
+
+
+def audit_folder_for(action: str = "", entity_type: str = "", details: str = "") -> str:
+    text_value = f"{action or ''} {entity_type or ''} {details or ''}".lower()
+    if any(k in text_value for k in ["wallet", "withdrawal", "payment", "deposit", "refund", "cashback", "fee", "credit", "saldo", "saque", "pagamento", "estorno"]):
+        return "financeiro"
+    if any(k in text_value for k in ["auction", "bid", "lance", "leil", "relist", "winner"]):
+        return "leiloes"
+    if any(k in text_value for k in ["order", "pedido", "tracking", "shipping", "delivered", "purchased", "dispute", "finalized", "rastreio", "envio", "entrega"]):
+        return "pedidos"
+    if any(k in text_value for k in ["kyc", "identity", "user", "moderation", "ban", "mute", "cadastro", "usuário", "usuario"]):
+        return "usuarios"
+    if any(k in text_value for k in ["admin", "superadmin", "status_changed", "manual"]):
+        return "admin"
+    return "geral"
+
+
+def build_audit_center(db: Session, search: str = "", folder: str = "geral", date_from: str = "", date_to: str = "", limit: int = 120) -> dict:
+    folder = folder if folder in AUDIT_FOLDERS else "geral"
+    search_clean = (search or "").strip()
+    date_from_clean = (date_from or "").strip()
+    date_to_clean = (date_to or "").strip()
+
+    query = (
+        db.query(
+            AuditLog.id, AuditLog.created_at, AuditLog.action, AuditLog.entity_type, AuditLog.entity_id,
+            AuditLog.ip_address, AuditLog.details, User.full_name, User.public_name, User.email, User.cpf,
+        )
+        .outerjoin(User, User.id == AuditLog.user_id)
+    )
+
+    if date_from_clean:
+        try:
+            start_dt = datetime.strptime(date_from_clean, "%Y-%m-%d")
+            query = query.filter(AuditLog.created_at >= start_dt)
+        except Exception:
+            date_from_clean = ""
+    if date_to_clean:
+        try:
+            end_dt = datetime.strptime(date_to_clean, "%Y-%m-%d") + timedelta(days=1)
+            query = query.filter(AuditLog.created_at < end_dt)
+        except Exception:
+            date_to_clean = ""
+
+    if search_clean:
+        like = f"%{search_clean}%"
+        query = query.filter(or_(
+            AuditLog.action.ilike(like),
+            AuditLog.entity_type.ilike(like),
+            AuditLog.entity_id.ilike(like),
+            AuditLog.ip_address.ilike(like),
+            AuditLog.details.ilike(like),
+            User.full_name.ilike(like),
+            User.public_name.ilike(like),
+            User.email.ilike(like),
+            User.cpf.ilike(like),
+        ))
+
+    # Puxamos um bloco maior e aplicamos a pasta em Python, porque a categoria é uma
+    # organização administrativa derivada da ação/detalhes, não uma coluna fixa antiga.
+    raw_rows = query.order_by(desc(AuditLog.created_at)).limit(max(limit * 5, 300)).all()
+    rows = []
+    folder_counts = {key: 0 for key in AUDIT_FOLDERS}
+    folder_counts["geral"] = len(raw_rows)
+
+    for r in raw_rows:
+        row_folder = audit_folder_for(r.action, r.entity_type, r.details)
+        folder_counts[row_folder] = folder_counts.get(row_folder, 0) + 1
+        is_old_or_closed = False
+        if r.created_at:
+            is_old_or_closed = r.created_at < (datetime.utcnow() - timedelta(days=90))
+        closed_words = f"{r.action or ''} {r.details or ''}".lower()
+        if any(k in closed_words for k in ["finalized", "closed", "resolved", "delivered", "expired", "rejected", "encerrad", "finaliz", "entreg"]):
+            is_old_or_closed = True
+        if is_old_or_closed:
+            folder_counts["arquivo_morto"] = folder_counts.get("arquivo_morto", 0) + 1
+
+        if folder == "arquivo_morto" and not is_old_or_closed:
+            continue
+        if folder not in {"geral", "arquivo_morto"} and row_folder != folder:
+            continue
+        user_label = "Sistema"
+        if r.public_name:
+            user_label = f"@{r.public_name}"
+        elif r.full_name:
+            user_label = r.full_name
+        elif r.email:
+            user_label = r.email
+        rows.append(SimpleNamespace(
+            id=r.id,
+            created_at=r.created_at,
+            action=r.action or "",
+            entity_type=r.entity_type or "",
+            entity_id=r.entity_id or "",
+            ip_address=r.ip_address or "",
+            details=r.details or "",
+            folder=row_folder,
+            folder_label=AUDIT_FOLDERS.get(row_folder, AUDIT_FOLDERS["geral"])["label"],
+            user_label=user_label,
+            user=SimpleNamespace(public_name=r.public_name or "", email=r.email or "", full_name=r.full_name or "", cpf=r.cpf or "") if (r.public_name or r.email or r.full_name or r.cpf) else None,
+            archived=is_old_or_closed,
+        ))
+        if len(rows) >= limit:
+            break
+
+    return {
+        "audit_logs": rows,
+        "audit_folders": [SimpleNamespace(key=k, **v, count=folder_counts.get(k, 0), active=(k == folder)) for k, v in AUDIT_FOLDERS.items()],
+        "audit_folder": folder,
+        "audit_search": search_clean,
+        "audit_date_from": date_from_clean,
+        "audit_date_to": date_to_clean,
+        "audit_total_loaded": len(rows),
+    }
+
 def only_digits(value: str) -> str:
     return re.sub(r"\D", "", value or "")
 
@@ -1110,7 +1268,7 @@ def current_user(request: Request, db: Session) -> Optional[User]:
     token = request.cookies.get("session_token")
     if not token:
         return None
-    user_id = SESSIONS.get(token)
+    user_id = _session_user_id(token)
     if not user_id:
         return None
     return db.get(User, user_id)
@@ -1127,7 +1285,7 @@ def admin_current_user_fast(request: Request, db: Session) -> Optional[SimpleNam
     if not token:
         return None
 
-    user_id = SESSIONS.get(token)
+    user_id = _session_user_id(token)
     if not user_id:
         return None
 
@@ -2375,6 +2533,7 @@ def build_admin_order_cards(db: Session, orders: list[WinnerOrder]) -> list[dict
 
 ORDER_STATUS_LABELS = {
     "pending_payment": "Aguardando pagamento",
+    "pending_gateway": "Aguardando confirmação do gateway",
     "paid": "Pagamento aprovado",
     "processing": "Preparando compra",
     "purchased": "Produto comprado",
@@ -2388,6 +2547,7 @@ ORDER_STATUS_LABELS = {
 
 ORDER_STATUS_DESCRIPTIONS = {
     "pending_payment": "Finalize o pagamento para a equipe iniciar a compra e o envio do produto.",
+    "pending_gateway": "Pagamento iniciado por Pix/cartão. Aguardando confirmação oficial antes de liberar compra/envio.",
     "paid": "Pagamento aprovado. O produto será comprado e preparado para envio.",
     "processing": "Pedido em preparação. A equipe está organizando a compra do produto.",
     "purchased": "Produto comprado. O próximo passo é registrar o envio e informar o rastreio.",
@@ -3093,7 +3253,7 @@ async def auction_watcher():
 
             expired_orders = (
                 db.query(WinnerOrder)
-                .filter(WinnerOrder.status == "pending_payment")
+                .filter(WinnerOrder.status.in_(["pending_payment", "pending_gateway"]))
                 .filter(WinnerOrder.payment_deadline.isnot(None))
                 .filter(WinnerOrder.payment_deadline <= now)
                 .order_by(WinnerOrder.payment_deadline.asc())
@@ -3492,11 +3652,8 @@ def register_confirm_email_submit(request: Request, email: str = Form(...), code
         if not user:
             return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "Conta não encontrada.", "email_sent": 0, "email_dev": 0}, status_code=400)
         if user.email_verified:
-            token = secrets.token_urlsafe(24)
-            SESSIONS[token] = user.id
             response = RedirectResponse("/cadastro/documentos", status_code=303)
-            response.set_cookie("session_token", token, httponly=True, samesite="lax")
-            return response
+            return _create_session_response(response, user.id)
         if not clean_code or clean_code != (user.email_verification_code or ""):
             return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "Código inválido.", "email_sent": 0, "email_dev": 0}, status_code=400)
         if user.email_verification_expires_at and user.email_verification_expires_at < datetime.utcnow():
@@ -3512,11 +3669,8 @@ def register_confirm_email_submit(request: Request, email: str = Form(...), code
         user.email_verification_expires_at = None
         audit_event(db, request, "user.email_code_verified", user, "user", user.id, "E-mail confirmado por código.")
         db.commit()
-        token = secrets.token_urlsafe(24)
-        SESSIONS[token] = user.id
         response = RedirectResponse("/cadastro/documentos", status_code=303)
-        response.set_cookie("session_token", token, httponly=True, samesite="lax")
-        return response
+        return _create_session_response(response, user.id)
     finally:
         db.close()
 
@@ -3657,9 +3811,6 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
                 "login_identifier": login_identifier,
             })
 
-        token = secrets.token_urlsafe(24)
-        SESSIONS[token] = user.id
-
         if wants_json:
             response = JSONResponse({
                 "ok": True,
@@ -3674,8 +3825,7 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
         else:
             response = RedirectResponse("/minha-conta", status_code=303)
 
-        response.set_cookie("session_token", token, httponly=True, samesite="lax")
-        return response
+        return _create_session_response(response, user.id)
     finally:
         db.close()
 
@@ -4197,7 +4347,7 @@ def cached_account_dashboard_context(db: Session, user: User, ttl_seconds: int =
     pending_orders = (
         db.query(WinnerOrder)
         .options(selectinload(WinnerOrder.auction))
-        .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
+        .filter(WinnerOrder.user_id == user.id, WinnerOrder.status.in_(["pending_payment", "pending_gateway"]))
         .order_by(desc(WinnerOrder.created_at))
         .limit(3)
         .all()
@@ -4440,7 +4590,7 @@ def my_pending_payments(request: Request):
             orders = (
                 db.query(WinnerOrder)
                 .options(selectinload(WinnerOrder.auction))
-                .filter(WinnerOrder.user_id == user.id, WinnerOrder.status == "pending_payment")
+                .filter(WinnerOrder.user_id == user.id, WinnerOrder.status.in_(["pending_payment", "pending_gateway"]))
                 .order_by(desc(WinnerOrder.created_at))
                 .limit(20)
                 .all()
@@ -4680,6 +4830,12 @@ def blank_admin_context() -> dict:
         "support_tickets": [],
         "user_audit": {},
         "audit_logs": [],
+        "audit_folders": [],
+        "audit_folder": "geral",
+        "audit_search": "",
+        "audit_date_from": "",
+        "audit_date_to": "",
+        "audit_total_loaded": 0,
         "finished_auctions": [],
         "returned_items": [],
         "finance": {},
@@ -4702,7 +4858,7 @@ def admin_light_stats(db: Session, is_super_admin: bool, returned_count: int = 0
           (SELECT COUNT(*) FROM auction_items WHERE status = 'live') AS live,
           (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
           (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
-          (SELECT COUNT(*) FROM winner_orders WHERE status = 'pending_payment') AS pending_payment,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('pending_payment','pending_gateway')) AS pending_payment,
           (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
           (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
           (SELECT COUNT(*) FROM users) AS users,
@@ -4755,7 +4911,7 @@ def build_admin_dashboard_context_snapshot(db: Session, is_super_admin: bool) ->
           (SELECT COUNT(*) FROM auction_items WHERE status = 'live') AS live,
           (SELECT COUNT(*) FROM auction_items WHERE status IN ('scheduled', 'relisted')) AS scheduled,
           (SELECT COUNT(*) FROM auction_items WHERE status = 'ended') AS completed,
-          (SELECT COUNT(*) FROM winner_orders WHERE status = 'pending_payment') AS pending_payment,
+          (SELECT COUNT(*) FROM winner_orders WHERE status IN ('pending_payment','pending_gateway')) AS pending_payment,
           (SELECT COUNT(*) FROM winner_orders WHERE status IN ('paid', 'processing', 'purchased','sent','delivered','dispute','resolved')) AS pending_shipping,
           (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open', 'in_review', 'dispute')) AS open_tickets,
           (SELECT COUNT(*) FROM users) AS users,
@@ -4877,6 +5033,41 @@ def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 300) -> dict:
     return nav_cache_set("admin:cashflow-context", value, ttl_seconds)
 
 
+@app.get("/admin/audit/export")
+def admin_audit_export(request: Request):
+    db = SessionLocal()
+    try:
+        require_superadmin(request, db)
+        search = (request.query_params.get("q") or "").strip()
+        folder = (request.query_params.get("folder") or "geral").strip()
+        date_from = (request.query_params.get("from") or "").strip()
+        date_to = (request.query_params.get("to") or "").strip()
+        data = build_audit_center(db, search=search, folder=folder, date_from=date_from, date_to=date_to, limit=1000)
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=";")
+        writer.writerow(["data", "pasta", "usuario", "acao", "entidade", "id_entidade", "ip", "detalhes", "arquivo_morto"])
+        for row in data["audit_logs"]:
+            writer.writerow([
+                row.created_at.strftime("%d/%m/%Y %H:%M:%S") if row.created_at else "",
+                row.folder_label,
+                row.user_label,
+                row.action,
+                row.entity_type,
+                row.entity_id,
+                row.ip_address,
+                row.details,
+                "sim" if row.archived else "não",
+            ])
+        filename = f"auditoria_lanceiocerto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+        return Response(
+            output.getvalue(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    finally:
+        db.close()
+
+
 def cached_finished_auctions(db: Session, ttl_seconds: int = 180) -> list[dict]:
     cached = nav_cache_get("admin:finished-auctions")
     if cached is not None:
@@ -4958,6 +5149,9 @@ def admin_dashboard(request: Request):
         requested_tab = (request.query_params.get("tab") or "").strip()
         active_panel = requested_tab if requested_tab in allowed_tabs else "admin-product"
         search = (request.query_params.get("q") or "").strip()
+        audit_folder = (request.query_params.get("folder") or "geral").strip()
+        audit_date_from = (request.query_params.get("from") or "").strip()
+        audit_date_to = (request.query_params.get("to") or "").strip()
 
         ctx = blank_admin_context()
         ctx.update({
@@ -4993,7 +5187,7 @@ def admin_dashboard(request: Request):
         elif active_panel in {"admin-pending-payments", "admin-shipping", "admin-search-orders"}:
             orders_query = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction), selectinload(WinnerOrder.user))
             if active_panel == "admin-pending-payments":
-                orders_query = orders_query.filter(WinnerOrder.status == "pending_payment")
+                orders_query = orders_query.filter(WinnerOrder.status.in_(["pending_payment", "pending_gateway"]))
             elif active_panel == "admin-shipping":
                 orders_query = orders_query.filter(WinnerOrder.status.in_(["paid", "processing", "purchased", "sent", "delivered", "dispute", "resolved"]))
             elif active_panel == "admin-search-orders":
@@ -5056,28 +5250,7 @@ def admin_dashboard(request: Request):
         elif active_panel == "admin-suggestions":
             ctx["suggestion_vote_stats"] = cached_suggestion_vote_stats(db)
         elif active_panel == "admin-audit" and is_super_admin:
-            audit_rows = (
-                db.query(
-                    AuditLog.created_at, AuditLog.action, AuditLog.entity_type, AuditLog.entity_id,
-                    AuditLog.ip_address, AuditLog.details, User.public_name, User.email,
-                )
-                .outerjoin(User, User.id == AuditLog.user_id)
-                .order_by(desc(AuditLog.created_at))
-                .limit(20)
-                .all()
-            )
-            ctx["audit_logs"] = [
-                SimpleNamespace(
-                    created_at=r.created_at,
-                    action=r.action or "",
-                    entity_type=r.entity_type or "",
-                    entity_id=r.entity_id or "",
-                    ip_address=r.ip_address or "",
-                    details=r.details or "",
-                    user=SimpleNamespace(public_name=r.public_name or "", email=r.email or "") if (r.public_name or r.email) else None,
-                )
-                for r in audit_rows
-            ]
+            ctx.update(build_audit_center(db, search=search, folder=audit_folder, date_from=audit_date_from, date_to=audit_date_to, limit=120))
             ctx["recent_chat_messages"] = []
         elif active_panel == "admin-moderation":
             ctx["moderation_users"] = db.query(User).order_by(desc(User.is_banned), desc(User.chat_muted), desc(User.created_at)).limit(100).all()
@@ -5390,8 +5563,14 @@ def admin_credit_user(request: Request, user_id: int, amount: float = Form(...))
         if not user:
             raise HTTPException(status_code=404, detail="Usuário não encontrado.")
         amount = BR(amount)
-        user.wallet_balance = BR(user.wallet_balance + amount)
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Crédito manual deve ser maior que zero. Use uma rota de estorno/ajuste específica para débito.")
+        previous_balance = BR(user.wallet_balance or 0.0)
+        user.wallet_balance = BR(previous_balance + amount)
         db.add(WalletTransaction(user_id=user.id, amount=amount, kind="manual_adjustment", note="Crédito admin"))
+        admin_user = require_superadmin(request, db)
+        audit_event(db, request, "wallet.manual_credit", admin_user, "user", user.id, f"Usuário: {user.full_name} | saldo antes R$ {fmt_money(previous_balance)} | crédito R$ {fmt_money(amount)} | saldo depois R$ {fmt_money(user.wallet_balance)}")
+        nav_cache_clear()
         db.commit()
         return RedirectResponse("/admin?tab=admin-users", status_code=303)
     finally:
@@ -5515,14 +5694,17 @@ def admin_set_order_status(request: Request, order_id: int, status: str = Form(.
         order = db.get(WinnerOrder, order_id)
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
-        allowed = {"pending_payment", "paid", "processing", "purchased", "sent", "delivered", "dispute", "resolved", "finalized", "expired"}
+        allowed = {"pending_payment", "pending_gateway", "paid", "processing", "purchased", "sent", "delivered", "dispute", "resolved", "finalized", "expired"}
         if status not in allowed:
             raise HTTPException(status_code=400, detail="Status inválido.")
-        if not admin_user.is_superadmin and status in {"pending_payment", "paid", "expired"}:
+        if not admin_user.is_superadmin and status in {"pending_payment", "pending_gateway", "paid", "expired"}:
             raise HTTPException(status_code=403, detail="Apenas o super admin pode alterar status financeiro do pedido.")
         previous_status = order.status
         order.status = status
         now = datetime.utcnow()
+        if status == "paid" and previous_status != "paid":
+            order.paid_at = order.paid_at or now
+            db.add(WalletTransaction(user_id=order.user_id, amount=BR(order.final_price or 0.0), kind="payment_confirmed_external", note=f"Pagamento externo confirmado manualmente pelo admin no pedido #{order.id}"))
         if status == "purchased" and previous_status != "purchased":
             order.purchased_at = order.purchased_at or now
             register_product_outgoing_if_needed(db, order, now)
@@ -5693,7 +5875,11 @@ def admin_set_withdrawal_status(request: Request, withdrawal_id: int, status: st
         if status not in {"pending", "approved", "rejected", "paid"}:
             raise HTTPException(status_code=400, detail="Status inválido.")
         previous_status = req.status
-        if previous_status == "pending" and status == "rejected":
+        if previous_status == "paid" and status != "paid":
+            raise HTTPException(status_code=400, detail="Saque já pago não pode voltar de status sem lançamento manual de estorno.")
+        if previous_status == "rejected" and status != "rejected":
+            raise HTTPException(status_code=400, detail="Saque rejeitado já foi devolvido ao saldo. Crie uma nova solicitação se necessário.")
+        if previous_status in {"pending", "approved"} and status == "rejected":
             user = db.get(User, req.user_id)
             if user:
                 user.wallet_balance = BR(user.wallet_balance + req.amount)

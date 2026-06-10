@@ -40,7 +40,7 @@
           <span class="admin-menu-label">Ferramentas</span>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}" href="/admin?tab=admin-suggestions" data-target="admin-suggestions" data-no-prefetch="true">Indicações</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}" href="/admin?tab=admin-search-orders" data-target="admin-search-orders" data-no-prefetch="true">Consulta</a>
-          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-audit' %}active{% endif %}" href="/admin?tab=admin-audit" data-target="admin-audit" data-no-prefetch="true">Auditoria Geral</a>{% endif %}
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-audit' %}active{% endif %}" href="/admin?tab=admin-audit" data-target="admin-audit" data-no-prefetch="true">Central de Auditoria</a>{% endif %}
           <a class="side-link admin-link {% if admin_active_panel == 'admin-moderation' %}active{% endif %}" href="/admin?tab=admin-moderation" data-target="admin-moderation" data-no-prefetch="true">Moderação</a>
         </div>
       </nav>
@@ -472,7 +472,7 @@
               <thead><tr><th>Produto</th><th>Vencedor</th><th>E-mail</th><th>Telefone</th><th>Valor</th><th>Prazo</th><th>Status</th><th>Ação</th></tr></thead>
               <tbody>
                 {% for o in orders %}
-                {% if o.status == 'pending_payment' %}
+                {% if o.status in ['pending_payment', 'pending_gateway'] %}
                 <tr>
                   <td>{{ o.auction.title }}</td>
                   <td>{{ o.user.full_name }}</td>
@@ -480,7 +480,7 @@
                   <td>{{ o.user.phone or '—' }}</td>
                   <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
                   <td>{{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</td>
-                  <td>{{ o.status }}</td>
+                  <td>{{ o.status }}{% if o.status == 'pending_gateway' %}<br><small>Aguardando gateway</small>{% endif %}</td>
                   <td>
                     <a class="btn small ghost" href="/auction/{{ o.auction.id }}">Abrir</a>
                     <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
@@ -537,6 +537,8 @@
                   <td>
                     <form method="post" action="/admin/order/{{ o.id }}/set-status" class="inline-form">
                       <select name="status">
+                        <option value="pending_gateway" {% if o.status == 'pending_gateway' %}selected{% endif %}>pending_gateway / aguardando gateway</option>
+                        <option value="paid" {% if o.status == 'paid' %}selected{% endif %}>paid / pagamento aprovado</option>
                         <option value="processing" {% if o.status == 'processing' %}selected{% endif %}>processing</option>
                         <option value="purchased" {% if o.status == 'purchased' %}selected{% endif %}>purchased</option>
                         <option value="sent" {% if o.status == 'sent' %}selected{% endif %}>sent / enviado</option>
@@ -1100,14 +1102,81 @@
 {% if admin_active_panel == 'admin-audit' %}
 <section id="admin-audit" class="admin-panel {% if admin_active_panel == 'admin-audit' %}active{% endif %}">
   <div class="section-head admin-section-head-pro">
-    <div><h1>Auditoria Geral</h1><p>Registro cronológico de ações sensíveis da plataforma: cadastro, KYC, saques, pagamentos, compra/envio/entrega, finalização de operação, disputas, estornos e moderação.</p></div>
+    <div>
+      <h1>Central de Auditoria</h1>
+      <p>Arquivo central da empresa: financeiro, leilões, pedidos, usuários, ações administrativas e arquivo morto, tudo separado em pastas pesquisáveis.</p>
+    </div>
+    <a class="btn small" href="/admin/audit/export?folder={{ audit_folder or 'geral' }}&q={{ audit_search or '' }}&from={{ audit_date_from or '' }}&to={{ audit_date_to or '' }}" data-no-prefetch="true">Exportar CSV</a>
   </div>
+
+  <div class="audit-folder-grid">
+    {% for folder in audit_folders if audit_folders is defined %}
+      <a class="audit-folder-card {% if folder.active %}active{% endif %}" href="/admin?tab=admin-audit&folder={{ folder.key }}&q={{ audit_search or '' }}&from={{ audit_date_from or '' }}&to={{ audit_date_to or '' }}" data-no-prefetch="true">
+        <span>{{ folder.label }}</span>
+        <strong>{{ folder.count }}</strong>
+        <small>{{ folder.description }}</small>
+      </a>
+    {% endfor %}
+  </div>
+
+  <div class="panel-card admin-card-pro audit-filter-card">
+    <div class="card-title-row">
+      <h2>Pesquisa e filtros</h2>
+      <span class="pill-soft">{{ audit_total_loaded if audit_total_loaded is defined else 0 }} registros carregados</span>
+    </div>
+    <form method="get" action="/admin" class="audit-search-form">
+      <input type="hidden" name="tab" value="admin-audit">
+      <label>Pesquisar
+        <input name="q" value="{{ audit_search or '' }}" placeholder="Nome, e-mail, CPF, produto, pedido, ação, IP ou detalhe">
+      </label>
+      <label>Pasta
+        <select name="folder">
+          {% for folder in audit_folders if audit_folders is defined %}
+            <option value="{{ folder.key }}" {% if folder.active %}selected{% endif %}>{{ folder.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>De
+        <input type="date" name="from" value="{{ audit_date_from or '' }}">
+      </label>
+      <label>Até
+        <input type="date" name="to" value="{{ audit_date_to or '' }}">
+      </label>
+      <button class="btn" type="submit">Buscar</button>
+      <a class="btn ghost" href="/admin?tab=admin-audit" data-no-prefetch="true">Limpar</a>
+    </form>
+  </div>
+
+  <div class="notice-grid audit-archive-layout">
+    <div class="panel-card admin-card-pro audit-explain-card">
+      <div class="card-title-row"><h2>Como essa central organiza</h2><span class="pill-soft">Arquivo empresarial</span></div>
+      <div class="admin-alert-list">
+        <div><strong>Financeiro</strong><span>Entradas, saídas, saques, taxas, estornos, créditos manuais e pagamentos confirmados.</span></div>
+        <div><strong>Operação</strong><span>Leilões, pedidos, compra do produto, envio, entrega, disputa e finalização.</span></div>
+        <div><strong>Arquivo morto</strong><span>Registros antigos ou concluídos ficam consultáveis para auditoria futura.</span></div>
+      </div>
+    </div>
+
+    <div class="panel-card admin-card-pro audit-explain-card">
+      <div class="card-title-row"><h2>Regra de segurança</h2><span class="pill-soft warn">Não apagar</span></div>
+      <p class="muted">A central foi pensada para consulta e exportação. O correto é nunca apagar registros antigos; eles devem permanecer arquivados para reconstruir qualquer evento importante do site.</p>
+    </div>
+  </div>
+
   <div class="panel-card admin-card-pro">
-    <div class="card-title-row"><h2>Eventos recentes</h2><span class="pill-soft">Rastreabilidade</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Data</th><th>Usuário</th><th>Ação</th><th>Entidade</th><th>IP</th><th>Detalhes</th></tr></thead><tbody>
+    <div class="card-title-row"><h2>Registros arquivados</h2><span class="pill-soft">Rastreabilidade</span></div>
+    <div class="table-wrap audit-table-wrap"><table class="audit-table"><thead><tr><th>Data</th><th>Pasta</th><th>Usuário/Admin</th><th>Ação</th><th>Entidade</th><th>IP</th><th>Detalhes</th></tr></thead><tbody>
       {% for a in audit_logs if audit_logs is defined %}
-      <tr><td>{{ a.created_at.strftime('%d/%m/%Y %H:%M') if a.created_at else '—' }}</td><td>{{ a.user.public_name if a.user and a.user.public_name else (a.user.email if a.user else 'Sistema') }}</td><td>{{ a.action }}</td><td>{{ a.entity_type }} #{{ a.entity_id }}</td><td>{{ a.ip_address }}</td><td>{{ a.details }}</td></tr>
-      {% else %}<tr><td colspan="6">Nenhum evento de auditoria registrado ainda.</td></tr>{% endfor %}
+      <tr class="{% if a.archived %}audit-row-archived{% endif %}">
+        <td>{{ a.created_at.strftime('%d/%m/%Y %H:%M') if a.created_at else '—' }}{% if a.archived %}<br><small>arquivo morto</small>{% endif %}</td>
+        <td><span class="audit-folder-pill">{{ a.folder_label }}</span></td>
+        <td>{{ a.user_label if a.user_label is defined else (a.user.public_name if a.user and a.user.public_name else (a.user.email if a.user else 'Sistema')) }}</td>
+        <td><strong>{{ a.action }}</strong></td>
+        <td>{{ a.entity_type }}{% if a.entity_id %} #{{ a.entity_id }}{% endif %}</td>
+        <td>{{ a.ip_address }}</td>
+        <td class="audit-details-cell">{{ a.details }}</td>
+      </tr>
+      {% else %}<tr><td colspan="7">Nenhum registro encontrado com esses filtros.</td></tr>{% endfor %}
     </tbody></table></div>
   </div>
 </section>
