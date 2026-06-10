@@ -4163,21 +4163,9 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
                 "login_identifier": login_identifier,
             }, status_code=403)
 
-        if not getattr(user, "email_verified", False):
-            user.email_verification_token = make_email_verification_token()
-            user.email_verification_code = ""
-            user.email_verification_expires_at = datetime.utcnow() + timedelta(hours=24)
-            email_dev = not send_verification_email(user, request)
-            audit_event(db, request, "user.email_confirmation_required", user, "user", user.id, "Login bloqueado até confirmação de e-mail. Novo link enviado.")
-            db.commit()
-            if wants_json:
-                return JSONResponse({"ok": False, "detail": "Confirme seu e-mail antes de entrar. Enviamos um novo link de confirmação."}, status_code=403)
-            return templates.TemplateResponse("login.html", {
-                "request": request,
-                "error": "Confirme seu e-mail antes de entrar. Enviamos um novo link de confirmação.",
-                "login_identifier": login_identifier,
-                "email_dev": email_dev,
-            }, status_code=403)
+        # A confirmação de e-mail pertence apenas ao fluxo de cadastro.
+        # Depois que a conta foi criada, o login não deve ficar bloqueado nem reenviar link automaticamente.
+        # Isso evita o aviso indevido no modal de entrada e mantém o padrão decidido para a plataforma.
 
         if wants_json:
             response = JSONResponse({

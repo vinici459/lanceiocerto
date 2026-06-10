@@ -892,6 +892,58 @@
     <button type="button" class="btn full" data-close-terms>Entendi</button>
   </div>
 </div>
+
+{% elif section == 'delete_account' %}
+<div class="panel-card delete-account-card">
+  <div class="section-head compact-head">
+    <div>
+      <h1>Excluir conta</h1>
+      <p>Use esta opção somente se você realmente deseja encerrar seu acesso ao Lanceio Certo.</p>
+    </div>
+  </div>
+
+  {% if error %}
+    <div class="alert">{{ error }}</div>
+  {% endif %}
+
+  <div class="delete-warning-box">
+    <strong>Atenção antes de continuar</strong>
+    <p>Ao excluir a conta, seu acesso será encerrado e seus dados de login serão desativados. O histórico financeiro, lances, pedidos, auditoria e registros obrigatórios da operação permanecem arquivados para consulta administrativa e segurança da plataforma.</p>
+  </div>
+
+  <form method="post" action="/minha-conta/deletar" class="delete-account-form">
+    <label>Motivo da exclusão
+      <select name="delete_reason" required>
+        <option value="">Selecione um motivo</option>
+        <option value="nao_uso">Não uso mais a plataforma</option>
+        <option value="privacidade">Privacidade/dados pessoais</option>
+        <option value="dificuldade">Dificuldade para usar o site</option>
+        <option value="problema_pagamento">Problema com pagamento, saque ou saldo</option>
+        <option value="problema_leilao">Problema com leilão ou pedido</option>
+        <option value="teste">Conta criada apenas para teste</option>
+        <option value="outro">Outro motivo</option>
+      </select>
+    </label>
+
+    <label>Detalhes adicionais
+      <textarea name="delete_details" maxlength="1000" placeholder="Conte brevemente o motivo. Isso ajuda o administrador a entender o que aconteceu."></textarea>
+      <small>Essa informação será registrada na Central de Auditoria do admin.</small>
+    </label>
+
+    <label>Confirme sua senha
+      <input type="password" name="password" autocomplete="current-password" required placeholder="Digite sua senha para confirmar">
+      <small>Por segurança, a exclusão só será feita após confirmar a senha da conta.</small>
+    </label>
+
+    <label class="check-line delete-confirm-line">
+      <input type="checkbox" name="confirm_delete" value="1" required>
+      <span>Entendo que minha conta será desativada e que os registros financeiros, operacionais e de auditoria permanecerão arquivados pela plataforma.</span>
+    </label>
+
+    <button class="btn full danger-btn" type="submit" onclick="return confirm('Tem certeza que deseja excluir sua conta? Essa ação encerrará seu acesso.');">Excluir minha conta</button>
+  </form>
+</div>
+
 {% endif %}
   
     <section class="panel-card">
