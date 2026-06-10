@@ -3828,7 +3828,6 @@ async def register(
             return fail("Este apelido público já está em uso.")
 
         token = make_email_verification_token()
-        code = make_email_verification_code()
         user = User(
             full_name=full_name.strip(),
             public_name=clean_public_name,
@@ -3836,8 +3835,8 @@ async def register(
             email=clean_email,
             email_verified=False,
             email_verification_token=token,
-            email_verification_code=code,
-            email_verification_expires_at=datetime.utcnow() + timedelta(minutes=15),
+            email_verification_code="",
+            email_verification_expires_at=datetime.utcnow() + timedelta(hours=24),
             password=hash_password(password.strip()),
             cpf=clean_cpf,
             phone=clean_phone,
@@ -3862,8 +3861,8 @@ async def register(
         )
         db.add(user)
         db.flush()
-        sent = send_verification_code_email(user, request)
-        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado. Código de e-mail enviado e KYC pendente.")
+        sent = send_verification_email(user, request)
+        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado. Link de confirmação de e-mail enviado e KYC pendente.")
         db.commit()
         suffix = "&email_sent=1" if sent else "&email_dev=1"
         return RedirectResponse(f"/cadastro/confirmar-email?email={clean_email}{suffix}", status_code=303)
@@ -3873,54 +3872,51 @@ async def register(
 
 @app.get("/cadastro/confirmar-email", response_class=HTMLResponse)
 def register_confirm_email_page(request: Request, email: str = "", email_sent: int = 0, email_dev: int = 0):
-    return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": normalize_email(email), "error": None, "email_sent": email_sent, "email_dev": email_dev})
+    """Página intermediária após cadastro.
+
+    A confirmação agora é feita por link seguro enviado por e-mail.
+    Esta tela apenas orienta o usuário a abrir o e-mail e permite reenviar o link.
+    """
+    return templates.TemplateResponse(
+        "register_email_confirm.html",
+        {
+            "request": request,
+            "email": normalize_email(email),
+            "error": None,
+            "email_sent": email_sent,
+            "email_dev": email_dev,
+        },
+    )
 
 
 @app.post("/cadastro/confirmar-email")
-def register_confirm_email_submit(request: Request, email: str = Form(...), code: str = Form(...)):
-    db = SessionLocal()
-    try:
-        clean_email = normalize_email(email)
-        clean_code = only_digits(code)
-        user = db.query(User).filter(User.email == clean_email).first()
-        if not user:
-            return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "Conta não encontrada.", "email_sent": 0, "email_dev": 0}, status_code=400)
-        if user.email_verified:
-            response = RedirectResponse("/cadastro/documentos", status_code=303)
-            return _create_session_response(response, user.id)
-        if not clean_code or clean_code != (user.email_verification_code or ""):
-            return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "Código inválido.", "email_sent": 0, "email_dev": 0}, status_code=400)
-        if user.email_verification_expires_at and user.email_verification_expires_at < datetime.utcnow():
-            user.email_verification_code = make_email_verification_code()
-            user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
-            send_verification_code_email(user, request)
-            db.commit()
-            return templates.TemplateResponse("register_email_confirm.html", {"request": request, "email": clean_email, "error": "O código expirou. Enviamos um novo código para seu e-mail.", "email_sent": 1, "email_dev": 0}, status_code=400)
-        user.email_verified = True
-        user.email_verified_at = datetime.utcnow()
-        user.email_verification_code = ""
-        user.email_verification_token = ""
-        user.email_verification_expires_at = None
-        audit_event(db, request, "user.email_code_verified", user, "user", user.id, "E-mail confirmado por código.")
-        db.commit()
-        response = RedirectResponse("/cadastro/documentos", status_code=303)
-        return _create_session_response(response, user.id)
-    finally:
-        db.close()
+def register_confirm_email_submit(request: Request, email: str = Form(...)):
+    # Compatibilidade com formulários antigos: reenviar o link, não validar código.
+    return register_resend_confirmation_link(request, email)
 
 
 @app.post("/cadastro/reenviar-codigo")
 def register_resend_code(request: Request, email: str = Form(...)):
+    # Compatibilidade com o nome antigo da rota. Agora reenviamos link seguro.
+    return register_resend_confirmation_link(request, email)
+
+
+@app.post("/cadastro/reenviar-confirmacao")
+def register_resend_confirmation_link(request: Request, email: str = Form(...)):
     db = SessionLocal()
     try:
         clean_email = normalize_email(email)
         user = db.query(User).filter(User.email == clean_email).first()
+        email_dev = False
         if user and not user.email_verified:
-            user.email_verification_code = make_email_verification_code()
-            user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
-            send_verification_code_email(user, request)
+            user.email_verification_token = make_email_verification_token()
+            user.email_verification_code = ""
+            user.email_verification_expires_at = datetime.utcnow() + timedelta(hours=24)
+            email_dev = not send_verification_email(user, request)
+            audit_event(db, request, "user.email_confirmation_resent", user, "user", user.id, "Link de confirmação reenviado após cadastro.")
             db.commit()
-        return RedirectResponse(f"/cadastro/confirmar-email?email={clean_email}&email_sent=1", status_code=303)
+        suffix = "&email_dev=1" if email_dev else "&email_sent=1"
+        return RedirectResponse(f"/cadastro/confirmar-email?email={clean_email}{suffix}", status_code=303)
     finally:
         db.close()
 
@@ -3988,10 +3984,12 @@ def confirm_email(request: Request, token: str = ""):
         user.email_verified = True
         user.email_verified_at = datetime.utcnow()
         user.email_verification_token = ""
+        user.email_verification_code = ""
         user.email_verification_expires_at = None
         audit_event(db, request, "user.email_verified", user, "user", user.id, "E-mail confirmado pelo link de verificação.")
         db.commit()
-        return RedirectResponse("/login?email_verified=1", status_code=303)
+        response = RedirectResponse("/cadastro/documentos", status_code=303)
+        return _create_session_response(response, user.id)
     finally:
         db.close()
 
@@ -4140,6 +4138,22 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
                 "error": "E-mail/CPF ou senha inválidos.",
                 "login_identifier": login_identifier,
             })
+
+        if not getattr(user, "email_verified", False):
+            user.email_verification_token = make_email_verification_token()
+            user.email_verification_code = ""
+            user.email_verification_expires_at = datetime.utcnow() + timedelta(hours=24)
+            email_dev = not send_verification_email(user, request)
+            audit_event(db, request, "user.email_confirmation_required", user, "user", user.id, "Login bloqueado até confirmação de e-mail. Novo link enviado.")
+            db.commit()
+            if wants_json:
+                return JSONResponse({"ok": False, "detail": "Confirme seu e-mail antes de entrar. Enviamos um novo link de confirmação."}, status_code=403)
+            return templates.TemplateResponse("login.html", {
+                "request": request,
+                "error": "Confirme seu e-mail antes de entrar. Enviamos um novo link de confirmação.",
+                "login_identifier": login_identifier,
+                "email_dev": email_dev,
+            }, status_code=403)
 
         if wants_json:
             response = JSONResponse({
