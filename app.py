@@ -90,6 +90,8 @@ class User(Base):
     email_verification_token: Mapped[str] = mapped_column(String(120), default="")
     email_verification_code: Mapped[str] = mapped_column(String(12), default="")
     email_verification_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    password_reset_token: Mapped[str] = mapped_column(String(120), default="")
+    password_reset_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     password: Mapped[str] = mapped_column(String(120))
     cpf: Mapped[str] = mapped_column(String(20), default="")
     phone: Mapped[str] = mapped_column(String(30), default="")
@@ -467,7 +469,7 @@ def is_speculative_navigation_request(request: Request) -> bool:
         return False
 
     # Só tratamos como página HTML principal. Endpoints de formulário/API ficam fora.
-    nav_paths = {"/", "/login", "/register", "/admin", "/minha-conta"}
+    nav_paths = {"/", "/login", "/register", "/forgot-password", "/reset-password", "/admin", "/minha-conta"}
     if path not in nav_paths and not path.startswith("/minha-conta/"):
         return False
 
@@ -1251,6 +1253,52 @@ def send_verification_email(user: User, request: Optional[Request] = None) -> bo
     except Exception as exc:
         print(f"[EMAIL VERIFICATION ERROR] {user.email}: {exc} | link={link}")
         return False
+
+def send_password_reset_email(user: User, token: str, request: Optional[Request] = None) -> bool:
+    """Envia link seguro de recuperação de senha.
+
+    Mantém o mesmo padrão SMTP usado na confirmação de e-mail e evita falha
+    fatal no fluxo: se o SMTP não estiver configurado, registra o link nos logs.
+    """
+    if not token:
+        return False
+    base_url = public_base_url(request)
+    reset_link = f"{base_url}/reset-password?token={token}"
+    subject = "Redefinição de senha — Lancei o Certo"
+    body = (
+        f"Olá, {user.full_name}.\n\n"
+        "Recebemos uma solicitação para redefinir sua senha no Lancei o Certo.\n\n"
+        "Para criar uma nova senha, acesse o link abaixo:\n"
+        f"{reset_link}\n\n"
+        "Este link expira em 1 hora e só pode ser usado uma vez.\n"
+        "Se você não solicitou esta alteração, ignore este e-mail.\n\n"
+        "Equipe Lancei o Certo.\n"
+    )
+    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT") or "587")
+    smtp_user = (os.getenv("SMTP_USER") or "").strip()
+    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
+    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
+    if not smtp_host or not smtp_from:
+        print(f"[PASSWORD RESET DEV] {user.email}: {reset_link}")
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = user.email
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
+                server.starttls()
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        return True
+    except Exception as exc:
+        print(f"[PASSWORD RESET ERROR] {user.email}: {exc} | link={reset_link}")
+        return False
+
 
 def fmt_deadline(dt: Optional[datetime]) -> str:
     if not dt:
@@ -3008,6 +3056,8 @@ def ensure_columns() -> None:
                 "email_verification_token": "VARCHAR(120) DEFAULT ''",
                 "email_verification_code": "VARCHAR(12) DEFAULT ''",
                 "email_verification_expires_at": "TIMESTAMP NULL",
+                "password_reset_token": "VARCHAR(120) DEFAULT ''",
+                "password_reset_expires_at": "TIMESTAMP NULL",
                 "ban_count": "INTEGER DEFAULT 0",
                 "banned_until": "TIMESTAMP NULL",
                 "ban_reason": "TEXT DEFAULT ''",
@@ -3943,9 +3993,94 @@ def resend_email_confirmation(request: Request, login_identifier: str = Form("")
         db.close()
 
 
+@app.get("/forgot-password", response_class=HTMLResponse)
+def forgot_password_page(request: Request):
+    db = SessionLocal()
+    try:
+        return templates.TemplateResponse("forgot_password.html", {"request": request, "user": current_user(request, db)})
+    finally:
+        db.close()
+
+
+@app.post("/forgot-password", response_class=HTMLResponse)
+def forgot_password_submit(request: Request, email: str = Form(...)):
+    db = SessionLocal()
+    generic_message = "Se existir uma conta com esse e-mail, enviamos um link de recuperação."
+    try:
+        email_clean = normalize_email(email)
+        user = db.query(User).filter(func.lower(User.email) == email_clean).first() if email_clean else None
+        email_dev = False
+        if user:
+            token = secrets.token_urlsafe(40)
+            user.password_reset_token = token
+            user.password_reset_expires_at = datetime.utcnow() + timedelta(hours=1)
+            db.commit()
+            email_dev = not send_password_reset_email(user, token, request)
+            audit_event(db, request, "user.password_reset_requested", user, "user", user.id, "Link de recuperação de senha solicitado.")
+            db.commit()
+        return templates.TemplateResponse(
+            "forgot_password.html",
+            {"request": request, "user": current_user(request, db), "success": generic_message, "email_dev": email_dev},
+        )
+    finally:
+        db.close()
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+def reset_password_page(request: Request, token: str = ""):
+    db = SessionLocal()
+    try:
+        token_clean = (token or "").strip()
+        user = db.query(User).filter(User.password_reset_token == token_clean).first() if token_clean else None
+        if not user or not user.password_reset_expires_at or user.password_reset_expires_at < datetime.utcnow():
+            return templates.TemplateResponse(
+                "reset_password.html",
+                {"request": request, "user": current_user(request, db), "error": "Link inválido ou expirado. Solicite um novo link de recuperação."},
+            )
+        return templates.TemplateResponse("reset_password.html", {"request": request, "user": current_user(request, db), "token": token_clean})
+    finally:
+        db.close()
+
+
+@app.post("/reset-password", response_class=HTMLResponse)
+def reset_password_submit(
+    request: Request,
+    token: str = Form(...),
+    password: str = Form(...),
+    password_confirm: str = Form(...),
+):
+    db = SessionLocal()
+    try:
+        token_clean = (token or "").strip()
+        user = db.query(User).filter(User.password_reset_token == token_clean).first() if token_clean else None
+        if not user or not user.password_reset_expires_at or user.password_reset_expires_at < datetime.utcnow():
+            return templates.TemplateResponse(
+                "reset_password.html",
+                {"request": request, "user": current_user(request, db), "error": "Link inválido ou expirado. Solicite um novo link de recuperação."},
+            )
+        if password != password_confirm:
+            return templates.TemplateResponse(
+                "reset_password.html",
+                {"request": request, "user": current_user(request, db), "token": token_clean, "error": "As senhas não coincidem."},
+            )
+        if len(password or "") < 8:
+            return templates.TemplateResponse(
+                "reset_password.html",
+                {"request": request, "user": current_user(request, db), "token": token_clean, "error": "A senha deve ter pelo menos 8 caracteres."},
+            )
+        user.password = hash_password(password)
+        user.password_reset_token = ""
+        user.password_reset_expires_at = None
+        audit_event(db, request, "user.password_reset_completed", user, "user", user.id, "Senha redefinida por link seguro.")
+        db.commit()
+        return RedirectResponse("/login?password_reset=1", status_code=303)
+    finally:
+        db.close()
+
+
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, created: int = 0, email_pending: int = 0, email_verified: int = 0, email_sent: int = 0, email_dev: int = 0):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None, "created": created, "email_pending": email_pending, "email_verified": email_verified, "email_sent": email_sent, "email_dev": email_dev})
+def login_page(request: Request, created: int = 0, email_pending: int = 0, email_verified: int = 0, email_sent: int = 0, email_dev: int = 0, password_reset: int = 0):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None, "created": created, "email_pending": email_pending, "email_verified": email_verified, "email_sent": email_sent, "email_dev": email_dev, "password_reset": password_reset})
 
 
 @app.post("/login")
