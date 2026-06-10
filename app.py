@@ -111,6 +111,11 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_superadmin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    account_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    account_deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    account_delete_reason: Mapped[str] = mapped_column(Text, default="")
+    account_delete_details: Mapped[str] = mapped_column(Text, default="")
+    account_delete_ip: Mapped[str] = mapped_column(String(80), default="")
     chat_muted: Mapped[bool] = mapped_column(Boolean, default=False)
     ban_count: Mapped[int] = mapped_column(Integer, default=0)
     banned_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -1351,7 +1356,10 @@ def current_user(request: Request, db: Session) -> Optional[User]:
     user_id = _session_user_id(token)
     if not user_id:
         return None
-    return db.get(User, user_id)
+    user = db.get(User, user_id)
+    if user and getattr(user, "account_deleted", False):
+        return None
+    return user
 
 
 def admin_current_user_fast(request: Request, db: Session) -> Optional[SimpleNamespace]:
@@ -1393,13 +1401,14 @@ def admin_current_user_fast(request: Request, db: Session) -> Optional[SimpleNam
             User.is_admin,
             User.is_superadmin,
             User.is_banned,
+            User.account_deleted,
             User.identity_status,
             User.wallet_balance,
         )
         .filter(User.id == user_id)
         .first()
     )
-    if not row:
+    if not row or bool(getattr(row, "account_deleted", False)):
         return None
 
     data = {
@@ -1413,6 +1422,7 @@ def admin_current_user_fast(request: Request, db: Session) -> Optional[SimpleNam
         "is_admin": bool(row.is_admin),
         "is_superadmin": bool(row.is_superadmin),
         "is_banned": bool(row.is_banned),
+        "account_deleted": bool(getattr(row, "account_deleted", False)),
         "identity_status": row.identity_status or "pending",
         "wallet_balance": float(row.wallet_balance or 0.0),
     }
@@ -3080,6 +3090,11 @@ def ensure_columns() -> None:
                 "email_verification_expires_at": "TIMESTAMP NULL",
                 "password_reset_token": "VARCHAR(120) DEFAULT ''",
                 "password_reset_expires_at": "TIMESTAMP NULL",
+                "account_deleted": "BOOLEAN DEFAULT FALSE",
+                "account_deleted_at": "TIMESTAMP NULL",
+                "account_delete_reason": "TEXT DEFAULT ''",
+                "account_delete_details": "TEXT DEFAULT ''",
+                "account_delete_ip": "VARCHAR(80) DEFAULT ''",
                 "ban_count": "INTEGER DEFAULT 0",
                 "banned_until": "TIMESTAMP NULL",
                 "ban_reason": "TEXT DEFAULT ''",
@@ -4139,6 +4154,15 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
                 "login_identifier": login_identifier,
             })
 
+        if getattr(user, "account_deleted", False):
+            if wants_json:
+                return JSONResponse({"ok": False, "detail": "Esta conta foi excluída e não pode mais acessar a plataforma."}, status_code=403)
+            return templates.TemplateResponse("login.html", {
+                "request": request,
+                "error": "Esta conta foi excluída e não pode mais acessar a plataforma.",
+                "login_identifier": login_identifier,
+            }, status_code=403)
+
         if not getattr(user, "email_verified", False):
             user.email_verification_token = make_email_verification_token()
             user.email_verification_code = ""
@@ -4781,6 +4805,147 @@ def my_profile(request: Request):
     try:
         user = require_user(request, db)
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "profile"})
+    finally:
+        db.close()
+
+
+@app.get("/minha-conta/deletar", response_class=HTMLResponse)
+def account_delete_page(request: Request):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "delete_account", "error": None})
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/deletar")
+def account_delete_submit(
+    request: Request,
+    delete_reason: str = Form(...),
+    delete_details: str = Form(""),
+    password: str = Form(...),
+    confirm_delete: str = Form(""),
+):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+
+        if getattr(user, "is_admin", False) or getattr(user, "is_superadmin", False):
+            return templates.TemplateResponse("account_pages.html", {
+                "request": request,
+                "user": user,
+                "section": "delete_account",
+                "error": "Contas administrativas não podem ser excluídas por esta tela. Use uma conta comum para testes.",
+            }, status_code=400)
+
+        if not verify_password((password or "").strip(), user.password):
+            return templates.TemplateResponse("account_pages.html", {
+                "request": request,
+                "user": user,
+                "section": "delete_account",
+                "error": "Senha incorreta. A conta não foi excluída.",
+            }, status_code=400)
+
+        if confirm_delete != "1":
+            return templates.TemplateResponse("account_pages.html", {
+                "request": request,
+                "user": user,
+                "section": "delete_account",
+                "error": "Confirme que entende que a exclusão não libera o histórico financeiro e operacional já registrado.",
+            }, status_code=400)
+
+        reason_labels = {
+            "nao_uso": "Não uso mais a plataforma",
+            "privacidade": "Privacidade/dados pessoais",
+            "dificuldade": "Dificuldade para usar o site",
+            "problema_pagamento": "Problema com pagamento, saque ou saldo",
+            "problema_leilao": "Problema com leilão ou pedido",
+            "teste": "Conta criada apenas para teste",
+            "outro": "Outro motivo",
+        }
+        reason_key = (delete_reason or "").strip()
+        reason_label = reason_labels.get(reason_key, "Outro motivo")
+        details = (delete_details or "").strip()[:1000]
+        now = datetime.utcnow()
+
+        original = {
+            "id": user.id,
+            "full_name": user.full_name or "",
+            "public_name": user.public_name or user.nickname or "",
+            "email": user.email or "",
+            "cpf": user.cpf or "",
+            "phone": user.phone or "",
+            "wallet_balance": BR(user.wallet_balance or 0.0),
+            "identity_status": user.identity_status or "",
+        }
+
+        audit_event(
+            db,
+            request,
+            "user.account_deleted",
+            user,
+            "user",
+            user.id,
+            (
+                f"Conta excluída pelo próprio usuário. "
+                f"Nome: {original['full_name']} | E-mail: {original['email']} | CPF: {original['cpf']} | "
+                f"Saldo no momento: R$ {fmt_money(original['wallet_balance'])} | "
+                f"Motivo: {reason_label} | Detalhes: {details or 'sem detalhes'}"
+            ),
+        )
+
+        deletion_stamp = f"{user.id}-{int(now.timestamp())}-{secrets.token_hex(4)}"
+        user.account_deleted = True
+        user.account_deleted_at = now
+        user.account_delete_reason = reason_label[:500]
+        user.account_delete_details = details
+        user.account_delete_ip = client_ip(request)
+        user.is_banned = True
+        user.chat_muted = True
+        user.ban_reason = "Conta excluída pelo próprio usuário."
+        user.banned_until = None
+        user.email_verified = False
+        user.email_verification_token = ""
+        user.email_verification_code = ""
+        user.email_verification_expires_at = None
+        user.password_reset_token = ""
+        user.password_reset_expires_at = None
+        user.password = hash_password(secrets.token_urlsafe(32))
+
+        # Anonimização: libera e-mail/CPF/apelido para novo cadastro e mantém o histórico financeiro/auditoria por ID.
+        user.full_name = "Conta excluída"
+        user.public_name = f"excluido{user.id}"[:24]
+        user.nickname = user.public_name
+        user.email = f"deleted-{deletion_stamp}@deleted.lanceiocerto.local"[:160]
+        user.cpf = f"deleted-{user.id}"[:20]
+        user.phone = ""
+        user.gender = ""
+        user.birth_date = ""
+        user.cep = ""
+        user.street = ""
+        user.number = ""
+        user.complement = ""
+        user.district = ""
+        user.city = ""
+        user.state = ""
+        user.identity_status = "deleted"
+        user.identity_note = "Conta excluída pelo próprio usuário."
+        user.document_number = ""
+        user.document_file_url = ""
+        user.document_back_file_url = ""
+        user.selfie_file_url = ""
+        user.residence_proof_file_url = ""
+
+        nav_cache_clear()
+        db.commit()
+
+        token = request.cookies.get("session_token")
+        if token and token in SESSIONS:
+            del SESSIONS[token]
+        response = RedirectResponse("/?account_deleted=1", status_code=303)
+        response.delete_cookie("session_token")
+        return response
     finally:
         db.close()
 
