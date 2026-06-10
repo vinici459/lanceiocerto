@@ -410,3 +410,55 @@ body.page-loading a,body.page-loading button{cursor:progress;}
   .winner-order-summary{grid-template-columns:1fr}
   .fulfillment-choice-grid{grid-template-columns:1fr}
 }
+
+/* Ajuste definitivo: imagem pequena nos Pedidos dos Vencedores
+   A lista principal deve parecer central de pedidos, não tela de detalhe. */
+.winner-order-summary{
+  grid-template-columns:minmax(300px,1.45fr) minmax(180px,.85fr) minmax(110px,.45fr) minmax(145px,.55fr) auto !important;
+}
+.winner-order-product{
+  display:flex !important;
+  align-items:center !important;
+  gap:12px !important;
+  min-width:0 !important;
+}
+.winner-order-product > img,
+.winner-order-summary .winner-order-product img,
+.winner-order-card > summary img{
+  width:80px !important;
+  height:80px !important;
+  min-width:80px !important;
+  max-width:80px !important;
+  min-height:80px !important;
+  max-height:80px !important;
+  object-fit:cover !important;
+  display:block !important;
+  flex:0 0 80px !important;
+  border-radius:10px !important;
+  border:1px solid rgba(255,255,255,.10) !important;
+  background:rgba(255,255,255,.05) !important;
+}
+.winner-order-product h3{
+  margin:3px 0 2px !important;
+  font-size:17px !important;
+  line-height:1.2 !important;
+}
+.winner-order-summary .btn.small{
+  white-space:nowrap !important;
+}
+@media(max-width:900px){
+  .winner-order-summary{
+    grid-template-columns:1fr !important;
+  }
+  .winner-order-product > img,
+  .winner-order-summary .winner-order-product img,
+  .winner-order-card > summary img{
+    width:70px !important;
+    height:70px !important;
+    min-width:70px !important;
+    max-width:70px !important;
+    min-height:70px !important;
+    max-height:70px !important;
+    flex-basis:70px !important;
+  }
+}
