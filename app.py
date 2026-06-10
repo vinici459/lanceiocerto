@@ -4073,14 +4073,25 @@ def reset_password_submit(
         user.password_reset_expires_at = None
         audit_event(db, request, "user.password_reset_completed", user, "user", user.id, "Senha redefinida por link seguro.")
         db.commit()
-        return RedirectResponse("/login?password_reset=1", status_code=303)
+        return RedirectResponse("/?login=1&password_reset=1", status_code=303)
     finally:
         db.close()
 
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, created: int = 0, email_pending: int = 0, email_verified: int = 0, email_sent: int = 0, email_dev: int = 0, password_reset: int = 0):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None, "created": created, "email_pending": email_pending, "email_verified": email_verified, "email_sent": email_sent, "email_dev": email_dev, "password_reset": password_reset})
+    # O padrão visual do site é sempre abrir o login em modal sobre a tela atual.
+    # Mantemos a rota /login apenas como compatibilidade para links antigos,
+    # redirecionando para a home com o modal aberto automaticamente.
+    params = []
+    if email_verified:
+        params.append("email_verified=1")
+    if email_dev:
+        params.append("email_dev=1")
+    if password_reset:
+        params.append("password_reset=1")
+    params.insert(0, "login=1")
+    return RedirectResponse("/?" + "&".join(params), status_code=303)
 
 
 @app.post("/login")
