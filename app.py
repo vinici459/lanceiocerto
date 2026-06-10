@@ -14,7 +14,11 @@ import hmac
 import smtplib
 import csv
 import io
+import json
+import urllib.request
+import urllib.error
 from email.message import EmailMessage
+from email.utils import parseaddr
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -1163,12 +1167,57 @@ def _smtp_settings() -> tuple[str, int, str, str, str, str]:
 
 
 def send_smtp_email(to_email: str, subject: str, body: str, log_prefix: str = "EMAIL") -> bool:
-    """Envia e-mail com suporte a STARTTLS e SMTP_SSL.
+    """Envia e-mail transacional.
 
-    Isso deixa o Railway compatível tanto com SMTP_PORT=587/SMTP_TLS=1 quanto
-    com SMTP_PORT=465/SMTP_TLS=ssl.
+    Prioridade profissional:
+    1) Se BREVO_API_KEY estiver configurada, usa a API HTTPS da Brevo.
+       Isso evita bloqueios/timeouts de SMTP em ambientes cloud como Railway.
+    2) Se não houver BREVO_API_KEY, usa SMTP com STARTTLS ou SSL como fallback.
     """
     smtp_host, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls = _smtp_settings()
+    brevo_api_key = (os.getenv("BREVO_API_KEY") or "").strip()
+
+    sender_name, sender_email = parseaddr(smtp_from)
+    sender_name = (os.getenv("BREVO_SENDER_NAME") or sender_name or APP_NAME).strip()
+    sender_email = (os.getenv("BREVO_SENDER_EMAIL") or sender_email or smtp_from or smtp_user).strip()
+
+    if brevo_api_key:
+        if not sender_email:
+            print(f"[{log_prefix} DEV] {to_email}: remetente não configurado para Brevo API")
+            return False
+        payload = {
+            "sender": {"name": sender_name, "email": sender_email},
+            "to": [{"email": to_email}],
+            "subject": subject,
+            "textContent": body,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=data,
+            headers={
+                "accept": "application/json",
+                "api-key": brevo_api_key,
+                "content-type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                status = getattr(resp, "status", 0)
+                if 200 <= status < 300:
+                    print(f"[{log_prefix} SENT] {to_email}: Brevo API status={status}")
+                    return True
+                response_body = resp.read().decode("utf-8", errors="replace")
+                print(f"[{log_prefix} ERROR] {to_email}: Brevo API status={status} body={response_body[:500]}")
+                return False
+        except urllib.error.HTTPError as exc:
+            response_body = exc.read().decode("utf-8", errors="replace")
+            print(f"[{log_prefix} ERROR] {to_email}: Brevo API HTTP {exc.code} body={response_body[:800]}")
+            return False
+        except Exception as exc:
+            print(f"[{log_prefix} ERROR] {to_email}: Brevo API {exc}")
+            return False
 
     if not smtp_host or not smtp_from:
         print(f"[{log_prefix} DEV] {to_email}: SMTP não configurado")
@@ -1183,17 +1232,18 @@ def send_smtp_email(to_email: str, subject: str, body: str, log_prefix: str = "E
     try:
         use_ssl = smtp_tls == "ssl" or smtp_port == 465
         if use_ssl:
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=25) as server:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=20) as server:
                 if smtp_user and smtp_password:
                     server.login(smtp_user, smtp_password)
                 server.send_message(msg)
         else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=25) as server:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
                 if smtp_tls not in {"0", "false", "no", "off", "none"}:
                     server.starttls()
                 if smtp_user and smtp_password:
                     server.login(smtp_user, smtp_password)
                 server.send_message(msg)
+        print(f"[{log_prefix} SENT] {to_email}: SMTP {smtp_host}:{smtp_port}")
         return True
     except Exception as exc:
         print(f"[{log_prefix} ERROR] {to_email}: {exc}")
