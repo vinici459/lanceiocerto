@@ -432,7 +432,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260610-winner-thumb-80-v3")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260608-nav-cache-v2")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -5635,13 +5635,6 @@ def admin_update_order_control(
     purchase_status: str = Form(""),
     tracking_code: str = Form(""),
     admin_note: str = Form(""),
-    mark_purchased: int = Form(0),
-    mark_sent: int = Form(0),
-    mark_delivered: int = Form(0),
-    mark_finalized: int = Form(0),
-    approve_customer_link: int = Form(0),
-    reject_customer_link: int = Form(0),
-    mark_customer_payment_done: int = Form(0),
 ):
     db = SessionLocal()
     try:
@@ -5649,60 +5642,97 @@ def admin_update_order_control(
         order = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.id == order_id).first()
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+
         order.purchase_link = purchase_link.strip()
-        order.purchase_status = purchase_status.strip()
         order.tracking_code = tracking_code.strip()
         order.admin_note = admin_note.strip()
         now = datetime.utcnow()
 
-        if int(approve_customer_link or 0):
-            if not getattr(order, "submitted_link_valid", False):
-                raise HTTPException(status_code=400, detail="O link do cliente ainda não passou na validação automática.")
-            order.status = "aprovado_para_pagamento"
-            order.approved_by_admin = admin_user.id
-            order.approved_at = now
-            audit_event(db, request, "order.customer_link_approved", admin_user, "order", order.id, f"Link aprovado para pagamento: {order.submitted_purchase_link}")
+        requested_status = (purchase_status or "").strip()
+        legacy_status_map = {
+            "pedido_pago": "pagamento_pedido_realizado",
+            "compra_realizada": "purchased",
+            "produto_enviado": "sent",
+            "produto_entregue": "delivered",
+        }
+        requested_status = legacy_status_map.get(requested_status, requested_status)
 
-        if int(reject_customer_link or 0):
-            order.status = "link_rejeitado"
-            order.submitted_link_valid = False
-            order.submitted_link_validation_note = (order.submitted_link_validation_note or "Link recusado pelo administrador após conferência.").strip()
-            audit_event(db, request, "order.customer_link_admin_rejected", admin_user, "order", order.id, f"Link recusado: {order.submitted_purchase_link}")
+        allowed_statuses = {
+            "aguardando_escolha",
+            "aguardando_link",
+            "link_recebido",
+            "link_rejeitado",
+            "aguardando_aprovacao",
+            "aprovado_para_pagamento",
+            "pagamento_pedido_realizado",
+            "purchased",
+            "sent",
+            "delivered",
+            "finalized",
+        }
+        if requested_status and requested_status not in allowed_statuses:
+            raise HTTPException(status_code=400, detail="Status do pedido inválido.")
 
-        if int(mark_customer_payment_done or 0):
-            if order.fulfillment_mode != "customer_purchase":
-                raise HTTPException(status_code=400, detail="Este pedido não está no fluxo de compra feita pelo vencedor.")
-            if order.status not in {"aprovado_para_pagamento", "pagamento_pedido_realizado"}:
-                raise HTTPException(status_code=400, detail="Aprove o link antes de marcar o pagamento do pedido.")
-            order.status = "pagamento_pedido_realizado"
-            order.purchased_at = now
-            register_product_outgoing_if_needed(db, order, now)
-            audit_event(db, request, "order.customer_purchase_paid", admin_user, "order", order.id, f"Pagamento do pedido do cliente registrado. Link: {order.submitted_purchase_link}")
+        previous_status = order.status
 
-        if int(mark_purchased or 0):
-            order.status = "purchased"
-            order.purchased_at = now
-            register_product_outgoing_if_needed(db, order, now)
-            audit_event(db, request, "order.purchased", admin_user, "order", order.id, f"Produto comprado. Pedido #{order.id}")
-        if int(mark_sent or 0):
-            order.status = "sent"
-            order.sent_at = now
-            register_product_outgoing_if_needed(db, order, now)
-            audit_event(db, request, "order.sent", admin_user, "order", order.id, f"Produto enviado. Rastreio: {order.tracking_code or 'sem código'}")
-        if int(mark_delivered or 0):
-            order.status = "delivered"
-            order.delivered_at = now
-            register_product_outgoing_if_needed(db, order, now)
-            audit_event(db, request, "order.delivered", admin_user, "order", order.id, f"Produto entregue. Pedido #{order.id}")
-        if int(mark_finalized or 0):
-            if order.status not in {"delivered", "resolved", "pagamento_pedido_realizado"}:
-                raise HTTPException(status_code=400, detail="A operação só pode ser finalizada depois da entrega, resolução da disputa ou pagamento do pedido do cliente.")
-            order.status = "finalized"
-            order.admin_note = ((order.admin_note or "") + "\nOperação finalizada administrativamente.").strip()
-            item = db.get(AuctionItem, order.auction_id)
-            if item:
-                item.status = "ended"
-            audit_event(db, request, "order.finalized", admin_user, "order", order.id, f"Operação finalizada. Pedido #{order.id}")
+        if requested_status:
+            if requested_status == "aprovado_para_pagamento":
+                if order.fulfillment_mode == "customer_purchase" or order.submitted_purchase_link:
+                    if not getattr(order, "submitted_link_valid", False):
+                        raise HTTPException(status_code=400, detail="O link do cliente ainda não passou na validação automática.")
+                    order.approved_by_admin = admin_user.id
+                    order.approved_at = order.approved_at or now
+                order.status = "aprovado_para_pagamento"
+                audit_event(db, request, "order.customer_link_approved", admin_user, "order", order.id, f"Status alterado para aprovado para pagamento. Link: {order.submitted_purchase_link or 'sem link'}")
+
+            elif requested_status == "link_rejeitado":
+                order.status = "link_rejeitado"
+                order.submitted_link_valid = False
+                order.submitted_link_validation_note = (order.submitted_link_validation_note or "Link recusado pelo administrador após conferência.").strip()
+                audit_event(db, request, "order.customer_link_admin_rejected", admin_user, "order", order.id, f"Link recusado pelo admin: {order.submitted_purchase_link or 'sem link'}")
+
+            elif requested_status == "pagamento_pedido_realizado":
+                if order.fulfillment_mode == "customer_purchase" and order.status not in {"aprovado_para_pagamento", "pagamento_pedido_realizado"}:
+                    raise HTTPException(status_code=400, detail="Aprove o link antes de marcar o pagamento do pedido.")
+                order.status = "pagamento_pedido_realizado"
+                order.purchased_at = order.purchased_at or now
+                register_product_outgoing_if_needed(db, order, now)
+                audit_event(db, request, "order.customer_purchase_paid", admin_user, "order", order.id, f"Pagamento do pedido registrado pelo status. Link: {order.submitted_purchase_link or order.purchase_link or 'sem link'}")
+
+            elif requested_status == "purchased":
+                order.status = "purchased"
+                order.purchased_at = order.purchased_at or now
+                register_product_outgoing_if_needed(db, order, now)
+                audit_event(db, request, "order.purchased", admin_user, "order", order.id, f"Compra realizada. Pedido #{order.id}")
+
+            elif requested_status == "sent":
+                order.status = "sent"
+                order.sent_at = order.sent_at or now
+                register_product_outgoing_if_needed(db, order, now)
+                audit_event(db, request, "order.sent", admin_user, "order", order.id, f"Produto enviado. Rastreio: {order.tracking_code or 'sem código'}")
+
+            elif requested_status == "delivered":
+                order.status = "delivered"
+                order.delivered_at = order.delivered_at or now
+                register_product_outgoing_if_needed(db, order, now)
+                audit_event(db, request, "order.delivered", admin_user, "order", order.id, f"Produto entregue. Pedido #{order.id}")
+
+            elif requested_status == "finalized":
+                if order.status not in {"delivered", "resolved", "pagamento_pedido_realizado", "finalized"}:
+                    raise HTTPException(status_code=400, detail="A operação só pode ser finalizada depois da entrega, resolução da disputa ou pagamento do pedido do cliente.")
+                order.status = "finalized"
+                order.admin_note = ((order.admin_note or "") + "\nOperação finalizada administrativamente.").strip()
+                item = db.get(AuctionItem, order.auction_id)
+                if item:
+                    item.status = "ended"
+                audit_event(db, request, "order.finalized", admin_user, "order", order.id, f"Operação finalizada. Pedido #{order.id}")
+
+            else:
+                order.status = requested_status
+                audit_event(db, request, "order.status_updated", admin_user, "order", order.id, f"Status alterado de {previous_status or '—'} para {requested_status}.")
+
+            order.purchase_status = requested_status
+
         nav_cache_clear()
         db.commit()
         return RedirectResponse("/admin?tab=admin-shipping", status_code=303)

@@ -588,16 +588,20 @@
                     <label>Link de compra/admin
                       <input name="purchase_link" value="{{ o.purchase_link or o.auction.source_url or '' }}" placeholder="https://...">
                     </label>
-                    <label>Status interno
+                    <label>Status do pedido
+                      {% set current_order_flow_status = o.status if o.status else (o.purchase_status or '') %}
                       <select name="purchase_status">
-                        <option value="" {% if not o.purchase_status %}selected{% endif %}>Não iniciado</option>
-                        <option value="aguardando_escolha" {% if o.purchase_status == 'aguardando_escolha' %}selected{% endif %}>Aguardando escolha</option>
-                        <option value="aguardando_link" {% if o.purchase_status == 'aguardando_link' %}selected{% endif %}>Aguardando link</option>
-                        <option value="aguardando_aprovacao" {% if o.purchase_status == 'aguardando_aprovacao' %}selected{% endif %}>Aguardando aprovação</option>
-                        <option value="pedido_pago" {% if o.purchase_status == 'pedido_pago' %}selected{% endif %}>Pedido pago</option>
-                        <option value="compra_realizada" {% if o.purchase_status == 'compra_realizada' %}selected{% endif %}>Compra realizada</option>
-                        <option value="produto_enviado" {% if o.purchase_status == 'produto_enviado' %}selected{% endif %}>Produto enviado</option>
-                        <option value="produto_entregue" {% if o.purchase_status == 'produto_entregue' %}selected{% endif %}>Produto entregue</option>
+                        <option value="aguardando_escolha" {% if current_order_flow_status in ['', 'paid', 'aguardando_escolha'] %}selected{% endif %}>Aguardando escolha</option>
+                        <option value="aguardando_link" {% if current_order_flow_status == 'aguardando_link' %}selected{% endif %}>Aguardando link</option>
+                        <option value="link_recebido" {% if current_order_flow_status == 'link_recebido' %}selected{% endif %}>Link recebido</option>
+                        <option value="link_rejeitado" {% if current_order_flow_status == 'link_rejeitado' %}selected{% endif %}>Link recusado</option>
+                        <option value="aguardando_aprovacao" {% if current_order_flow_status == 'aguardando_aprovacao' %}selected{% endif %}>Aguardando aprovação</option>
+                        <option value="aprovado_para_pagamento" {% if current_order_flow_status == 'aprovado_para_pagamento' %}selected{% endif %}>Aprovado para pagamento</option>
+                        <option value="pagamento_pedido_realizado" {% if current_order_flow_status == 'pagamento_pedido_realizado' %}selected{% endif %}>Pedido pago</option>
+                        <option value="purchased" {% if current_order_flow_status in ['purchased', 'compra_realizada'] %}selected{% endif %}>Compra realizada</option>
+                        <option value="sent" {% if current_order_flow_status in ['sent', 'produto_enviado'] %}selected{% endif %}>Produto enviado</option>
+                        <option value="delivered" {% if current_order_flow_status in ['delivered', 'produto_entregue'] %}selected{% endif %}>Produto entregue</option>
+                        <option value="finalized" {% if current_order_flow_status == 'finalized' %}selected{% endif %}>Finalizado</option>
                       </select>
                     </label>
                     <label>Código de rastreio
@@ -608,17 +612,6 @@
                     <textarea name="admin_note">{{ o.admin_note or '' }}</textarea>
                   </label>
 
-                  <div class="admin-checkbox-row">
-                    {% if o.fulfillment_mode == 'customer_purchase' or o.submitted_purchase_link %}
-                      <label><input type="checkbox" name="approve_customer_link" value="1"> Aprovar link validado</label>
-                      <label><input type="checkbox" name="reject_customer_link" value="1"> Recusar link</label>
-                      <label><input type="checkbox" name="mark_customer_payment_done" value="1"> Marcar pagamento do pedido</label>
-                    {% endif %}
-                    <label><input type="checkbox" name="mark_purchased" value="1"> Marcar compra realizada</label>
-                    <label><input type="checkbox" name="mark_sent" value="1"> Marcar produto enviado</label>
-                    <label><input type="checkbox" name="mark_delivered" value="1"> Marcar produto entregue</label>
-                    <label><input type="checkbox" name="mark_finalized" value="1"> Finalizar operação</label>
-                  </div>
                   <button class="btn" type="submit">Salvar controle</button>
                 </form>
               </div>
@@ -1111,12 +1104,7 @@
                       <label>Observação interna
                         <textarea name="admin_note">{{ o.admin_note or '' }}</textarea>
                       </label>
-                      <div class="admin-checkbox-row">
-                        <label><input type="checkbox" name="mark_purchased" value="1"> Marcar comprado</label>
-                        <label><input type="checkbox" name="mark_sent" value="1"> Marcar enviado</label>
-                        <label><input type="checkbox" name="mark_delivered" value="1"> Marcar entregue</label>
-                        <label><input type="checkbox" name="mark_finalized" value="1"> Finalizar operação</label>
-                      </div>
+                      
                       <button class="btn" type="submit">Salvar controle</button>
                       {% if o.status in ['delivered', 'resolved'] %}
                       <form method="post" action="/admin/order/{{ o.id }}/finalize-operation" class="inline-form">
