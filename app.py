@@ -1145,6 +1145,61 @@ def public_base_url(request: Optional[Request] = None) -> str:
     return ""
 
 
+def _smtp_settings() -> tuple[str, int, str, str, str, str]:
+    """Lê as configurações SMTP do ambiente.
+
+    SMTP_TLS aceita:
+    - "1", "true", "yes", "starttls" para STARTTLS, normalmente porta 587.
+    - "ssl" ou porta 465 para SMTP_SSL.
+    - "0", "false", "no", "off" para envio sem TLS.
+    """
+    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT") or "587")
+    smtp_user = (os.getenv("SMTP_USER") or "").strip()
+    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
+    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
+    smtp_tls = (os.getenv("SMTP_TLS") or "1").strip().lower()
+    return smtp_host, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls
+
+
+def send_smtp_email(to_email: str, subject: str, body: str, log_prefix: str = "EMAIL") -> bool:
+    """Envia e-mail com suporte a STARTTLS e SMTP_SSL.
+
+    Isso deixa o Railway compatível tanto com SMTP_PORT=587/SMTP_TLS=1 quanto
+    com SMTP_PORT=465/SMTP_TLS=ssl.
+    """
+    smtp_host, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls = _smtp_settings()
+
+    if not smtp_host or not smtp_from:
+        print(f"[{log_prefix} DEV] {to_email}: SMTP não configurado")
+        return False
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = smtp_from
+    msg["To"] = to_email
+    msg.set_content(body)
+
+    try:
+        use_ssl = smtp_tls == "ssl" or smtp_port == 465
+        if use_ssl:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=25) as server:
+                if smtp_user and smtp_password:
+                    server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=25) as server:
+                if smtp_tls not in {"0", "false", "no", "off", "none"}:
+                    server.starttls()
+                if smtp_user and smtp_password:
+                    server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+        return True
+    except Exception as exc:
+        print(f"[{log_prefix} ERROR] {to_email}: {exc}")
+        return False
+
+
 def send_verification_code_email(user: User, request: Optional[Request] = None) -> bool:
     code = (getattr(user, "email_verification_code", "") or "").strip()
     if not code:
@@ -1156,30 +1211,10 @@ def send_verification_code_email(user: User, request: Optional[Request] = None) 
         f"Código: {code}\n\n"
         "Este código expira em 15 minutos. Se você não criou essa conta, ignore esta mensagem.\n"
     )
-    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT") or "587")
-    smtp_user = (os.getenv("SMTP_USER") or "").strip()
-    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
-    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
-    if not smtp_host or not smtp_from:
+    ok = send_smtp_email(user.email, subject, body, "EMAIL CODE")
+    if not ok:
         print(f"[EMAIL CODE DEV] {user.email}: {code}")
-        return False
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = smtp_from
-    msg["To"] = user.email
-    msg.set_content(body)
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
-                server.starttls()
-            if smtp_user and smtp_password:
-                server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        return True
-    except Exception as exc:
-        print(f"[EMAIL CODE ERROR] {user.email}: {exc} | code={code}")
-        return False
+    return ok
 
 
 def send_identity_rejection_email(user: User, note: str = "") -> bool:
@@ -1192,30 +1227,11 @@ def send_identity_rejection_email(user: User, note: str = "") -> bool:
         "Você pode acessar sua conta e enviar os documentos novamente com uma imagem legível, atual e compatível com os dados informados no cadastro.\n\n"
         "Equipe Lancei o Certo.\n"
     )
-    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT") or "587")
-    smtp_user = (os.getenv("SMTP_USER") or "").strip()
-    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
-    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
-    if not smtp_host or not smtp_from:
+    ok = send_smtp_email(user.email, subject, body, "IDENTITY REJECTION")
+    if not ok:
         print(f"[IDENTITY REJECTION DEV] {user.email}: {reason}")
-        return False
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = smtp_from
-    msg["To"] = user.email
-    msg.set_content(body)
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
-                server.starttls()
-            if smtp_user and smtp_password:
-                server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        return True
-    except Exception as exc:
-        print(f"[IDENTITY REJECTION ERROR] {user.email}: {exc}")
-        return False
+    return ok
+
 
 def send_verification_email(user: User, request: Optional[Request] = None) -> bool:
     if not getattr(user, "email_verification_token", ""):
@@ -1229,37 +1245,14 @@ def send_verification_email(user: User, request: Optional[Request] = None) -> bo
         f"{link}\n\n"
         "Este link expira em 24 horas. Se você não criou essa conta, ignore esta mensagem.\n"
     )
-    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT") or "587")
-    smtp_user = (os.getenv("SMTP_USER") or "").strip()
-    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
-    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
-    if not smtp_host or not smtp_from:
+    ok = send_smtp_email(user.email, subject, body, "EMAIL VERIFICATION")
+    if not ok:
         print(f"[EMAIL VERIFICATION DEV] {user.email}: {link}")
-        return False
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = smtp_from
-    msg["To"] = user.email
-    msg.set_content(body)
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
-                server.starttls()
-            if smtp_user and smtp_password:
-                server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        return True
-    except Exception as exc:
-        print(f"[EMAIL VERIFICATION ERROR] {user.email}: {exc} | link={link}")
-        return False
+    return ok
+
 
 def send_password_reset_email(user: User, token: str, request: Optional[Request] = None) -> bool:
-    """Envia link seguro de recuperação de senha.
-
-    Mantém o mesmo padrão SMTP usado na confirmação de e-mail e evita falha
-    fatal no fluxo: se o SMTP não estiver configurado, registra o link nos logs.
-    """
+    """Envia link seguro de recuperação de senha."""
     if not token:
         return False
     base_url = public_base_url(request)
@@ -1274,31 +1267,10 @@ def send_password_reset_email(user: User, token: str, request: Optional[Request]
         "Se você não solicitou esta alteração, ignore este e-mail.\n\n"
         "Equipe Lancei o Certo.\n"
     )
-    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT") or "587")
-    smtp_user = (os.getenv("SMTP_USER") or "").strip()
-    smtp_password = (os.getenv("SMTP_PASSWORD") or "").strip()
-    smtp_from = (os.getenv("SMTP_FROM") or smtp_user or "no-reply@lanceiocerto.com.br").strip()
-    if not smtp_host or not smtp_from:
+    ok = send_smtp_email(user.email, subject, body, "PASSWORD RESET")
+    if not ok:
         print(f"[PASSWORD RESET DEV] {user.email}: {reset_link}")
-        return False
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = smtp_from
-    msg["To"] = user.email
-    msg.set_content(body)
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            if (os.getenv("SMTP_TLS") or "1").strip() != "0":
-                server.starttls()
-            if smtp_user and smtp_password:
-                server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        return True
-    except Exception as exc:
-        print(f"[PASSWORD RESET ERROR] {user.email}: {exc} | link={reset_link}")
-        return False
-
+    return ok
 
 def fmt_deadline(dt: Optional[datetime]) -> str:
     if not dt:
