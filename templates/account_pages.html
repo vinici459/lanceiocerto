@@ -448,7 +448,9 @@
   </div>
 </div>
 
-
+{% elif section == 'wins' %}
+<div class="orders-page-marketplace">
+  <h1 style="margin:0 0 14px;font-size:34px;line-height:1.1;">Leilões Ganhos</h1>
 
   <div class="orders-list-marketplace">
     {% for o in orders %}
@@ -491,8 +493,7 @@
       </article>
     {% else %}
       <div class="panel-card empty-card orders-empty-marketplace">
-        <h2>Você ainda não ganhou leilões.</h2>
-        <p class="muted">Quando vencer um leilão, ele aparecerá aqui para acompanhar pagamento, envio e entrega.</p>
+        <h2>Você ainda não ganhou nenhum leilão.</h2>
         <a class="btn small" href="/">Ver leilões disponíveis</a>
       </div>
     {% endfor %}
