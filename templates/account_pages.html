@@ -193,10 +193,10 @@
       <button class="btn full" type="submit">Gerar PIX</button>
 
       {% if pix_payment and pix_payment.qr_code_base64 %}
-      <div class="pix-payment-box" data-pix-payment="deposit" data-payment-id="{{ pix_payment.payment_id }}">
+      <div class="pix-payment-box" data-pix-payment="deposit" data-payment-id="{{ pix_payment.payment_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
         <h3>Pix gerado</h3>
         <p>Valor: <strong>R$ {{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }}</strong></p>
-        <p class="pix-expire-note">Válido por 15 minutos{% if pix_payment.expires_label %} • expira em {{ pix_payment.expires_label }}{% endif %}</p>
+        <p class="pix-expire-note">Tempo para pagar: <strong data-pix-countdown>15:00</strong></p>
         <div class="pix-qr-wrap">
           <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
           <div>
@@ -882,10 +882,10 @@
           <p>Ao confirmar, o sistema gera o QR Code Pix pelo Mercado Pago.</p>
 
           {% if pix_payment and pix_payment.qr_code_base64 %}
-          <div class="pix-payment-box" data-pix-payment="order" data-payment-id="{{ pix_payment.payment_id }}" data-auction-id="{{ entity.auction_id }}">
+          <div class="pix-payment-box" data-pix-payment="order" data-payment-id="{{ pix_payment.payment_id }}" data-auction-id="{{ entity.auction_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
             <h3>Pix gerado</h3>
             <p>Valor: <strong>R$ {{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }}</strong></p>
-            <p class="pix-expire-note">Válido por 15 minutos{% if pix_payment.expires_label %} • expira em {{ pix_payment.expires_label }}{% endif %}</p>
+            <p class="pix-expire-note">Tempo para pagar: <strong data-pix-countdown>15:00</strong></p>
             <div class="pix-qr-wrap">
               <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
               <div>
@@ -1262,6 +1262,27 @@
     box.dataset.pollingStarted = "1";
 
     const statusEl = type === "order" ? document.getElementById("order-pix-status") : document.getElementById("deposit-pix-status");
+    const countdownEl = box.querySelector("[data-pix-countdown]");
+    const expiresIso = box.getAttribute("data-expires-iso");
+    const expiresAt = expiresIso ? Date.parse(expiresIso) : (Date.now() + 15 * 60 * 1000);
+    let pixExpired = false;
+
+    function updateCountdown(){
+      const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+      const minutes = String(Math.floor(remaining / 60)).padStart(2, "0");
+      const seconds = String(remaining % 60).padStart(2, "0");
+      if (countdownEl) countdownEl.textContent = `${minutes}:${seconds}`;
+      if (remaining <= 0) {
+        pixExpired = true;
+        if (statusEl && !statusEl.classList.contains("approved")) {
+          statusEl.textContent = "Tempo do Pix encerrado. Gere um novo Pix para pagar.";
+        }
+        return;
+      }
+      setTimeout(updateCountdown, 1000);
+    }
+    updateCountdown();
+
     let tries = 0;
 
     async function check() {
@@ -1288,7 +1309,7 @@
         }
       } catch (_) {}
 
-      if (tries < 180) {
+      if (!pixExpired && tries < 180) {
         setTimeout(check, 5000);
       } else if (statusEl && !statusEl.classList.contains("approved")) {
         statusEl.textContent = "Tempo do Pix encerrado. Gere um novo Pix para pagar.";

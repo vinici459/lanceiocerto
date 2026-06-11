@@ -1019,6 +1019,8 @@ def build_pix_payment_view(payment: MercadoPagoPayment) -> dict:
         "qr_code": payment.qr_code,
         "qr_code_base64": payment.qr_code_base64,
         "expires_at": expires_at,
+        # Usado pelo JS para mostrar contagem regressiva 14:59, 14:58...
+        "expires_iso": expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "expires_label": fmt_br_datetime(expires_at),
     }
 
@@ -5105,8 +5107,12 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
     try:
         user = require_user(request, db)
         amount = BR(amount)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="Valor inválido.")
+        if amount < 1:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                {"request": request, "user": user, "section": "wallet", "error": "O depósito mínimo é de R$ 1,00."},
+                status_code=400,
+            )
 
         try:
             mp = create_mp_pix_payment(
@@ -5167,8 +5173,12 @@ def account_add_balance_card(request: Request, amount: float = Form(...)):
     try:
         user = require_user(request, db)
         amount = BR(amount)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="Valor inválido.")
+        if amount < 1:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                {"request": request, "user": user, "section": "wallet", "error": "O depósito mínimo é de R$ 1,00."},
+                status_code=400,
+            )
         try:
             checkout = create_mp_card_checkout(
                 request=request,
@@ -7068,8 +7078,12 @@ def account_request_withdrawal(request: Request, amount: float = Form(...), pix_
             raise HTTPException(status_code=403, detail="Para solicitar saque, envie seus documentos e aguarde a confirmação da conta.")
 
         amount = BR(amount)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="Valor inválido.")
+        if amount < 1:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                {"request": request, "user": user, "section": "wallet", "error": "O saque mínimo é de R$ 1,00."},
+                status_code=400,
+            )
 
         pix_key_clean = (pix_key or "").strip()
         if not pix_key_clean:
