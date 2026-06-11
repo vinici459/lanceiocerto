@@ -4,8 +4,7 @@
   <div class="form-card wide identity-card identity-pro-card">
     <span class="eyebrow">Verificação de identidade</span>
     <h1>Enviar ou reenviar documentos</h1>
-    <p class="muted">Use esta página para corrigir documentos recusados, atualizar arquivos ilegíveis ou completar a análise da sua conta.</p>
-
+    
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
     {% if success %}<div class="alert success">{{ success }}</div>{% endif %}
 
@@ -27,7 +26,7 @@
 
     <form method="post" action="/minha-conta/verificacao" enctype="multipart/form-data" class="identity-upload-form">
       <h2>Arquivos para análise</h2>
-      <p class="muted">Envie imagens nítidas. A frente do documento e a selfie são obrigatórias. O comprovante de residência ajuda a validar o endereço.</p>
+      
       <div class="docs-upload-grid identity-doc-grid">
         <label>Frente do documento <strong>*</strong>
           <input type="file" name="document_front_file" accept="image/*,.pdf" capture="environment" required>
@@ -35,7 +34,7 @@
         </label>
         <label>Verso do documento
           <input type="file" name="document_back_file" accept="image/*,.pdf" capture="environment">
-          <small>Envie se o documento tiver verso com dados.</small>
+          
         </label>
         <label>Selfie atual <strong>*</strong>
           <input type="file" name="selfie_file" accept="image/*" capture="user" required>
@@ -43,18 +42,12 @@
         </label>
         <label>Comprovante de residência
           <input type="file" name="residence_proof_file" accept="image/*,.pdf" capture="environment">
-          <small>Conta de água, luz, internet ou documento com endereço.</small>
+          <small>Conta de água, luz, internet.</small>
         </label>
       </div>
       <button class="btn full" type="submit">Enviar para análise</button>
     </form>
-
-    <div class="identity-rules-box">
-      <strong>Como funciona a análise:</strong>
-      <span>1. Você envia ou reenvia os documentos.</span>
-      <span>2. O status volta para <b>Em análise</b>.</span>
-      <span>3. O administrador aprova ou informa o motivo da incompatibilidade.</span>
-    </div>
+    
   </div>
 </section>
 <style>
