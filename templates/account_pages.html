@@ -18,6 +18,17 @@
 
 /* Minha Conta - verificação documental limpa */
 .account-doc-status-card.clean-doc-card{border-color:rgba(148,163,184,.18);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(15,23,42,.84))}.clean-doc-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.clean-doc-head h2{margin:4px 0 0;font-size:24px}.clean-doc-head .eyebrow{margin-bottom:2px}.clean-doc-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:999px;font-weight:950;white-space:nowrap;border:1px solid rgba(251,191,36,.34);background:rgba(251,191,36,.10);color:#fde68a}.clean-doc-pill.ok{border-color:rgba(74,222,128,.38);background:rgba(74,222,128,.10);color:#bbf7d0}.clean-doc-pill.bad{border-color:rgba(248,113,113,.38);background:rgba(239,68,68,.10);color:#fecaca}.clean-doc-list{display:grid;gap:8px;margin:12px 0 16px}.clean-doc-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border-radius:14px;border:1px solid rgba(148,163,184,.14);background:rgba(255,255,255,.035)}.clean-doc-row span{color:#dbeafe;font-weight:900}.clean-doc-row strong{font-size:13px;padding:6px 10px;border-radius:999px;background:rgba(148,163,184,.12);color:#cbd5e1;white-space:nowrap}.clean-doc-row strong.done{background:rgba(74,222,128,.10);color:#bbf7d0;border:1px solid rgba(74,222,128,.24)}.clean-doc-row strong.pending{background:rgba(251,191,36,.10);color:#fde68a;border:1px solid rgba(251,191,36,.22)}.clean-doc-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.clean-doc-actions .btn{width:auto}@media(max-width:700px){.clean-doc-head{flex-direction:column}.clean-doc-row{align-items:flex-start;flex-direction:column}.clean-doc-actions .btn{width:100%}}
+
+.pix-payment-box{margin-top:14px;border:1px solid rgba(74,222,128,.28);background:rgba(74,222,128,.08);border-radius:18px;padding:14px;display:grid;gap:12px}
+.pix-payment-box h3{margin:0;font-size:18px}
+.pix-payment-box p{margin:0;color:#cbd5e1}
+.pix-qr-wrap{display:grid;grid-template-columns:180px minmax(0,1fr);gap:14px;align-items:center}
+.pix-qr-wrap img{width:180px;height:180px;border-radius:14px;background:#fff;padding:8px}
+.pix-code-copy{width:100%;min-height:96px;margin-top:7px;padding:12px;border-radius:12px;border:1px solid rgba(148,163,184,.22);background:rgba(15,23,42,.85);color:#fff;resize:vertical}
+.pix-expire-note{font-size:13px!important;color:#fde68a!important;font-weight:850}.payment-note{display:block;margin:8px 0 14px;color:#b7c6e6;font-size:13px;line-height:1.35}.pix-status-line{font-size:13px;font-weight:800;color:#fde68a}
+.pix-status-line.approved{color:#bbf7d0}
+@media(max-width:720px){.pix-qr-wrap{grid-template-columns:1fr}.pix-qr-wrap img{width:100%;height:auto;max-width:260px;margin:0 auto}}
+
 </style>
 {% endblock %}
 {% block content %}
@@ -160,6 +171,10 @@
     <span class="wallet-badge">Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
   </div>
 
+  {% if error %}
+    <div class="alert">{{ error }}</div>
+  {% endif %}
+
   <div class="wallet-action-tabs">
     <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Depositar</button>
     <button class="wallet-action-btn" type="button" data-wallet-mode="wallet-withdraw-panel">Sacar</button>
@@ -176,13 +191,32 @@
         <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
       </label>
       <button class="btn full" type="submit">Gerar PIX</button>
+
+      {% if pix_payment and pix_payment.qr_code_base64 %}
+      <div class="pix-payment-box" data-pix-payment="deposit" data-payment-id="{{ pix_payment.payment_id }}">
+        <h3>Pix gerado</h3>
+        <p>Valor: <strong>R$ {{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }}</strong></p>
+        <p class="pix-expire-note">Válido por 15 minutos{% if pix_payment.expires_label %} • expira em {{ pix_payment.expires_label }}{% endif %}</p>
+        <div class="pix-qr-wrap">
+          <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
+          <div>
+            <label>Código Pix copia e cola
+              <textarea class="pix-code-copy" id="deposit-pix-code" readonly>{{ pix_payment.qr_code }}</textarea>
+            </label>
+            <button class="btn full ghost" type="button" data-copy-pix="deposit-pix-code">Copiar código Pix</button>
+          </div>
+        </div>
+        <div class="pix-status-line" id="deposit-pix-status">Aguardando confirmação do Mercado Pago...</div>
+      </div>
+      {% endif %}
     </form>
 
     <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel">
       <label>Valor do depósito
         <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
       </label>
-      <button class="btn full" type="submit">Pagar com cartão</button>
+      <small class="payment-note">Você será direcionado para o Mercado Pago. O LanceioCerto não recebe nem armazena dados do cartão.</small>
+      <button class="btn full" type="submit">Ir para pagamento</button>
     </form>
   </div>
 
@@ -672,6 +706,10 @@
     </div>
   </div>
 
+  {% if error %}
+    <div class="alert">{{ error }}</div>
+  {% endif %}
+
   <div class="checkout-grid checkout-grid-pro">
 
     <!-- ESQUERDA -->
@@ -841,39 +879,32 @@
 
         <div id="pixPaymentPanel" class="payment-panel active">
           <h3>Pagamento via PIX</h3>
-          <p>Ao confirmar, o sistema seguirá para a geração/validação do PIX.</p>
-          <p class="muted">Código PIX de teste: <code>{{ entity.pix_code }}</code></p>
+          <p>Ao confirmar, o sistema gera o QR Code Pix pelo Mercado Pago.</p>
+
+          {% if pix_payment and pix_payment.qr_code_base64 %}
+          <div class="pix-payment-box" data-pix-payment="order" data-payment-id="{{ pix_payment.payment_id }}" data-auction-id="{{ entity.auction_id }}">
+            <h3>Pix gerado</h3>
+            <p>Valor: <strong>R$ {{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }}</strong></p>
+            <p class="pix-expire-note">Válido por 15 minutos{% if pix_payment.expires_label %} • expira em {{ pix_payment.expires_label }}{% endif %}</p>
+            <div class="pix-qr-wrap">
+              <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
+              <div>
+                <label>Código Pix copia e cola
+                  <textarea class="pix-code-copy" id="order-pix-code" readonly>{{ pix_payment.qr_code }}</textarea>
+                </label>
+                <button class="btn full ghost" type="button" data-copy-pix="order-pix-code">Copiar código Pix</button>
+              </div>
+            </div>
+            <div class="pix-status-line" id="order-pix-status">Aguardando confirmação do Mercado Pago...</div>
+          </div>
+          {% endif %}
         </div>
 
         <div id="cardPaymentPanel" class="payment-panel">
           <h3>Pagamento com cartão</h3>
-          <p>O cartão deverá estar no nome do usuário cadastrado no site.</p>
-
-          <div class="grid-2">
-            <label>Nome impresso no cartão
-              <input name="card_holder_name" value="{{ user.full_name or '' }}" placeholder="Nome completo">
-            </label>
-
-            <label>CPF do titular
-              <input name="card_holder_cpf" value="{{ user.cpf or '' }}" placeholder="000.000.000-00">
-            </label>
-          </div>
-
-          <label>Parcelamento
-            <select name="installments">
-              <option value="1">1x - sem parcelamento</option>
-              <option value="2">2x - taxas calculadas pelo Mercado Pago</option>
-              <option value="3">3x - taxas calculadas pelo Mercado Pago</option>
-              <option value="4">4x - taxas calculadas pelo Mercado Pago</option>
-              <option value="5">5x - taxas calculadas pelo Mercado Pago</option>
-              <option value="6">6x - taxas calculadas pelo Mercado Pago</option>
-              <option value="10">10x - taxas calculadas pelo Mercado Pago</option>
-              <option value="12">12x - taxas calculadas pelo Mercado Pago</option>
-            </select>
-          </label>
-
-          <div class="fee-info">
-            As taxas da máquina e do parcelamento serão calculadas automaticamente pelo Mercado Pago antes da confirmação final.
+          <p>Ao confirmar, você será direcionado para o ambiente seguro do Mercado Pago.</p>
+          <div class="security-box">
+            🔒 O LanceioCerto não recebe nem armazena número do cartão, validade ou CVV. A confirmação volta automaticamente pelo Mercado Pago.
           </div>
         </div>
 
@@ -1202,6 +1233,73 @@
       }
     });
   }
+
+
+  document.querySelectorAll("[data-copy-pix]").forEach((button) => {
+    button.addEventListener("click", async function () {
+      const id = this.getAttribute("data-copy-pix");
+      const field = document.getElementById(id);
+      if (!field) return;
+      try {
+        await navigator.clipboard.writeText(field.value || field.textContent || "");
+        this.textContent = "Código copiado";
+        setTimeout(() => { this.textContent = "Copiar código Pix"; }, 1800);
+      } catch (_) {
+        field.select();
+        document.execCommand("copy");
+        this.textContent = "Código copiado";
+        setTimeout(() => { this.textContent = "Copiar código Pix"; }, 1800);
+      }
+    });
+  });
+
+  function startPixPolling(box) {
+    if (!box) return;
+    const paymentId = box.getAttribute("data-payment-id");
+    const type = box.getAttribute("data-pix-payment");
+    const auctionId = box.getAttribute("data-auction-id");
+    if (!paymentId || box.dataset.pollingStarted === "1") return;
+    box.dataset.pollingStarted = "1";
+
+    const statusEl = type === "order" ? document.getElementById("order-pix-status") : document.getElementById("deposit-pix-status");
+    let tries = 0;
+
+    async function check() {
+      tries += 1;
+      const url = type === "order"
+        ? `/minha-conta/pagamentos/${auctionId}/pix/status?payment_id=${encodeURIComponent(paymentId)}`
+        : `/minha-conta/saldo/pix/status?payment_id=${encodeURIComponent(paymentId)}`;
+
+      try {
+        const resp = await fetch(url, { headers: { "accept": "application/json" } });
+        const data = await resp.json();
+        if (data && data.approved) {
+          if (statusEl) {
+            statusEl.textContent = "Pagamento aprovado!";
+            statusEl.classList.add("approved");
+          }
+          setTimeout(() => {
+            window.location.href = data.redirect_url || "/minha-conta/saldo";
+          }, 900);
+          return;
+        }
+        if (statusEl && data && data.status) {
+          statusEl.textContent = `Aguardando confirmação do Mercado Pago... status: ${data.status}`;
+        }
+      } catch (_) {}
+
+      if (tries < 180) {
+        setTimeout(check, 5000);
+      } else if (statusEl && !statusEl.classList.contains("approved")) {
+        statusEl.textContent = "Tempo do Pix encerrado. Gere um novo Pix para pagar.";
+      }
+    }
+
+    setTimeout(check, 2500);
+  }
+
+  document.querySelectorAll("[data-pix-payment]").forEach(startPixPolling);
+
 
 })();
 

@@ -219,6 +219,26 @@ class WalletTransaction(Base):
     note: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+class MercadoPagoPayment(Base):
+    __tablename__ = "mercadopago_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    order_id: Mapped[Optional[int]] = mapped_column(ForeignKey("winner_orders.id"), nullable=True, index=True)
+    purpose: Mapped[str] = mapped_column(String(40), default="deposit")  # deposit/order_payment
+    mp_payment_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    qr_code: Mapped[str] = mapped_column(Text, default="")
+    qr_code_base64: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(String(220), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+    order: Mapped[Optional["WinnerOrder"]] = relationship(foreign_keys=[order_id])
+
+
 
 class WinnerOrder(Base):
     __tablename__ = "winner_orders"
@@ -818,6 +838,221 @@ def split_bid_amount(bid_value: float, fee_percent: float | None = None) -> tupl
 
 def fmt_money(v: float) -> str:
     return f"{BR(v):.2f}".replace(".", ",")
+
+
+def mp_access_token() -> str:
+    return (os.getenv("MP_ACCESS_TOKEN_PROD") or os.getenv("MERCADO_PAGO_ACCESS_TOKEN") or "").strip()
+
+
+def mp_headers(extra_idempotency: bool = False) -> dict:
+    token = mp_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    if extra_idempotency:
+        headers["X-Idempotency-Key"] = secrets.token_urlsafe(32)
+    return headers
+
+
+def mp_api_request(method: str, url: str, payload: Optional[dict] = None, timeout: int = 30) -> dict:
+    if not mp_access_token():
+        raise RuntimeError("MP_ACCESS_TOKEN_PROD não configurado no Railway.")
+
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers=mp_headers(extra_idempotency=(method.upper() == "POST")),
+        method=method.upper(),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Mercado Pago HTTP {exc.code}: {body[:800]}")
+    except Exception as exc:
+        raise RuntimeError(f"Erro de conexão com Mercado Pago: {exc}")
+
+
+def create_mp_pix_payment(*, amount: float, description: str, payer_email: str) -> dict:
+    amount = BR(amount)
+    expires_at = datetime.utcnow() + timedelta(minutes=15)
+    payload = {
+        "transaction_amount": amount,
+        "description": description[:220],
+        "payment_method_id": "pix",
+        "date_of_expiration": expires_at.isoformat(timespec="seconds") + "Z",
+        "payer": {
+            "email": (payer_email or "cliente@lanceiocerto.com.br").strip(),
+        },
+    }
+    base_url = public_base_url()
+    if base_url:
+        payload["notification_url"] = f"{base_url}/webhook/mercadopago"
+
+    payment = mp_api_request("POST", "https://api.mercadopago.com/v1/payments", payload)
+    payment_id = str(payment.get("id") or "").strip()
+    status = (payment.get("status") or "pending").strip().lower()
+    tx = payment.get("point_of_interaction", {}).get("transaction_data", {}) or {}
+    qr_code = tx.get("qr_code") or ""
+    qr_base64 = tx.get("qr_code_base64") or ""
+
+    if not payment_id or not qr_code or not qr_base64:
+        raise RuntimeError("O Mercado Pago não retornou QR Code Pix completo.")
+
+    return {
+        "payment_id": payment_id,
+        "status": status,
+        "qr_code": qr_code,
+        "qr_code_base64": qr_base64,
+        "amount": amount,
+        "expires_at": expires_at,
+    }
+
+
+def create_mp_card_checkout(*, request: Request, amount: float, description: str, payer_email: str, purpose: str, user_id: int, order_id: Optional[int] = None) -> dict:
+    amount = BR(amount)
+    base_url = public_base_url(request)
+    if not base_url:
+        raise RuntimeError("PUBLIC_BASE_URL não configurado. Configure a URL pública do Railway para usar cartão.")
+
+    external_reference = f"lc_{purpose}_{user_id}_{order_id or 0}_{secrets.token_urlsafe(12)}"
+    back_url = f"{base_url}/minha-conta/mercadopago/retorno?ref={external_reference}"
+    payload = {
+        "items": [{
+            "title": description[:120],
+            "quantity": 1,
+            "currency_id": "BRL",
+            "unit_price": amount,
+        }],
+        "payer": {"email": (payer_email or "cliente@lanceiocerto.com.br").strip()},
+        "external_reference": external_reference,
+        "back_urls": {
+            "success": back_url,
+            "pending": back_url,
+            "failure": back_url,
+        },
+        "auto_return": "approved",
+        "notification_url": f"{base_url}/webhook/mercadopago",
+        "statement_descriptor": "LANCEIOCERTO",
+        "payment_methods": {
+            "excluded_payment_types": [
+                {"id": "ticket"},
+                {"id": "bank_transfer"},
+                {"id": "debit_card"},
+            ],
+            "installments": 12,
+        },
+    }
+    pref = mp_api_request("POST", "https://api.mercadopago.com/checkout/preferences", payload)
+    init_point = (pref.get("init_point") or pref.get("sandbox_init_point") or "").strip()
+    preference_id = str(pref.get("id") or "").strip()
+    if not init_point or not preference_id:
+        raise RuntimeError("O Mercado Pago não retornou o link de pagamento por cartão.")
+    return {
+        "external_reference": external_reference,
+        "preference_id": preference_id,
+        "init_point": init_point,
+        "amount": amount,
+    }
+
+
+def get_mp_payment_status(payment_id: str) -> dict:
+    payment_id = (payment_id or "").strip()
+    if not payment_id:
+        raise RuntimeError("payment_id vazio.")
+    payment = mp_api_request("GET", f"https://api.mercadopago.com/v1/payments/{payment_id}", None)
+    return {
+        "payment_id": str(payment.get("id") or payment_id),
+        "status": (payment.get("status") or "").strip().lower(),
+        "status_detail": (payment.get("status_detail") or "").strip().lower(),
+        "amount": BR(float(payment.get("transaction_amount") or 0)),
+        "raw": payment,
+    }
+
+
+def build_pix_payment_view(payment: MercadoPagoPayment) -> dict:
+    expires_at = (payment.created_at or datetime.utcnow()) + timedelta(minutes=15)
+    return {
+        "id": payment.id,
+        "payment_id": payment.mp_payment_id,
+        "amount": payment.amount,
+        "status": payment.status,
+        "qr_code": payment.qr_code,
+        "qr_code_base64": payment.qr_code_base64,
+        "expires_at": expires_at,
+        "expires_label": fmt_br_datetime(expires_at),
+    }
+
+
+def apply_approved_mp_payment(db: Session, request: Request, payment_row: MercadoPagoPayment) -> bool:
+    """Aplica aprovação do Mercado Pago uma única vez."""
+    if not payment_row or (payment_row.status == "approved" and payment_row.approved_at):
+        return False
+
+    user = db.get(User, payment_row.user_id)
+    if not user:
+        payment_row.status = "approved"
+        payment_row.approved_at = datetime.utcnow()
+        db.add(payment_row)
+        return False
+
+    payment_row.status = "approved"
+    payment_row.approved_at = datetime.utcnow()
+
+    is_pix_payment = bool(payment_row.qr_code)
+    payment_label = "Pix" if is_pix_payment else "Cartão"
+
+    if payment_row.purpose == "deposit":
+        user.wallet_balance = BR(float(user.wallet_balance or 0) + float(payment_row.amount or 0))
+        db.add(WalletTransaction(
+            user_id=user.id,
+            amount=payment_row.amount,
+            kind="deposit_pix" if is_pix_payment else "deposit_card",
+            note=f"Depósito {payment_label} aprovado pelo Mercado Pago. Referência MP #{payment_row.mp_payment_id}",
+        ))
+        audit_event(db, request, "wallet.deposit_approved", user, "mercadopago_payment", payment_row.mp_payment_id, f"Método: {payment_label} | Valor R$ {fmt_money(payment_row.amount)}")
+
+    elif payment_row.purpose == "order_payment" and payment_row.order_id:
+        order = db.get(WinnerOrder, payment_row.order_id)
+        paid_statuses = {"aguardando_escolha", "paid", "purchased", "sent", "delivered", "finalized", "completed"}
+        if order and order.user_id == user.id and order.status not in paid_statuses:
+            order.status = "aguardando_escolha"
+            order.paid_at = datetime.utcnow()
+            order.admin_note = f"Pagamento confirmado via {payment_label} Mercado Pago. Aguardando escolha do modo de recebimento."
+            db.add(WalletTransaction(
+                user_id=user.id,
+                amount=payment_row.amount,
+                kind="order_payment_pix" if is_pix_payment else "order_payment_card",
+                note=f"Pagamento {payment_label} do pedido #{order.id}/leilão #{order.auction_id} confirmado pelo Mercado Pago.",
+            ))
+            audit_event(db, request, "order.payment_approved", user, "order", order.id, f"Método: {payment_label} | Referência MP #{payment_row.mp_payment_id} | Valor R$ {fmt_money(payment_row.amount)}")
+            nav_cache_clear("account:")
+            db.add(order)
+
+    db.add(user)
+    db.add(payment_row)
+    return True
+
+
+def refresh_mp_payment(db: Session, request: Request, payment_id: str) -> MercadoPagoPayment:
+    row = db.query(MercadoPagoPayment).filter(MercadoPagoPayment.mp_payment_id == str(payment_id)).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Pagamento não encontrado.")
+
+    mp_status = get_mp_payment_status(row.mp_payment_id)
+    status = mp_status["status"] or row.status
+    if status == "approved":
+        apply_approved_mp_payment(db, request, row)
+    else:
+        row.status = status
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def br_time(dt: Optional[datetime]) -> Optional[datetime]:
@@ -3197,6 +3432,9 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_user_created ON wallet_transactions (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_kind_created ON wallet_transactions (kind, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_created ON wallet_transactions (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_mp_payments_mp_id ON mercadopago_payments (mp_payment_id)",
+            "CREATE INDEX IF NOT EXISTS ix_mp_payments_user_created ON mercadopago_payments (user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_mp_payments_order_created ON mercadopago_payments (order_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_withdrawals_status_created ON withdrawal_requests (status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_users_identity_created ON users (identity_status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_withdrawals_user_created ON withdrawal_requests (user_id, created_at)",
@@ -4827,20 +5065,136 @@ def my_wallet(request: Request):
 
 @app.post("/minha-conta/saldo")
 @app.post("/minha-conta/saldo/pix")
-@app.post("/minha-conta/saldo/cartao")
-def account_add_balance(request: Request, amount: float = Form(...)):
+def account_add_balance_pix(request: Request, amount: float = Form(...)):
     db = SessionLocal()
     try:
         user = require_user(request, db)
         amount = BR(amount)
         if amount <= 0:
             raise HTTPException(status_code=400, detail="Valor inválido.")
-        # Em produção, o saldo só deve ser creditado por webhook confirmado do gateway de pagamento.
-        tx = WalletTransaction(user_id=user.id, amount=0.0, kind="deposit_pending", note=f"Depósito solicitado: R$ {fmt_money(amount)}. Aguardando integração/webhook do gateway.")
-        db.add(tx)
-        audit_event(db, request, "wallet.deposit_requested", user, "wallet_transaction", "pending", f"Valor solicitado: R$ {fmt_money(amount)}")
+
+        try:
+            mp = create_mp_pix_payment(
+                amount=amount,
+                description=f"Depósito de saldo - LanceioCerto - usuário #{user.id}",
+                payer_email=user.email,
+            )
+        except Exception as exc:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "section": "wallet",
+                    "error": str(exc),
+                },
+                status_code=400,
+            )
+
+        payment = MercadoPagoPayment(
+            user_id=user.id,
+            order_id=None,
+            purpose="deposit",
+            mp_payment_id=mp["payment_id"],
+            amount=amount,
+            status=mp["status"],
+            qr_code=mp["qr_code"],
+            qr_code_base64=mp["qr_code_base64"],
+            description=f"Depósito de saldo - usuário #{user.id}",
+        )
+        db.add(payment)
+        db.add(WalletTransaction(
+            user_id=user.id,
+            amount=0.0,
+            kind="deposit_pix_pending",
+            note=f"Pix de depósito gerado: R$ {fmt_money(amount)} | MP #{mp['payment_id']}",
+        ))
+        audit_event(db, request, "wallet.deposit_pix_created", user, "mercadopago_payment", mp["payment_id"], f"Valor R$ {fmt_money(amount)}")
         db.commit()
-        return RedirectResponse("/minha-conta?saldo=1", status_code=303)
+        db.refresh(payment)
+
+        return templates.TemplateResponse(
+            "account_pages.html",
+            {
+                "request": request,
+                "user": user,
+                "section": "wallet",
+                "pix_payment": build_pix_payment_view(payment),
+            },
+        )
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/saldo/cartao")
+def account_add_balance_card(request: Request, amount: float = Form(...)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        amount = BR(amount)
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Valor inválido.")
+        try:
+            checkout = create_mp_card_checkout(
+                request=request,
+                amount=amount,
+                description=f"Depósito de saldo - LanceioCerto - usuário #{user.id}",
+                payer_email=user.email,
+                purpose="deposit",
+                user_id=user.id,
+            )
+        except Exception as exc:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                {"request": request, "user": user, "section": "wallet", "error": str(exc)},
+                status_code=400,
+            )
+
+        payment = MercadoPagoPayment(
+            user_id=user.id,
+            order_id=None,
+            purpose="deposit",
+            mp_payment_id=checkout["external_reference"],
+            amount=amount,
+            status="pending",
+            qr_code="",
+            qr_code_base64="",
+            description=f"Cartão | preferência {checkout['preference_id']}",
+        )
+        db.add(payment)
+        db.add(WalletTransaction(
+            user_id=user.id,
+            amount=0.0,
+            kind="deposit_card_pending",
+            note=f"Checkout de cartão gerado: R$ {fmt_money(amount)} | Preferência MP {checkout['preference_id']}",
+        ))
+        audit_event(db, request, "wallet.deposit_card_created", user, "mercadopago_payment", checkout["external_reference"], f"Valor R$ {fmt_money(amount)}")
+        db.commit()
+        return RedirectResponse(checkout["init_point"], status_code=303)
+    finally:
+        db.close()
+
+
+@app.get("/minha-conta/saldo/pix/status")
+def account_pix_deposit_status(request: Request, payment_id: str):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        row = db.query(MercadoPagoPayment).filter(
+            MercadoPagoPayment.user_id == user.id,
+            MercadoPagoPayment.mp_payment_id == str(payment_id),
+            MercadoPagoPayment.purpose == "deposit",
+        ).first()
+        if not row:
+            return JSONResponse({"ok": False, "reason": "not_found"}, status_code=404)
+        row = refresh_mp_payment(db, request, row.mp_payment_id)
+        db.refresh(user)
+        return {
+            "ok": True,
+            "approved": row.status == "approved",
+            "status": row.status,
+            "wallet_balance": BR(user.wallet_balance or 0),
+        }
     finally:
         db.close()
 
@@ -5318,13 +5672,101 @@ def confirm_payment_flow(
                 note=f"Pagamento do leilão #{order.auction_id}"
             ))
 
-        # PIX/CARTÃO: em homologação, não marca como pago sem webhook real do gateway.
-        elif payment_method in ["pix", "card"]:
+        # PIX Mercado Pago: gera QR Code e só marca como pago depois da confirmação oficial.
+        elif payment_method == "pix":
+            try:
+                mp = create_mp_pix_payment(
+                    amount=order.final_price,
+                    description=f"Pagamento do pedido #{order.id} - LanceioCerto",
+                    payer_email=user.email,
+                )
+            except Exception as exc:
+                return templates.TemplateResponse(
+                    "account_pages.html",
+                    {
+                        "request": request,
+                        "user": user,
+                        "section": "checkout",
+                        "order": build_order_card(order),
+                        "entity": order,
+                        "error": str(exc),
+                    },
+                    status_code=400,
+                )
+
             order.status = "pending_gateway"
-            order.admin_note = "Pagamento iniciado. Aguardando confirmação oficial do gateway/webhook."
-            audit_event(db, request, "order.payment_gateway_pending", user, "order", order.id, f"Método: {payment_method}")
+            order.admin_note = "Pix Mercado Pago gerado. Aguardando confirmação oficial do pagamento."
+            payment = MercadoPagoPayment(
+                user_id=user.id,
+                order_id=order.id,
+                purpose="order_payment",
+                mp_payment_id=mp["payment_id"],
+                amount=order.final_price,
+                status=mp["status"],
+                qr_code=mp["qr_code"],
+                qr_code_base64=mp["qr_code_base64"],
+                description=f"Pagamento do pedido #{order.id}",
+            )
+            db.add(payment)
+            audit_event(db, request, "order.payment_pix_created", user, "order", order.id, f"Pagamento MP #{mp['payment_id']} | Valor R$ {fmt_money(order.final_price)}")
             db.commit()
-            return RedirectResponse("/minha-conta/ganhos", status_code=303)
+            db.refresh(payment)
+            db.refresh(order)
+            return templates.TemplateResponse(
+                "account_pages.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "section": "checkout",
+                    "order": build_order_card(order),
+                    "entity": order,
+                    "pix_payment": build_pix_payment_view(payment),
+                },
+            )
+
+        elif payment_method in ["card", "credit_card"]:
+            try:
+                checkout = create_mp_card_checkout(
+                    request=request,
+                    amount=order.final_price,
+                    description=f"Pagamento do pedido #{order.id} - LanceioCerto",
+                    payer_email=user.email,
+                    purpose="order_payment",
+                    user_id=user.id,
+                    order_id=order.id,
+                )
+            except Exception as exc:
+                return templates.TemplateResponse(
+                    "account_pages.html",
+                    {
+                        "request": request,
+                        "user": user,
+                        "section": "checkout",
+                        "order": build_order_card(order),
+                        "entity": order,
+                        "error": str(exc),
+                    },
+                    status_code=400,
+                )
+
+            order.status = "pending_gateway"
+            order.admin_note = "Pagamento por cartão Mercado Pago iniciado. Aguardando confirmação oficial."
+            payment = MercadoPagoPayment(
+                user_id=user.id,
+                order_id=order.id,
+                purpose="order_payment",
+                mp_payment_id=checkout["external_reference"],
+                amount=order.final_price,
+                status="pending",
+                qr_code="",
+                qr_code_base64="",
+                description=f"Cartão pedido #{order.id} | preferência {checkout['preference_id']}",
+            )
+            db.add(payment)
+            db.add(order)
+            audit_event(db, request, "order.payment_card_created", user, "order", order.id, f"Referência {checkout['external_reference']} | Valor R$ {fmt_money(order.final_price)}")
+            db.commit()
+            return RedirectResponse(checkout["init_point"], status_code=303)
 
         # Pagamento com saldo interno confirmado.
         order.status = "aguardando_escolha"
@@ -5336,6 +5778,135 @@ def confirm_payment_flow(
 
         return RedirectResponse("/minha-conta/ganhos", status_code=303)
 
+    finally:
+        db.close()
+
+
+@app.get("/minha-conta/pagamentos/{auction_id}/pix/status")
+def order_pix_payment_status(request: Request, auction_id: int, payment_id: str):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        order = (
+            db.query(WinnerOrder)
+            .filter(WinnerOrder.user_id == user.id, WinnerOrder.auction_id == auction_id)
+            .order_by(desc(WinnerOrder.created_at))
+            .first()
+        )
+        if not order:
+            return JSONResponse({"ok": False, "reason": "order_not_found"}, status_code=404)
+        row = db.query(MercadoPagoPayment).filter(
+            MercadoPagoPayment.user_id == user.id,
+            MercadoPagoPayment.order_id == order.id,
+            MercadoPagoPayment.mp_payment_id == str(payment_id),
+            MercadoPagoPayment.purpose == "order_payment",
+        ).first()
+        if not row:
+            return JSONResponse({"ok": False, "reason": "payment_not_found"}, status_code=404)
+        row = refresh_mp_payment(db, request, row.mp_payment_id)
+        db.refresh(order)
+        return {
+            "ok": True,
+            "approved": row.status == "approved",
+            "status": row.status,
+            "redirect_url": f"/minha-conta/pedido/{order.id}" if row.status == "approved" else "",
+        }
+    finally:
+        db.close()
+
+
+@app.get("/minha-conta/mercadopago/retorno")
+def mercadopago_checkout_return(request: Request):
+    """Retorno do Checkout Pro. A confirmação real continua sendo feita por consulta/webhook."""
+    payment_id = (
+        request.query_params.get("payment_id")
+        or request.query_params.get("collection_id")
+        or request.query_params.get("id")
+        or ""
+    )
+    external_reference = (request.query_params.get("external_reference") or request.query_params.get("ref") or "").strip()
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        row = None
+        if payment_id:
+            try:
+                mp_status = get_mp_payment_status(payment_id)
+                raw = mp_status.get("raw") or {}
+                external_reference = external_reference or str(raw.get("external_reference") or "").strip()
+            except Exception as exc:
+                print(f"[MP RETURN LOOKUP ERROR] payment_id={payment_id}: {exc}")
+        if external_reference:
+            row = db.query(MercadoPagoPayment).filter(
+                MercadoPagoPayment.user_id == user.id,
+                MercadoPagoPayment.mp_payment_id == external_reference,
+            ).first()
+        if row and payment_id:
+            # Mantém a referência local enquanto pendente; ao aprovar, aplica com segurança.
+            status = get_mp_payment_status(payment_id)
+            if status["status"] == "approved":
+                row.mp_payment_id = str(payment_id)
+                apply_approved_mp_payment(db, request, row)
+            else:
+                row.status = status["status"] or row.status
+                db.add(row)
+            db.commit()
+            db.refresh(row)
+            if row.purpose == "order_payment" and row.order_id:
+                return RedirectResponse(f"/minha-conta/pedido/{row.order_id}", status_code=303)
+        return RedirectResponse("/minha-conta/saldo", status_code=303)
+    finally:
+        db.close()
+
+
+@app.api_route("/webhook/mercadopago", methods=["GET", "POST"])
+async def mercadopago_webhook(request: Request):
+    payment_id = (
+        request.query_params.get("id")
+        or request.query_params.get("data.id")
+        or request.query_params.get("payment_id")
+        or ""
+    )
+    if request.method == "POST":
+        try:
+            payload = await request.json()
+            data = payload.get("data") if isinstance(payload, dict) else {}
+            if isinstance(data, dict):
+                payment_id = payment_id or str(data.get("id") or "")
+            payment_id = payment_id or str(payload.get("id") or payload.get("payment_id") or "")
+        except Exception:
+            pass
+
+    payment_id = str(payment_id or "").strip()
+    if not payment_id:
+        return {"ok": True, "ignored": "missing_payment_id"}
+
+    db = SessionLocal()
+    try:
+        row = db.query(MercadoPagoPayment).filter(MercadoPagoPayment.mp_payment_id == payment_id).first()
+        try:
+            mp_status = get_mp_payment_status(payment_id)
+            external_reference = str((mp_status.get("raw") or {}).get("external_reference") or "").strip()
+            if not row and external_reference:
+                row = db.query(MercadoPagoPayment).filter(MercadoPagoPayment.mp_payment_id == external_reference).first()
+                if row:
+                    # Troca a referência temporária pelo ID real do pagamento para evitar reaplicar.
+                    row.mp_payment_id = payment_id
+                    db.add(row)
+                    db.flush()
+            if not row:
+                return {"ok": True, "ignored": "payment_not_registered"}
+            if mp_status["status"] == "approved":
+                apply_approved_mp_payment(db, request, row)
+            else:
+                row.status = mp_status["status"] or row.status
+                db.add(row)
+            db.commit()
+            db.refresh(row)
+        except Exception as exc:
+            print(f"[MP WEBHOOK ERROR] payment_id={payment_id}: {exc}")
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "status": row.status}
     finally:
         db.close()
 
