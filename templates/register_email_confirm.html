@@ -3,31 +3,61 @@
 <section class="form-wrap email-confirm-wrap">
   <div class="form-card email-confirm-card">
     <span class="eyebrow">Confirmação de e-mail</span>
-    <h1>Confira seu e-mail.</h1>
+    <h1>Digite o código de segurança.</h1>
     <p class="muted">
-      Enviamos um link seguro de confirmação para <strong>{{ email }}</strong>.
-      Abra o e-mail e clique no botão/link para ativar sua conta.
+      Enviamos um código de 6 dígitos para <strong>{{ email }}</strong>.
+      Digite o código abaixo para confirmar seu e-mail e continuar para o envio dos documentos.
     </p>
 
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
-    {% if email_sent %}<div class="alert success">Link de confirmação enviado. Confira sua caixa de entrada e também o spam.</div>{% endif %}
-    {% if email_dev %}<div class="alert">E-mail temporariamente indisponível. O link foi registrado no console/log da aplicação.</div>{% endif %}
+    {% if email_sent %}<div class="alert success">Código enviado. Confira sua caixa de entrada e também o spam.</div>{% endif %}
+    {% if email_dev %}<div class="alert">E-mail temporariamente indisponível. O código foi registrado no console/log da aplicação.</div>{% endif %}
 
-    <div class="confirm-steps">
-      <div><strong>1</strong><span>Abra sua caixa de entrada.</span></div>
-      <div><strong>2</strong><span>Clique em confirmar e-mail.</span></div>
-      <div><strong>3</strong><span>Depois você continuará para o envio dos documentos.</span></div>
-    </div>
+    <form method="post" action="/cadastro/confirmar-email" class="email-code-form" autocomplete="off">
+      <input type="hidden" name="email" value="{{ email }}">
+
+      <label>Código de confirmação
+        <input
+          name="code"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          minlength="6"
+          placeholder="000000"
+          autocomplete="one-time-code"
+          required
+          class="email-code-input"
+          autofocus
+        >
+      </label>
+
+      <button type="submit" class="btn full">Confirmar e continuar</button>
+    </form>
 
     <form method="post" action="/cadastro/reenviar-confirmacao" class="resend-code-form">
       <input type="hidden" name="email" value="{{ email }}">
-      <button type="submit" class="btn full ghost">Reenviar link de confirmação</button>
+      <button type="submit" class="btn full ghost">Reenviar código</button>
     </form>
 
-    <a class="btn full" href="/login">Voltar para entrar</a>
+    <div class="confirm-steps compact-confirm-steps">
+      <div><strong>1</strong><span>Abra seu e-mail.</span></div>
+      <div><strong>2</strong><span>Copie o código de 6 dígitos.</span></div>
+      <div><strong>3</strong><span>Depois você continuará para os documentos.</span></div>
+    </div>
+
+    <a class="btn full ghost" href="/login">Voltar para entrar</a>
   </div>
 </section>
 <style>
-.email-confirm-wrap{align-content:start}.email-confirm-card h1{margin:8px 0 8px}.confirm-steps{display:grid;gap:10px;margin:18px 0}.confirm-steps div{display:grid;grid-template-columns:34px 1fr;gap:10px;align-items:center;border:1px solid rgba(148,163,184,.18);border-radius:14px;background:rgba(255,255,255,.035);padding:11px}.confirm-steps strong{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:rgba(59,130,246,.18);color:#bfdbfe}.confirm-steps span{color:#dbeafe;font-weight:800}.resend-code-form{margin:16px 0 10px}.resend-code-form .btn{display:flex}
+.email-confirm-wrap{align-content:start}.email-confirm-card h1{margin:8px 0 8px}.email-code-form{margin:18px 0 10px}.email-code-input{font-size:28px!important;font-weight:950!important;letter-spacing:.32em;text-align:center;padding-left:calc(13px + .32em)!important}.confirm-steps{display:grid;gap:10px;margin:16px 0}.confirm-steps div{display:grid;grid-template-columns:34px 1fr;gap:10px;align-items:center;border:1px solid rgba(148,163,184,.18);border-radius:14px;background:rgba(255,255,255,.035);padding:10px}.confirm-steps strong{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:rgba(59,130,246,.18);color:#bfdbfe}.confirm-steps span{color:#dbeafe;font-weight:800}.resend-code-form{margin:10px 0}.resend-code-form .btn{display:flex}.compact-confirm-steps{margin-top:16px}
 </style>
+<script>
+(function(){
+  const input = document.querySelector('.email-code-input');
+  if (!input) return;
+  input.addEventListener('input', function(){
+    this.value = String(this.value || '').replace(/\D/g, '').slice(0, 6);
+  });
+})();
+</script>
 {% endblock %}

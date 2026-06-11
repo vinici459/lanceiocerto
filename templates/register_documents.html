@@ -4,35 +4,78 @@
   <div class="form-card wide docs-card">
     <span class="eyebrow">Verificação de identidade</span>
     <h1>Envie seus documentos</h1>
-    <p class="muted">Essa etapa ajuda a proteger sua conta. Você pode enviar agora ou deixar para depois.</p>
+    <p class="muted">Você pode tirar as fotos pelo celular ou anexar arquivos pelo computador. Antes de enviar, confira se tudo está legível.</p>
 
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
     {% if success %}<div class="alert success">{{ success }}</div>{% endif %}
 
-    <form method="post" action="/cadastro/documentos" enctype="multipart/form-data">
-      <div class="docs-upload-grid">
-        <label>Frente do documento
-          <input type="file" name="document_front_file" accept="image/*,.pdf" capture="environment" required>
-          <small>No celular, você pode tirar a foto na hora. No computador, envie uma imagem legível.</small>
-        </label>
+    <form method="post" action="/cadastro/documentos" enctype="multipart/form-data" id="documents-form">
+      <div class="docs-upload-grid docs-upload-grid-pro">
+        <div class="doc-upload-card" data-doc-upload data-required="1" data-min-width="700" data-min-height="450">
+          <div class="doc-upload-head">
+            <strong>Frente do documento</strong>
+            <span>Obrigatório</span>
+          </div>
+          <p>No celular, tire a foto com boa luz. No computador, anexe uma imagem ou PDF legível.</p>
+          <input class="doc-file-input" type="file" name="document_front_file" accept="image/*,.pdf" hidden required>
+          <div class="doc-upload-actions">
+            <button type="button" class="btn small" data-pick-camera="environment">Tirar foto</button>
+            <button type="button" class="btn small ghost" data-pick-file>Escolher arquivo</button>
+          </div>
+          <div class="doc-preview" aria-live="polite"></div>
+          <div class="doc-quality-message"></div>
+        </div>
 
-        <label>Verso do documento
-          <input type="file" name="document_back_file" accept="image/*,.pdf" capture="environment" required>
-          <small>Use boa iluminação e evite cortes no documento.</small>
-        </label>
+        <div class="doc-upload-card" data-doc-upload data-required="1" data-min-width="700" data-min-height="450">
+          <div class="doc-upload-head">
+            <strong>Verso do documento</strong>
+            <span>Obrigatório</span>
+          </div>
+          <p>Evite cortes nas bordas do documento e confira se os dados aparecem com nitidez.</p>
+          <input class="doc-file-input" type="file" name="document_back_file" accept="image/*,.pdf" hidden required>
+          <div class="doc-upload-actions">
+            <button type="button" class="btn small" data-pick-camera="environment">Tirar foto</button>
+            <button type="button" class="btn small ghost" data-pick-file>Escolher arquivo</button>
+          </div>
+          <div class="doc-preview" aria-live="polite"></div>
+          <div class="doc-quality-message"></div>
+        </div>
 
-        <label>Selfie atual
-          <input type="file" name="selfie_file" accept="image/*" capture="user" required>
-          <small>A selfie precisa ser recente e mostrar bem o rosto.</small>
-        </label>
+        <div class="doc-upload-card" data-doc-upload data-required="1" data-min-width="480" data-min-height="480">
+          <div class="doc-upload-head">
+            <strong>Selfie atual</strong>
+            <span>Obrigatório</span>
+          </div>
+          <p>A selfie precisa mostrar bem seu rosto, sem óculos escuros e com boa iluminação.</p>
+          <input class="doc-file-input" type="file" name="selfie_file" accept="image/*" hidden required>
+          <div class="doc-upload-actions">
+            <button type="button" class="btn small" data-pick-camera="user">Tirar selfie</button>
+            <button type="button" class="btn small ghost" data-pick-file data-image-only="1">Escolher imagem</button>
+          </div>
+          <div class="doc-preview" aria-live="polite"></div>
+          <div class="doc-quality-message"></div>
+        </div>
 
-        <label>Comprovante de residência
-          <input type="file" name="residence_proof_file" accept="image/*,.pdf" capture="environment">
-          <small>Opcional, mas recomendado para aumentar a segurança da validação.</small>
-        </label>
+        <div class="doc-upload-card" data-doc-upload data-min-width="700" data-min-height="450">
+          <div class="doc-upload-head">
+            <strong>Comprovante de residência</strong>
+            <span>Opcional</span>
+          </div>
+          <p>Recomendado para aumentar a segurança da validação. Pode ser imagem ou PDF.</p>
+          <input class="doc-file-input" type="file" name="residence_proof_file" accept="image/*,.pdf" hidden>
+          <div class="doc-upload-actions">
+            <button type="button" class="btn small" data-pick-camera="environment">Tirar foto</button>
+            <button type="button" class="btn small ghost" data-pick-file>Escolher arquivo</button>
+          </div>
+          <div class="doc-preview" aria-live="polite"></div>
+          <div class="doc-quality-message"></div>
+        </div>
       </div>
 
-      <button class="btn full" type="submit">Enviar documentos para análise</button>
+      <div class="docs-submit-box">
+        <span>Confira as prévias antes de enviar. Se alguma imagem não estiver boa, clique em tirar novamente.</span>
+        <button class="btn full" type="submit">Enviar documentos para análise</button>
+      </div>
     </form>
 
     <form method="post" action="/cadastro/documentos/enviar-depois" class="skip-docs-form">
@@ -41,6 +84,136 @@
   </div>
 </section>
 <style>
-.docs-wrap{align-items:start}.docs-card h1{margin:8px 0 8px}.docs-upload-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}.docs-upload-grid label{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:14px}.docs-upload-grid small{display:block;margin-top:8px;line-height:1.35}.skip-docs-form{margin-top:12px}@media(max-width:840px){.docs-upload-grid{grid-template-columns:1fr}}
+.docs-wrap{align-items:start}.docs-card h1{margin:8px 0 8px}.docs-upload-grid-pro{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0}.doc-upload-card{border:1px solid rgba(148,163,184,.18);border-radius:18px;background:rgba(255,255,255,.035);padding:14px;display:grid;gap:10px}.doc-upload-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.doc-upload-head strong{font-size:17px}.doc-upload-head span{font-size:12px;font-weight:950;color:#bfdbfe;background:rgba(59,130,246,.14);border:1px solid rgba(96,165,250,.24);padding:6px 9px;border-radius:999px}.doc-upload-card p{margin:0;color:#b7c6e6;line-height:1.35}.doc-upload-actions{display:flex;gap:8px;flex-wrap:wrap}.doc-preview{min-height:64px;border:1px dashed rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.50);display:grid;place-items:center;overflow:hidden}.doc-preview:empty:before{content:'Nenhum arquivo selecionado';color:#94a3b8;font-weight:800;font-size:13px}.doc-preview img{width:100%;max-height:220px;object-fit:contain;background:#020617}.doc-file-chip{width:100%;padding:12px;color:#dbeafe;font-weight:900;display:flex;justify-content:space-between;gap:10px;align-items:center}.doc-quality-message{font-size:13px;font-weight:850;color:#b7c6e6;line-height:1.35}.doc-quality-message.good{color:#bbf7d0}.doc-quality-message.warn{color:#fde68a}.doc-quality-message.bad{color:#fecaca}.doc-ready-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}.doc-ready-actions button{font-size:12px}.docs-submit-box{display:grid;gap:10px;margin-top:12px}.docs-submit-box span{color:#b7c6e6;font-size:13px;font-weight:800}.skip-docs-form{margin-top:12px}@media(max-width:840px){.docs-upload-grid-pro{grid-template-columns:1fr}.doc-preview img{max-height:260px}}
 </style>
+<script>
+(function(){
+  const form = document.getElementById('documents-form');
+  if (!form) return;
+
+  function formatSize(bytes){
+    if (!bytes) return '0 KB';
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+    return (bytes / 1024 / 1024).toFixed(1).replace('.', ',') + ' MB';
+  }
+
+  function setMessage(card, type, text){
+    const msg = card.querySelector('.doc-quality-message');
+    msg.className = 'doc-quality-message ' + (type || '');
+    msg.textContent = text || '';
+  }
+
+  function addReadyActions(card, input){
+    let actions = card.querySelector('.doc-ready-actions');
+    if (!actions) {
+      actions = document.createElement('div');
+      actions.className = 'doc-ready-actions';
+      card.appendChild(actions);
+    }
+    actions.innerHTML = '';
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.className = 'btn small';
+    use.textContent = 'Usar este arquivo';
+    const change = document.createElement('button');
+    change.type = 'button';
+    change.className = 'btn small ghost';
+    change.textContent = 'Trocar / tirar novamente';
+    change.addEventListener('click', () => input.click());
+    actions.append(use, change);
+  }
+
+  function validateImage(card, file, img){
+    const minW = Number(card.dataset.minWidth || 0);
+    const minH = Number(card.dataset.minHeight || 0);
+    if (file.size < 25 * 1024) {
+      card.dataset.validQuality = '0';
+      setMessage(card, 'bad', 'Arquivo muito pequeno. Tire uma nova foto com mais qualidade.');
+      return;
+    }
+    if ((minW && img.naturalWidth < minW) || (minH && img.naturalHeight < minH)) {
+      card.dataset.validQuality = '0';
+      setMessage(card, 'warn', 'A imagem parece pequena ou pouco nítida. Recomendamos tirar novamente antes de enviar.');
+      return;
+    }
+    card.dataset.validQuality = '1';
+    setMessage(card, 'good', 'Prévia carregada. Confira se está legível antes de enviar.');
+  }
+
+  document.querySelectorAll('[data-doc-upload]').forEach((card) => {
+    const input = card.querySelector('.doc-file-input');
+    const preview = card.querySelector('.doc-preview');
+
+    card.querySelectorAll('[data-pick-camera]').forEach((button) => {
+      button.addEventListener('click', () => {
+        input.value = '';
+        input.accept = 'image/*';
+        input.setAttribute('capture', button.dataset.pickCamera || 'environment');
+        input.click();
+      });
+    });
+
+    card.querySelectorAll('[data-pick-file]').forEach((button) => {
+      button.addEventListener('click', () => {
+        input.value = '';
+        input.accept = button.dataset.imageOnly === '1' ? 'image/*' : 'image/*,.pdf';
+        input.removeAttribute('capture');
+        input.click();
+      });
+    });
+
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      card.dataset.validQuality = '';
+      preview.innerHTML = '';
+      const oldActions = card.querySelector('.doc-ready-actions');
+      if (oldActions) oldActions.remove();
+      if (!file) {
+        setMessage(card, '', '');
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        input.value = '';
+        setMessage(card, 'bad', 'Arquivo maior que 8 MB. Escolha uma imagem ou PDF menor.');
+        return;
+      }
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        const chip = document.createElement('div');
+        chip.className = 'doc-file-chip';
+        chip.innerHTML = '<span>PDF selecionado</span><small>' + formatSize(file.size) + '</small>';
+        preview.appendChild(chip);
+        card.dataset.validQuality = '1';
+        setMessage(card, 'good', 'PDF selecionado. Confira se o arquivo está correto antes de enviar.');
+        addReadyActions(card, input);
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        input.value = '';
+        setMessage(card, 'bad', 'Formato inválido. Envie imagem ou PDF.');
+        return;
+      }
+      const img = document.createElement('img');
+      img.alt = 'Prévia do documento';
+      img.onload = () => validateImage(card, file, img);
+      img.src = URL.createObjectURL(file);
+      preview.appendChild(img);
+      addReadyActions(card, input);
+    });
+  });
+
+  form.addEventListener('submit', (event) => {
+    const bad = [];
+    document.querySelectorAll('[data-doc-upload]').forEach((card) => {
+      const input = card.querySelector('.doc-file-input');
+      const title = card.querySelector('.doc-upload-head strong')?.textContent || 'arquivo';
+      if (card.dataset.required === '1' && (!input.files || !input.files[0])) bad.push(title);
+      if (input.files && input.files[0] && card.dataset.validQuality === '0') bad.push(title + ' com baixa qualidade');
+    });
+    if (bad.length) {
+      event.preventDefault();
+      alert('Revise antes de enviar: ' + bad.join(', ') + '.');
+    }
+  });
+})();
+</script>
 {% endblock %}
