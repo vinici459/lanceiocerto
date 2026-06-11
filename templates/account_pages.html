@@ -14,6 +14,7 @@
 .account-doc-status-card{border-color:rgba(96,165,250,.28);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(15,23,42,.82))}.doc-status-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}.doc-status-header h2{margin:4px 0 6px;font-size:24px}.doc-status-header p{margin:0;color:#b7c6e6;line-height:1.45}.doc-status-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:999px;font-weight:900;white-space:nowrap;border:1px solid rgba(251,191,36,.38);background:rgba(251,191,36,.12);color:#fde68a}.doc-status-pill.verified{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.12);color:#bbf7d0}.doc-status-pill.rejected{border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.12);color:#fecaca}.doc-admin-note{display:grid;gap:5px;margin:12px 0 16px;padding:13px 14px;border-radius:15px;border:1px solid rgba(96,165,250,.26);background:rgba(37,99,235,.10)}.doc-admin-note span{color:#dbeafe}.doc-progress-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}.doc-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#b7c6e6;font-weight:800}.doc-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff}.doc-step.done{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08);color:#dcfce7}.doc-step.done strong{background:#22c55e;color:#fff}.doc-check-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.doc-check-grid div{border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);border-radius:15px;padding:12px}.doc-check-grid span{display:block;color:#bfdbfe;font-size:13px;margin-bottom:5px}.doc-actions-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}.doc-actions-row small{color:#b7c6e6}@media(max-width:850px){.doc-progress-line,.doc-check-grid{grid-template-columns:1fr}.doc-status-header{flex-direction:column}}
 
 .account-danger-link{color:#fecaca!important;border-color:rgba(248,113,113,.24)!important}.account-danger-link.active{background:rgba(239,68,68,.16)!important;color:#fff!important}.delete-account-card{border-color:rgba(248,113,113,.26)!important;background:linear-gradient(180deg,rgba(127,29,29,.12),rgba(15,23,42,.92))!important}.delete-account-card .section-head{margin-bottom:8px}.delete-account-form{display:grid;gap:12px;max-width:760px}.delete-account-form select,.delete-account-form textarea{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.delete-account-form textarea{resize:vertical;min-height:84px}.delete-account-form small{display:block;margin-top:6px;color:#b7c6e6}.delete-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:2px}.delete-actions .btn{width:auto}.danger-btn{background:linear-gradient(135deg,#dc2626,#991b1b)!important;border-color:rgba(248,113,113,.45)!important}.delete-confirm-overlay{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:22px;background:rgba(2,6,23,.72);backdrop-filter:blur(8px)}.delete-confirm-overlay.active{display:flex}.delete-confirm-card{width:min(460px,100%);border:1px solid rgba(248,113,113,.30);background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(30,41,59,.98));border-radius:22px;padding:20px;box-shadow:0 28px 80px rgba(0,0,0,.48)}.delete-confirm-card h2{margin:0 0 8px;font-size:26px}.delete-confirm-card p{margin:0 0 10px;color:#cbd5e1;line-height:1.45}.delete-confirm-card .delete-confirm-warning{border:1px solid rgba(248,113,113,.24);background:rgba(239,68,68,.10);color:#fecaca;border-radius:15px;padding:12px;margin:12px 0}.delete-confirm-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:16px}.delete-confirm-actions .btn{width:auto}
+.account-status-panel.verified{border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.08)}.account-status-panel.pending{border-color:rgba(251,191,36,.32);background:rgba(251,191,36,.08)}.notice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.pending-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.12)}.pending-row:last-child{border-bottom:0}.mini-auction{display:flex;gap:12px;align-items:center}.mini-auction img{width:82px;height:82px;border-radius:14px;object-fit:cover}.account-wallet-panel.active{display:block}
 </style>
 {% endblock %}
 {% block content %}
@@ -25,18 +26,17 @@
       Resumo da conta
     </a>
 
-    <a href="/minha-conta#account-balance-panel"
-       class="account-side-link account-side-balance"
-       data-account-target="account-balance-panel">
+    <a href="/minha-conta/saldo"
+       class="account-side-link account-side-balance {% if section == 'wallet' %}active{% endif %}">
       Saldo
     </a>
 
     <a href="/minha-conta/cadastro" class="account-side-link {% if section == 'profile' %}active{% endif %}">
-      Status da Conta
+      Meu Cadastro
     </a>
 
-    <a href="/minha-conta/comprovantes" class="account-side-link {% if section == 'receipts' %}active{% endif %}">
-      Comprovantes e Auditoria
+    <a href="/minha-conta/auditoria" class="account-side-link {% if section == 'receipts' %}active{% endif %}">
+      Auditoria
     </a>
 
     <a href="/minha-conta/participacoes" class="account-side-link {% if section == 'participations' %}active{% endif %}">
@@ -44,7 +44,7 @@
     </a>
 
     <a href="/minha-conta/ganhos" class="account-side-link {% if section in ['wins','order_detail'] %}active{% endif %}">
-      Meus Pedidos
+      Leilões Ganhos
     </a>
 
     <a href="/minha-conta/pagamentos" class="account-side-link {% if section == 'payments' %}active{% endif %}">
@@ -65,52 +65,95 @@
 <div class="section-head">
   <div>
     <h1>Resumo da conta</h1>
-    <p>Acompanhe suas participações, lances e pendências em um só lugar.</p>
   </div>
 </div>
-
 
 <div class="stats-grid account-stats">
-    <div class="stat"><span>Participações</span><strong>{{ stats.distinct_auctions }}</strong></div>
+  <div class="stat"><span>Participações</span><strong>{{ stats.distinct_auctions }}</strong></div>
   <div class="stat"><span>Lances</span><strong>{{ stats.bids_total }}</strong></div>
-  <div class="stat"><span>Ganhos</span><strong>{{ stats.won }}</strong></div>
-  <div class="stat"><span>Pendentes</span><strong>{{ stats.pending }}</strong></div>
-  <div class="stat"><span>Expirados</span><strong>{{ stats.expired }}</strong></div>
-</div>
-
-<div class="panel-card account-quick-actions">
-  <div>
-    <h2>Ações rápidas</h2>
-    <p class="muted">Acesse as partes mais importantes da sua conta sem procurar no menu lateral.</p>
-  </div>
-  <div class="quick-action-grid">
-    <a class="btn small" href="/minha-conta#account-balance-panel" data-account-target="account-balance-panel">Adicionar saldo</a>
-    <a class="btn small ghost" href="/minha-conta/cadastro">Enviar documentos</a>
-    <a class="btn small ghost" href="/minha-conta/pagamentos">Pagamentos pendentes</a>
-    <a class="btn small ghost" href="/minha-conta/ganhos">Meus pedidos</a>
-  </div>
+  <div class="stat"><span>Leilões ganhos</span><strong>{{ stats.won }}</strong></div>
+  <div class="stat"><span>Pagamentos pendentes</span><strong>{{ stats.pending }}</strong></div>
+  <div class="stat"><span>Produtos expirados</span><strong>{{ stats.expired }}</strong></div>
 </div>
 
 <div class="panel-card account-status-panel {{ 'verified' if user.identity_status == 'verified' else 'pending' }}">
   <div>
     <span class="status-dot"></span>
-    <h2>{{ 'Conta confirmada' if user.identity_status == 'verified' else 'Conta com pendências de documentos' }}</h2>
-    <p>
-      {% if user.identity_status == 'verified' %}
-        Seu apelido aparece em verde e sua conta está liberada para pagamento, envio e solicitação de saque.
-      {% else %}
-        Você pode participar dos leilões, mas o envio de produtos e saques só serão liberados após a análise dos documentos pelo administrador.
-      {% endif %}
-    </p>
+    {% if user.identity_status == 'verified' %}
+      <h2>Conta ativada</h2>
+      <p>Seu cadastro e documentos estão aprovados.</p>
+    {% elif user.document_file_url and user.selfie_file_url %}
+      <h2>Conta com documentos em análise</h2>
+      <p>Recebemos seus documentos. Aguarde a conferência do administrador.</p>
+    {% else %}
+      <h2>Conta com pendências</h2>
+      <p>Envie seus documentos para liberar todas as funções da plataforma.</p>
+    {% endif %}
   </div>
   <a href="/minha-conta/cadastro" class="btn small {{ 'ghost' if user.identity_status == 'verified' else '' }}">Ver cadastro</a>
 </div>
 
-<div id="account-balance-panel" class="panel-card account-wallet-panel">
+<div class="notice-grid">
+  <div class="panel-card">
+    <h2>Último leilão ganho</h2>
+    {% if latest_orders %}
+      {% set o = latest_orders[0] %}
+      <div class="mini-auction">
+        <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async">
+        <div>
+          <strong>{{ o.auction_title }}</strong>
+          <p>Status: {{ o.status_label or o.status }}</p>
+          <p>Valor final: <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></p>
+          <a href="/minha-conta/pedido/{{ o.id }}" class="btn small">Acompanhar</a>
+        </div>
+      </div>
+    {% else %}
+      <p class="muted">Você ainda não ganhou nenhum leilão.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel-card">
+    <h2>Pagamentos pendentes</h2>
+    {% if pending_orders %}
+      {% for o in pending_orders %}
+      <div class="pending-row">
+        <div>
+          <strong>{{ o.auction_title }}</strong>
+          <p>Valor: R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
+          <p class="highlight-warn">Prazo: {{ o.remaining_label }}</p>
+        </div>
+        <a href="/minha-conta/pagamentos/{{ o.auction_id }}" class="btn small">Pagar</a>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">Nenhum pagamento pendente no momento.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel-card">
+    <h2>Chamados em aberto</h2>
+    {% if open_tickets %}
+      {% for t in open_tickets %}
+      <div class="pending-row">
+        <div>
+          <strong>{{ t.subject or 'Chamado de suporte' }}</strong>
+          <p>Status: {{ t.status }}</p>
+        </div>
+        {% if t.order_id %}<a href="/minha-conta/pedido/{{ t.order_id }}" class="btn small ghost">Ver pedido</a>{% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">Nenhum chamado em aberto.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% elif section == 'wallet' %}
+<div id="account-balance-panel" class="panel-card account-wallet-panel active">
   <div class="section-head compact-head">
     <div>
-      <h2>Saldo</h2>
-      <p>Depósitos reais devem ser confirmados pelo gateway de pagamento antes de liberar saldo. Saques exigem conta confirmada.</p>
+      <h1>Saldo</h1>
+      <p>Deposite ou solicite saque pela sua carteira.</p>
     </div>
     <span class="wallet-badge">Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
   </div>
@@ -193,49 +236,10 @@
   </div>
 </div>
 
-<div class="notice-grid">
-  <div class="panel-card">
-    <h2>Último leilão ganho</h2>
-    {% if latest_orders %}
-      {% set o = latest_orders[0] %}
-      <div class="mini-auction">
-        <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async">
-        <div>
-          <strong>{{ o.auction_title }}</strong>
-          <p>Status: {{ o.status }}</p>
-          <p>Valor final: R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
-          {% if o.status == 'pending_payment' %}
-            <p class="highlight-warn">Prazo restante: {{ o.remaining_label }}</p>
-            <a href="{{ o.payment_link }}" class="btn small">Pagar agora</a>
-          {% endif %}
-        </div>
-      </div>
-    {% else %}
-      <p class="muted">Você ainda não ganhou nenhum leilão.</p>
-    {% endif %}
-  </div>
-  <div class="panel-card">
-    <h2>Pagamentos pendentes</h2>
-    {% if pending_orders %}
-      {% for o in pending_orders %}
-      <div class="pending-row">
-        <div>
-          <strong>{{ o.auction_title }}</strong>
-          <p>Valor: R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
-          <p class="highlight-warn">Prazo: {{ o.remaining_label }}</p>
-        </div>
-        <a href="{{ o.payment_link }}" class="btn small">Pagar agora</a>
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="muted">Nenhum pagamento pendente no momento.</p>
-    {% endif %}
-  </div>
-</div>
 
 {% elif section == 'profile' %}
 <div class="panel-card">
-  <div class="section-head"><div><h1>Meu Cadastro</h1><p>Dados básicos, acesso e endereço principal.</p></div></div>
+  <div class="section-head"><div><h1>Meu Cadastro</h1></div></div>
   <div class="profile-grid">
     <div><span>Apelido público</span><strong>@{{ user.public_name or user.nickname }}</strong></div>
     <div><span>E-mail</span><strong>{{ user.email }}</strong></div>
@@ -255,18 +259,18 @@
     <div>
       <span class="eyebrow">Verificação documental</span>
       {% if user.identity_status == 'verified' %}
-        <h2>Documentos aprovados</h2>
-        <p>Sua conta foi conferida pelo administrador. Entregas e saques ficam liberados conforme as regras da plataforma.</p>
+        <h2>Cadastro aprovado</h2>
+        <p>Está tudo certo com seus documentos.</p>
       {% elif user.identity_status == 'rejected' %}
         <h2>Correção necessária</h2>
         <p>Algum documento precisa ser reenviado. Confira a observação abaixo e envie uma nova versão legível.</p>
       {% else %}
-        <h2>Documentos recebidos e em análise</h2>
-        <p>Seus documentos ficam na fila de conferência do administrador. Enquanto isso, o status aparece como pendente/em análise.</p>
+        <h2>Aguardando envio de documentos</h2>
+        <p>Envie a frente do documento e uma selfie para iniciar a análise.</p>
       {% endif %}
     </div>
     <span class="doc-status-pill {{ user.identity_status or 'pending' }}">
-      {% if user.identity_status == 'verified' %}Aprovado{% elif user.identity_status == 'rejected' %}Reenviar{% else %}Em análise{% endif %}
+      {% if user.identity_status == 'verified' %}Tudo certo{% elif user.identity_status == 'rejected' %}Reenviar{% elif user.document_file_url and user.selfie_file_url %}Em análise{% else %}Aguardando envio{% endif %}
     </span>
   </div>
 
@@ -292,14 +296,80 @@
   </div>
 
   <div class="doc-actions-row">
-    <a href="/minha-conta/verificacao" class="btn">{{ 'Reenviar documentos' if user.identity_status == 'rejected' else 'Editar/Reenviar documentos' }}</a>
+    <a href="/minha-conta/verificacao" class="btn">{{ 'Reenviar documentos' if user.identity_status == 'rejected' else 'Enviar ou reenviar documentos' }}</a>
     <small>Ao reenviar, sua conta volta para análise e o administrador verá os novos arquivos.</small>
   </div>
 </div>
 
+
+{% elif section == 'receipts' %}
+<div class="panel-card">
+  <div class="section-head"><div><h1>Auditoria</h1></div></div>
+  <p class="muted">Histórico das suas movimentações, pagamentos, depósitos, saques, pedidos e alterações relevantes na conta.</p>
+
+  <h2>Movimentações de saldo</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Observação</th></tr></thead>
+      <tbody>
+      {% for tx in wallet_transactions %}
+        <tr>
+          <td>{{ fmt_br_datetime(tx.created_at) if fmt_br_datetime is defined else tx.created_at }}</td>
+          <td>{{ tx.kind }}</td>
+          <td>R$ {{ '%.2f'|format(tx.amount or 0)|replace('.', ',') }}</td>
+          <td>{{ tx.note or '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4">Nenhuma movimentação de saldo registrada.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel-card">
+  <h2>Pedidos e pagamentos</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Data</th><th>Produto</th><th>Valor</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for o in orders_raw %}
+        <tr>
+          <td>{{ fmt_br_datetime(o.created_at) if fmt_br_datetime is defined else o.created_at }}</td>
+          <td>{{ o.auction.title if o.auction else 'Produto' }}</td>
+          <td>R$ {{ '%.2f'|format(o.final_price or 0)|replace('.', ',') }}</td>
+          <td>{{ o.status }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4">Nenhum pedido registrado.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel-card">
+  <h2>Eventos da conta</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Data</th><th>Ação</th><th>Detalhes</th></tr></thead>
+      <tbody>
+      {% for log in audit_logs %}
+        <tr>
+          <td>{{ fmt_br_datetime(log.created_at) if fmt_br_datetime is defined else log.created_at }}</td>
+          <td>{{ log.action }}</td>
+          <td>{{ log.details or '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="3">Nenhum evento registrado.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% elif section == 'participations' %}
 <div class="panel-card">
-  <div class="section-head"><div><h1>Leilões Participados</h1><p>Histórico de onde você já deu lance.</p></div></div>
+  <div class="section-head"><div><h1>Leilões Participados</h1></div></div>
   <div class="cards account-cards">
     {% for item in items %}
     <article class="card auction-card compact-card">
@@ -321,7 +391,7 @@
 
 {% elif section == 'payments' %}
 <div class="panel-card">
-  <div class="section-head"><div><h1>Pagamentos Pendentes</h1><p>Produtos aguardando pagamento dentro do prazo de 1 dia.</p></div></div>
+  <div class="section-head"><div><h1>Pagamentos Pendentes</h1></div></div>
   <div class="cards account-cards">
     {% for o in orders %}
     <article class="card auction-card compact-card">
@@ -343,9 +413,9 @@
 <div class="orders-page-marketplace">
   <div class="section-head orders-head-marketplace">
     <div>
-      <span class="orders-eyebrow">Área de compras</span>
-      <h1>Meus Pedidos</h1>
-      <p>Acompanhe seus produtos arrematados, escolha como deseja receber e envie link de pagamento quando preferir fazer o próprio pedido.</p>
+      <span class="orders-eyebrow">Leilões vencidos</span>
+      <h1>Leilões Ganhos</h1>
+      <p>Acompanhe pagamento, preparação, envio e entrega dos produtos que você venceu.</p>
     </div>
     <a class="btn small ghost" href="/minha-conta/pagamentos">Pagamentos pendentes</a>
   </div>
@@ -380,8 +450,6 @@
             <div><span>Economia</span><strong class="order-saving">{% if savings %}R$ {{ '%.2f'|format(savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
             <div><span>Atendimento</span><strong>{% if o.fulfillment_mode == "customer_purchase" %}Pedido feito por você{% elif o.fulfillment_mode == "site_purchase" %}Compra assistida{% else %}Aguardando escolha{% endif %}</strong></div>
           </div>
-
-          {% if o.admin_note %}<p class="order-admin-note">{{ o.admin_note }}</p>{% endif %}
         </div>
 
         <div class="order-summary-actions">
@@ -393,8 +461,8 @@
       </article>
     {% else %}
       <div class="panel-card empty-card orders-empty-marketplace">
-        <h2>Você ainda não tem pedidos.</h2>
-        <p class="muted">Quando vencer um leilão, ele aparecerá aqui como um pedido para acompanhar pagamento, envio e entrega.</p>
+        <h2>Você ainda não ganhou leilões.</h2>
+        <p class="muted">Quando vencer um leilão, ele aparecerá aqui para acompanhar pagamento, envio e entrega.</p>
         <a class="btn small" href="/">Ver leilões disponíveis</a>
       </div>
     {% endfor %}
@@ -615,7 +683,7 @@
 
 {% elif section == 'expired' %}
 <div class="panel-card">
-  <div class="section-head"><div><h1>Produtos Expirados</h1><p>Itens que você venceu, mas perdeu o prazo.</p></div></div>
+  <div class="section-head"><div><h1>Produtos Expirados</h1></div></div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Produto</th><th>Valor</th><th>Prazo encerrado</th><th>Status</th></tr></thead>
@@ -1003,26 +1071,7 @@
 
 {% endif %}
   
-    <section class="panel-card">
-      <div class="section-head compact-head">
-        <div>
-          <h2>Mensagens do admin</h2>
-          <p>Atualizações diretas sobre seus produtos arrematados, compra e envio.</p>
-        </div>
-      </div>
-      <div class="direct-user-messages">
-        {% for msg in direct_messages if direct_messages is defined %}
-        <div class="direct-user-message {% if not msg.is_open %}closed{% endif %}">
-          <strong>{{ msg.order.auction.title if msg.order and msg.order.auction else 'Produto' }}</strong>
-          <span>{{ msg.created_at.strftime('%d/%m/%Y %H:%M') if msg.created_at else '—' }}</span>
-          <p>{{ msg.message }}</p>
-          {% if not msg.is_open %}<small>Atendimento fechado pelo admin.</small>{% endif %}
-        </div>
-        {% else %}
-        <p class="muted">Nenhuma mensagem direta no momento.</p>
-        {% endfor %}
-      </div>
-    </section>
+
 </main>
 </div>
 {% endblock %}

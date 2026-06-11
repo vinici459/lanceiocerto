@@ -4773,10 +4773,18 @@ def cached_account_dashboard_context(db: Session, user: User, ttl_seconds: int =
         .limit(5)
         .all()
     )
+    open_tickets = (
+        db.query(SupportTicket)
+        .filter(SupportTicket.user_id == user.id, SupportTicket.status.in_(["open", "in_review", "dispute"]))
+        .order_by(desc(SupportTicket.created_at))
+        .limit(3)
+        .all()
+    )
     return nav_cache_set(key, {
         "stats": stats,
         "pending_orders": [build_order_card(x) for x in pending_orders[:3]],
         "latest_orders": [build_order_card(x) for x in won_orders[:5]],
+        "open_tickets": open_tickets,
     }, ttl_seconds)
 
 
@@ -4795,6 +4803,7 @@ def my_account(request: Request):
                 "stats": account_summary["stats"],
                 "pending_orders": account_summary["pending_orders"],
                 "latest_orders": account_summary["latest_orders"],
+                "open_tickets": account_summary.get("open_tickets", []),
                 "wallet_transactions": [],
                 "withdrawals": [],
                 "tickets": [],
@@ -4802,6 +4811,16 @@ def my_account(request: Request):
                 "account_status_label": account_status_label(user),
             },
         )
+    finally:
+        db.close()
+
+
+@app.get("/minha-conta/saldo", response_class=HTMLResponse)
+def my_wallet(request: Request):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wallet"})
     finally:
         db.close()
 
@@ -4827,6 +4846,7 @@ def account_add_balance(request: Request, amount: float = Form(...)):
 
 
 
+@app.get("/minha-conta/auditoria", response_class=HTMLResponse)
 @app.get("/minha-conta/comprovantes", response_class=HTMLResponse)
 def my_receipts(request: Request):
     db = SessionLocal()
