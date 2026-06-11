@@ -879,29 +879,64 @@ def mp_api_request(method: str, url: str, payload: Optional[dict] = None, timeou
 
 def create_mp_pix_payment(*, amount: float, description: str, payer_email: str) -> dict:
     amount = BR(amount)
+
+    # PIX expira em 15 minutos
     expires_at = datetime.utcnow() + timedelta(minutes=15)
+
     payload = {
         "transaction_amount": amount,
         "description": description[:220],
         "payment_method_id": "pix",
-        "date_of_expiration": expires_at.isoformat(timespec="seconds") + "Z",
+
+        # FORMATO EXIGIDO PELO MERCADO PAGO
+        "date_of_expiration": expires_at.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+
         "payer": {
             "email": (payer_email or "cliente@lanceiocerto.com.br").strip(),
         },
     }
+
     base_url = public_base_url()
     if base_url:
         payload["notification_url"] = f"{base_url}/webhook/mercadopago"
 
-    payment = mp_api_request("POST", "https://api.mercadopago.com/v1/payments", payload)
+    print("[PIX PAYLOAD]", payload)
+    print("[PIX EXPIRATION]", payload["date_of_expiration"])
+
+    payment = mp_api_request(
+        "POST",
+        "https://api.mercadopago.com/v1/payments",
+        payload,
+    )
+
     payment_id = str(payment.get("id") or "").strip()
     status = (payment.get("status") or "pending").strip().lower()
-    tx = payment.get("point_of_interaction", {}).get("transaction_data", {}) or {}
+
+    tx = (
+        payment.get("point_of_interaction", {})
+        .get("transaction_data", {})
+        or {}
+    )
+
     qr_code = tx.get("qr_code") or ""
     qr_base64 = tx.get("qr_code_base64") or ""
 
-    if not payment_id or not qr_code or not qr_base64:
-        raise RuntimeError("O Mercado Pago não retornou QR Code Pix completo.")
+    print("[PIX RESPONSE]", payment)
+
+    if not payment_id:
+        raise RuntimeError(
+            "Mercado Pago não retornou ID de pagamento."
+        )
+
+    if not qr_code:
+        raise RuntimeError(
+            "Mercado Pago não retornou código PIX."
+        )
+
+    if not qr_base64:
+        raise RuntimeError(
+            "Mercado Pago não retornou QR Code PIX."
+        )
 
     return {
         "payment_id": payment_id,
