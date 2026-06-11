@@ -13,7 +13,7 @@
 
 .account-doc-status-card{border-color:rgba(96,165,250,.28);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(15,23,42,.82))}.doc-status-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}.doc-status-header h2{margin:4px 0 6px;font-size:24px}.doc-status-header p{margin:0;color:#b7c6e6;line-height:1.45}.doc-status-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:999px;font-weight:900;white-space:nowrap;border:1px solid rgba(251,191,36,.38);background:rgba(251,191,36,.12);color:#fde68a}.doc-status-pill.verified{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.12);color:#bbf7d0}.doc-status-pill.rejected{border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.12);color:#fecaca}.doc-admin-note{display:grid;gap:5px;margin:12px 0 16px;padding:13px 14px;border-radius:15px;border:1px solid rgba(96,165,250,.26);background:rgba(37,99,235,.10)}.doc-admin-note span{color:#dbeafe}.doc-progress-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}.doc-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#b7c6e6;font-weight:800}.doc-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff}.doc-step.done{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08);color:#dcfce7}.doc-step.done strong{background:#22c55e;color:#fff}.doc-check-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.doc-check-grid div{border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);border-radius:15px;padding:12px}.doc-check-grid span{display:block;color:#bfdbfe;font-size:13px;margin-bottom:5px}.doc-actions-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}.doc-actions-row small{color:#b7c6e6}@media(max-width:850px){.doc-progress-line,.doc-check-grid{grid-template-columns:1fr}.doc-status-header{flex-direction:column}}
 
-.account-danger-link{color:#fecaca!important;border-color:rgba(248,113,113,.24)!important}.account-danger-link.active{background:rgba(239,68,68,.16)!important;color:#fff!important}.delete-account-card{border-color:rgba(248,113,113,.30)!important;background:linear-gradient(180deg,rgba(127,29,29,.25),rgba(15,23,42,.88))!important}.delete-warning-box{border:1px solid rgba(248,113,113,.35);background:rgba(239,68,68,.10);border-radius:18px;padding:14px;margin:14px 0;color:#fee2e2}.delete-warning-box strong{display:block;font-size:18px;margin-bottom:6px}.delete-warning-box p{margin:0;line-height:1.45;color:#fecaca}.delete-account-form{display:grid;gap:14px}.delete-account-form select,.delete-account-form textarea{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.delete-account-form textarea{resize:vertical;min-height:100px}.delete-account-form small{display:block;margin-top:6px;color:#b7c6e6}.delete-confirm-line{border:1px solid rgba(248,113,113,.25);border-radius:16px;padding:12px;background:rgba(239,68,68,.08)}.danger-btn{background:linear-gradient(135deg,#dc2626,#991b1b)!important;border-color:rgba(248,113,113,.45)!important}
+.account-danger-link{color:#fecaca!important;border-color:rgba(248,113,113,.24)!important}.account-danger-link.active{background:rgba(239,68,68,.16)!important;color:#fff!important}.delete-account-card{border-color:rgba(248,113,113,.26)!important;background:linear-gradient(180deg,rgba(127,29,29,.16),rgba(15,23,42,.90))!important}.delete-account-card .section-head{margin-bottom:8px}.delete-mini-warning{display:flex;align-items:flex-start;gap:9px;border:1px solid rgba(248,113,113,.26);background:rgba(239,68,68,.08);border-radius:14px;padding:10px 12px;margin:10px 0 14px;color:#fecaca;font-size:14px;line-height:1.35}.delete-mini-warning strong{color:#fff}.delete-account-form{display:grid;gap:12px}.delete-account-form select,.delete-account-form textarea{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.delete-account-form textarea{resize:vertical;min-height:84px}.delete-account-form small{display:block;margin-top:6px;color:#b7c6e6}.delete-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:2px}.delete-actions .btn{width:auto}.danger-btn{background:linear-gradient(135deg,#dc2626,#991b1b)!important;border-color:rgba(248,113,113,.45)!important}.delete-secondary-note{color:#b7c6e6;font-size:13px;font-weight:800}
 </style>
 {% endblock %}
 {% block content %}
@@ -898,7 +898,7 @@
   <div class="section-head compact-head">
     <div>
       <h1>Excluir conta</h1>
-      <p>Use esta opção somente se você realmente deseja encerrar seu acesso ao Lanceio Certo.</p>
+      <p>Informe o motivo e confirme com sua senha.</p>
     </div>
   </div>
 
@@ -906,12 +906,12 @@
     <div class="alert">{{ error }}</div>
   {% endif %}
 
-  <div class="delete-warning-box">
-    <strong>Atenção antes de continuar</strong>
-    <p>Ao excluir a conta, seu acesso será encerrado e seus dados de login serão desativados. O histórico financeiro, lances, pedidos, auditoria e registros obrigatórios da operação permanecem arquivados para consulta administrativa e segurança da plataforma.</p>
+  <div class="delete-mini-warning">
+    <span>⚠️</span>
+    <span><strong>Atenção:</strong> ao confirmar, seu acesso será encerrado. O motivo será registrado para o admin.</span>
   </div>
 
-  <form method="post" action="/minha-conta/deletar" class="delete-account-form">
+  <form method="post" action="/minha-conta/deletar" class="delete-account-form" id="delete-account-form">
     <label>Motivo da exclusão
       <select name="delete_reason" required>
         <option value="">Selecione um motivo</option>
@@ -926,23 +926,37 @@
     </label>
 
     <label>Detalhes adicionais
-      <textarea name="delete_details" maxlength="1000" placeholder="Conte brevemente o motivo. Isso ajuda o administrador a entender o que aconteceu."></textarea>
-      <small>Essa informação será registrada na Central de Auditoria do admin.</small>
+      <textarea name="delete_details" maxlength="1000" placeholder="Opcional: conte brevemente o motivo."></textarea>
+      <small>Essas informações aparecem na Central de Auditoria do admin.</small>
     </label>
 
     <label>Confirme sua senha
-      <input type="password" name="password" autocomplete="current-password" required placeholder="Digite sua senha para confirmar">
-      <small>Por segurança, a exclusão só será feita após confirmar a senha da conta.</small>
+      <input type="password" name="password" autocomplete="current-password" required placeholder="Digite sua senha">
     </label>
 
-    <label class="check-line delete-confirm-line">
-      <input type="checkbox" name="confirm_delete" value="1" required>
-      <span>Entendo que minha conta será desativada e que os registros financeiros, operacionais e de auditoria permanecerão arquivados pela plataforma.</span>
-    </label>
+    <input type="hidden" name="confirm_delete" value="1">
 
-    <button class="btn full danger-btn" type="submit" onclick="return confirm('Tem certeza que deseja excluir sua conta? Essa ação encerrará seu acesso.');">Excluir minha conta</button>
+    <div class="delete-actions">
+      <button class="btn danger-btn" type="submit" data-delete-account-submit>Excluir minha conta</button>
+      <a class="btn ghost" href="/minha-conta">Cancelar</a>
+      <span class="delete-secondary-note">A confirmação final aparece ao clicar em excluir.</span>
+    </div>
   </form>
 </div>
+
+<script>
+(function(){
+  const form = document.getElementById('delete-account-form');
+  if (!form) return;
+  form.addEventListener('submit', function(event){
+    const ok = window.confirm(
+      'Confirma a exclusão da sua conta?\n\n' +
+      'Seu acesso será encerrado agora. O histórico financeiro, lances, pedidos e auditoria permanecerão arquivados para segurança da plataforma.'
+    );
+    if (!ok) event.preventDefault();
+  });
+})();
+</script>
 
 {% endif %}
   
