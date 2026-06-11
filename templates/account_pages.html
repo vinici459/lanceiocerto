@@ -29,6 +29,8 @@
 .pix-status-line.approved{color:#bbf7d0}
 @media(max-width:720px){.pix-qr-wrap{grid-template-columns:1fr}.pix-qr-wrap img{width:100%;height:auto;max-width:260px;margin:0 auto}}
 
+.wallet-error{display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.30);color:#fecaca;font-weight:800;line-height:1.35}.wallet-error.show{display:block}
+
 </style>
 {% endblock %}
 {% block content %}
@@ -186,10 +188,21 @@
       <button class="wallet-choice-btn" type="button" data-deposit-target="deposit-card-panel">Cartão</button>
     </div>
 
-    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active">
+    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active" novalidate>
+      <div id="deposit-pix-alert" class="wallet-error" aria-live="polite"></div>
+
       <label>Valor do depósito
-        <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
+        <input
+          type="number"
+          step="0.01"
+          min="1"
+          name="amount"
+          id="deposit-pix-amount"
+          placeholder="R$ 0,00"
+          inputmode="decimal"
+          required>
       </label>
+
       <button class="btn full" type="submit">Gerar PIX</button>
 
       {% if pix_payment and pix_payment.qr_code_base64 %}
@@ -211,24 +224,51 @@
       {% endif %}
     </form>
 
-    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel">
+    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel" novalidate>
+      <div id="deposit-card-alert" class="wallet-error" aria-live="polite"></div>
+
       <label>Valor do depósito
-        <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
+        <input
+          type="number"
+          step="0.01"
+          min="1"
+          name="amount"
+          id="deposit-card-amount"
+          placeholder="R$ 0,00"
+          inputmode="decimal"
+          required>
       </label>
+
       <small class="payment-note">Você será direcionado para o Mercado Pago. O LanceioCerto não recebe nem armazena dados do cartão.</small>
       <button class="btn full" type="submit">Ir para pagamento</button>
     </form>
   </div>
 
   <div id="wallet-withdraw-panel" class="wallet-mode-panel">
-    <form method="post" action="/minha-conta/saque" class="wallet-card withdraw-card">
+    <form id="withdraw-form" method="post" action="/minha-conta/saque" class="wallet-card withdraw-card" novalidate>
+      <div id="withdraw-alert" class="wallet-error" aria-live="polite"></div>
+
       <label>Valor do saque
-        <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
+        <input
+          type="number"
+          step="0.01"
+          min="1"
+          name="amount"
+          id="withdraw-amount"
+          data-withdraw-amount
+          placeholder="R$ 0,00"
+          inputmode="decimal"
+          required>
         <small>Taxa de saque: 1%</small>
+        <small id="withdraw-net-preview" class="payment-note">Digite um valor para ver quanto será recebido após a taxa.</small>
       </label>
 
       <label>Chave PIX
-        <input name="pix_key" placeholder="CPF, e-mail, telefone ou chave aleatória" required>
+        <input
+          name="pix_key"
+          id="withdraw-pix-key"
+          placeholder="CPF, e-mail, telefone ou chave aleatória"
+          required>
       </label>
 
       {% if user.identity_status == 'verified' %}
@@ -1322,6 +1362,97 @@
   document.querySelectorAll("[data-pix-payment]").forEach(startPixPolling);
 
 
+})();
+
+
+(function(){
+  function moneyToNumber(value){
+    return Number(String(value || "").replace(",", "."));
+  }
+
+  function showWalletError(id, message){
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.textContent = message;
+    box.classList.add("show");
+  }
+
+  function hideWalletError(id){
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.textContent = "";
+    box.classList.remove("show");
+  }
+
+  function validateAmountForm(formId, inputId, alertId, message){
+    const form = document.getElementById(formId);
+    const input = document.getElementById(inputId);
+    if (!form || !input) return;
+
+    form.addEventListener("submit", function(event){
+      hideWalletError(alertId);
+      const amount = moneyToNumber(input.value);
+
+      if (!Number.isFinite(amount) || amount < 1){
+        event.preventDefault();
+        showWalletError(alertId, message);
+        input.focus();
+        return false;
+      }
+    });
+
+    input.addEventListener("input", function(){
+      hideWalletError(alertId);
+    });
+  }
+
+  validateAmountForm(
+    "deposit-pix-panel",
+    "deposit-pix-amount",
+    "deposit-pix-alert",
+    "O valor mínimo para depósito é R$ 1,00."
+  );
+
+  validateAmountForm(
+    "deposit-card-panel",
+    "deposit-card-amount",
+    "deposit-card-alert",
+    "O valor mínimo para depósito é R$ 1,00."
+  );
+
+  const withdrawForm = document.getElementById("withdraw-form");
+  const withdrawAmount = document.getElementById("withdraw-amount");
+  const withdrawPixKey = document.getElementById("withdraw-pix-key");
+
+  if (withdrawForm && withdrawAmount && withdrawPixKey){
+    withdrawForm.addEventListener("submit", function(event){
+      hideWalletError("withdraw-alert");
+      const amount = moneyToNumber(withdrawAmount.value);
+      const pixKey = String(withdrawPixKey.value || "").trim();
+
+      if (!Number.isFinite(amount) || amount < 1){
+        event.preventDefault();
+        showWalletError("withdraw-alert", "O valor mínimo para saque é R$ 1,00.");
+        withdrawAmount.focus();
+        return false;
+      }
+
+      if (!pixKey){
+        event.preventDefault();
+        showWalletError("withdraw-alert", "Informe a chave PIX para solicitar o saque.");
+        withdrawPixKey.focus();
+        return false;
+      }
+    });
+
+    withdrawAmount.addEventListener("input", function(){
+      hideWalletError("withdraw-alert");
+    });
+
+    withdrawPixKey.addEventListener("input", function(){
+      hideWalletError("withdraw-alert");
+    });
+  }
 })();
 
 (function(){

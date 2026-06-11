@@ -453,3 +453,21 @@ body.page-loading a,body.page-loading button{cursor:progress;}
 @media(max-width:900px){
   #admin-shipping .winner-order-summary{grid-template-columns:1fr !important;}
 }
+
+/* Avisos profissionais da carteira/saldo */
+.wallet-error{
+    display:none;
+    margin-bottom:14px;
+    padding:12px 14px;
+    border-radius:12px;
+    background:rgba(239,68,68,.12);
+    border:1px solid rgba(239,68,68,.30);
+    color:#fecaca;
+    font-weight:800;
+    line-height:1.35;
+}
+
+.wallet-error.show{
+    display:block;
+}
+
