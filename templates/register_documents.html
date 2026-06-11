@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="form-wrap docs-wrap">
-  <div class="form-card wide docs-card docs-card-clean">
-    <div class="docs-topbar">
+<section class="form-wrap docs-wrap docs-clean-wrap">
+  <div class="form-card wide docs-card docs-clean-card">
+    <div class="docs-clean-head">
       <div>
         <span class="eyebrow">Verificação de identidade</span>
-        <h1>Documentos</h1>
+        <h1>Enviar documentos</h1>
       </div>
       <a class="btn small ghost" href="/minha-conta/cadastro">Voltar</a>
     </div>
@@ -13,83 +13,86 @@
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
     {% if success %}<div class="alert success">{{ success }}</div>{% endif %}
 
-    <div class="docs-status-card status-{{ user.identity_status if user is defined else 'pending' }}">
-      {% if user is defined and user.identity_status == 'verified' %}
-        <strong>Conta verificada</strong>
-        <span>Tudo certo com seus documentos.</span>
-      {% elif user is defined and user.identity_status == 'rejected' %}
-        <strong>Documentos recusados</strong>
-        <span>Envie novamente os arquivos solicitados.</span>
-      {% elif user is defined and (user.document_file_url or user.selfie_file_url) %}
-        <strong>Em análise</strong>
-        <span>Seus documentos foram enviados e estão aguardando conferência.</span>
-      {% else %}
-        <strong>Aguardando envio</strong>
-        <span>Envie a frente do documento e uma selfie para iniciar a análise.</span>
-      {% endif %}
+    {% set has_required_docs = user is defined and user and user.document_file_url and user.selfie_file_url %}
+    {% if user is defined and user and user.identity_status == 'verified' %}
+      {% set status_class = 'ok' %}
+      {% set status_label = 'Aprovado' %}
+    {% elif user is defined and user and user.identity_status == 'rejected' %}
+      {% set status_class = 'bad' %}
+      {% set status_label = 'Reenviar documentos' %}
+    {% elif has_required_docs %}
+      {% set status_class = 'warn' %}
+      {% set status_label = 'Em análise' %}
+    {% else %}
+      {% set status_class = 'bad' %}
+      {% set status_label = 'Aguardando envio' %}
+    {% endif %}
+
+    <div class="docs-status-bar {{ status_class }}">
+      <span>Status</span>
+      <strong>{{ status_label }}</strong>
     </div>
 
     <form method="post" action="/cadastro/documentos" enctype="multipart/form-data" id="documents-form">
-      <div class="docs-upload-grid docs-upload-grid-pro">
-        <div class="doc-upload-card" data-doc-upload data-required="1" data-min-width="700" data-min-height="450">
-          <div class="doc-upload-head">
-            <strong>Frente do documento</strong>
+      <div class="docs-clean-grid">
+        <div class="doc-clean-item" data-doc-upload data-required="1" data-min-width="700" data-min-height="450">
+          <div class="doc-clean-title">
+            <strong>Documento — frente</strong>
             <span>Obrigatório</span>
           </div>
           <input class="doc-file-input" type="file" name="document_front_file" accept="image/*,.pdf" hidden required>
-          <div class="doc-upload-actions">
+          <div class="doc-clean-actions">
             <button type="button" class="btn small" data-pick-camera="environment">Tirar foto</button>
-            <button type="button" class="btn small ghost" data-pick-file>Escolher arquivo</button>
+            <button type="button" class="btn small ghost" data-pick-file>Arquivo</button>
           </div>
           <div class="doc-preview" aria-live="polite"></div>
           <div class="doc-quality-message"></div>
         </div>
 
-        <div class="doc-upload-card" data-doc-upload data-min-width="700" data-min-height="450">
-          <div class="doc-upload-head">
-            <strong>Verso do documento</strong>
+        <div class="doc-clean-item" data-doc-upload data-min-width="700" data-min-height="450">
+          <div class="doc-clean-title">
+            <strong>Documento — verso</strong>
             <span>Opcional</span>
           </div>
           <input class="doc-file-input" type="file" name="document_back_file" accept="image/*,.pdf" hidden>
-          <div class="doc-upload-actions">
+          <div class="doc-clean-actions">
             <button type="button" class="btn small" data-pick-camera="environment">Tirar foto</button>
-            <button type="button" class="btn small ghost" data-pick-file>Escolher arquivo</button>
+            <button type="button" class="btn small ghost" data-pick-file>Arquivo</button>
           </div>
           <div class="doc-preview" aria-live="polite"></div>
           <div class="doc-quality-message"></div>
         </div>
 
-        <div class="doc-upload-card" data-doc-upload data-required="1" data-min-width="480" data-min-height="480">
-          <div class="doc-upload-head">
+        <div class="doc-clean-item" data-doc-upload data-required="1" data-min-width="480" data-min-height="480">
+          <div class="doc-clean-title">
             <strong>Selfie</strong>
             <span>Obrigatório</span>
           </div>
           <input class="doc-file-input" type="file" name="selfie_file" accept="image/*" hidden required>
-          <div class="doc-upload-actions">
+          <div class="doc-clean-actions">
             <button type="button" class="btn small" data-pick-camera="user">Tirar selfie</button>
-            <button type="button" class="btn small ghost" data-pick-file data-image-only="1">Escolher imagem</button>
+            <button type="button" class="btn small ghost" data-pick-file data-image-only="1">Arquivo</button>
           </div>
           <div class="doc-preview" aria-live="polite"></div>
           <div class="doc-quality-message"></div>
         </div>
 
-        <div class="doc-upload-card" data-doc-upload data-min-width="700" data-min-height="450">
-          <div class="doc-upload-head">
+        <div class="doc-clean-item" data-doc-upload data-min-width="700" data-min-height="450">
+          <div class="doc-clean-title">
             <strong>Comprovante de residência</strong>
             <span>Opcional</span>
           </div>
           <input class="doc-file-input" type="file" name="residence_proof_file" accept="image/*,.pdf" hidden>
-          <div class="doc-upload-actions">
+          <div class="doc-clean-actions">
             <button type="button" class="btn small" data-pick-camera="environment">Tirar foto</button>
-            <button type="button" class="btn small ghost" data-pick-file>Escolher arquivo</button>
+            <button type="button" class="btn small ghost" data-pick-file>Arquivo</button>
           </div>
           <div class="doc-preview" aria-live="polite"></div>
           <div class="doc-quality-message"></div>
         </div>
       </div>
 
-      <div class="docs-form-error" id="docs-form-error" aria-live="polite"></div>
-      <button class="btn full" type="submit">Enviar para análise</button>
+      <button class="btn full docs-send-btn" type="submit">Enviar para análise</button>
     </form>
 
     <form method="post" action="/cadastro/documentos/enviar-depois" class="skip-docs-form">
@@ -97,14 +100,15 @@
     </form>
   </div>
 </section>
+
 <style>
-.docs-wrap{align-items:start}.docs-card-clean{max-width:940px}.docs-topbar{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.docs-card h1{margin:8px 0 0}.docs-status-card{display:grid;gap:4px;border:1px solid rgba(251,191,36,.36);background:rgba(251,191,36,.10);border-radius:16px;padding:13px 15px;margin:14px 0 16px}.docs-status-card strong{font-size:18px}.docs-status-card span{color:#dbeafe}.docs-status-card.status-verified{border-color:rgba(74,222,128,.38);background:rgba(74,222,128,.10)}.docs-status-card.status-rejected{border-color:rgba(248,113,113,.38);background:rgba(239,68,68,.10)}.docs-upload-grid-pro{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.doc-upload-card{border:1px solid rgba(148,163,184,.18);border-radius:18px;background:rgba(255,255,255,.035);padding:13px;display:grid;gap:10px}.doc-upload-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.doc-upload-head strong{font-size:17px}.doc-upload-head span{font-size:12px;font-weight:950;color:#bfdbfe;background:rgba(59,130,246,.14);border:1px solid rgba(96,165,250,.24);padding:6px 9px;border-radius:999px}.doc-upload-actions{display:flex;gap:8px;flex-wrap:wrap}.doc-preview{min-height:54px;border:1px dashed rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.50);display:grid;place-items:center;overflow:hidden}.doc-preview:empty:before{content:'Nenhum arquivo';color:#94a3b8;font-weight:800;font-size:13px}.doc-preview img{width:100%;max-height:190px;object-fit:contain;background:#020617}.doc-file-chip{width:100%;padding:11px;color:#dbeafe;font-weight:900;display:flex;justify-content:space-between;gap:10px;align-items:center}.doc-quality-message{font-size:13px;font-weight:850;color:#b7c6e6;line-height:1.35}.doc-quality-message.good{color:#bbf7d0}.doc-quality-message.warn{color:#fde68a}.doc-quality-message.bad{color:#fecaca}.doc-ready-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}.doc-ready-actions button{font-size:12px}.docs-form-error{display:none;border:1px solid rgba(248,113,113,.36);background:rgba(239,68,68,.10);color:#fecaca;border-radius:14px;padding:11px 12px;margin:8px 0 12px;font-weight:850}.docs-form-error.active{display:block}.skip-docs-form{margin-top:12px}@media(max-width:840px){.docs-upload-grid-pro{grid-template-columns:1fr}.doc-preview img{max-height:240px}.docs-topbar{align-items:stretch;flex-direction:column}.docs-topbar .btn{width:max-content}}
+.docs-clean-wrap{align-items:start}.docs-clean-card{max-width:900px}.docs-clean-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.docs-clean-head h1{margin:8px 0 0;font-size:34px;line-height:1.08}.docs-status-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;border-radius:16px;padding:13px 15px;margin:14px 0 16px;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.035)}.docs-status-bar span{color:#b7c6e6;font-size:13px;font-weight:900}.docs-status-bar strong{font-size:18px}.docs-status-bar.ok{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08)}.docs-status-bar.ok strong{color:#bbf7d0}.docs-status-bar.warn{border-color:rgba(251,191,36,.34);background:rgba(251,191,36,.08)}.docs-status-bar.warn strong{color:#fde68a}.docs-status-bar.bad{border-color:rgba(248,113,113,.34);background:rgba(239,68,68,.08)}.docs-status-bar.bad strong{color:#fecaca}.docs-clean-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.doc-clean-item{border:1px solid rgba(148,163,184,.18);border-radius:18px;background:rgba(255,255,255,.035);padding:14px;display:grid;gap:10px}.doc-clean-title{display:flex;align-items:center;justify-content:space-between;gap:10px}.doc-clean-title strong{font-size:17px}.doc-clean-title span{font-size:12px;font-weight:950;color:#bfdbfe;background:rgba(59,130,246,.14);border:1px solid rgba(96,165,250,.24);padding:5px 8px;border-radius:999px;white-space:nowrap}.doc-clean-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.doc-preview{min-height:82px;border:1px dashed rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.50);display:grid;place-items:center;overflow:hidden}.doc-preview:empty:before{content:'Nenhum arquivo';color:#94a3b8;font-weight:800;font-size:13px}.doc-preview img{width:100%;max-height:230px;object-fit:contain;background:#020617}.doc-file-chip{width:100%;padding:12px;color:#dbeafe;font-weight:900;display:flex;justify-content:space-between;gap:10px;align-items:center}.doc-quality-message{min-height:18px;font-size:13px;font-weight:850;color:#b7c6e6;line-height:1.35}.doc-quality-message.good{color:#bbf7d0}.doc-quality-message.warn{color:#fde68a}.doc-quality-message.bad{color:#fecaca}.doc-ready-actions{display:flex;gap:8px;flex-wrap:wrap}.doc-ready-actions .btn{font-size:12px}.docs-send-btn{margin-top:4px}.skip-docs-form{margin-top:10px}@media(max-width:760px){.docs-clean-wrap{padding:18px 12px}.docs-clean-head{align-items:flex-start}.docs-clean-head h1{font-size:28px}.docs-clean-grid{grid-template-columns:1fr}.doc-clean-actions{grid-template-columns:1fr 1fr}.doc-preview img{max-height:260px}}@media(max-width:420px){.docs-clean-head{display:grid}.docs-status-bar{display:grid}.doc-clean-title{align-items:flex-start}.doc-clean-actions{grid-template-columns:1fr}.docs-clean-card{padding:18px}}
 </style>
+
 <script>
 (function(){
   const form = document.getElementById('documents-form');
   if (!form) return;
-  const errorBox = document.getElementById('docs-form-error');
 
   function formatSize(bytes){
     if (!bytes) return '0 KB';
@@ -129,9 +133,9 @@
     const change = document.createElement('button');
     change.type = 'button';
     change.className = 'btn small ghost';
-    change.textContent = 'Trocar arquivo';
+    change.textContent = 'Trocar';
     change.addEventListener('click', () => input.click());
-    actions.append(change);
+    actions.appendChild(change);
   }
 
   function validateImage(card, file, img){
@@ -139,12 +143,12 @@
     const minH = Number(card.dataset.minHeight || 0);
     if (file.size < 25 * 1024) {
       card.dataset.validQuality = '0';
-      setMessage(card, 'bad', 'Arquivo muito pequeno. Envie outro arquivo.');
+      setMessage(card, 'bad', 'Imagem muito pequena.');
       return;
     }
     if ((minW && img.naturalWidth < minW) || (minH && img.naturalHeight < minH)) {
       card.dataset.validQuality = '0';
-      setMessage(card, 'warn', 'Imagem pequena. Recomendamos trocar por uma foto melhor.');
+      setMessage(card, 'warn', 'Imagem pequena. Recomendado trocar.');
       return;
     }
     card.dataset.validQuality = '1';
@@ -204,7 +208,7 @@
         return;
       }
       const img = document.createElement('img');
-      img.alt = 'Prévia do documento';
+      img.alt = 'Prévia do arquivo';
       img.onload = () => validateImage(card, file, img);
       img.src = URL.createObjectURL(file);
       preview.appendChild(img);
@@ -216,15 +220,13 @@
     const bad = [];
     document.querySelectorAll('[data-doc-upload]').forEach((card) => {
       const input = card.querySelector('.doc-file-input');
-      const title = card.querySelector('.doc-upload-head strong')?.textContent || 'arquivo';
+      const title = card.querySelector('.doc-clean-title strong')?.textContent || 'arquivo';
       if (card.dataset.required === '1' && (!input.files || !input.files[0])) bad.push(title);
       if (input.files && input.files[0] && card.dataset.validQuality === '0') bad.push(title + ' com baixa qualidade');
     });
     if (bad.length) {
       event.preventDefault();
-      errorBox.textContent = 'Revise: ' + bad.join(', ') + '.';
-      errorBox.classList.add('active');
-      errorBox.scrollIntoView({behavior:'smooth', block:'center'});
+      alert('Revise: ' + bad.join(', ') + '.');
     }
   });
 })();
