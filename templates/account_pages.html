@@ -153,7 +153,6 @@
   <div class="section-head compact-head">
     <div>
       <h1>Saldo</h1>
-      <p>Deposite ou solicite saque pela sua carteira.</p>
     </div>
     <span class="wallet-badge">Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
   </div>
@@ -165,74 +164,42 @@
 
   <div id="wallet-deposit-panel" class="wallet-mode-panel active">
     <div class="wallet-choice-row">
-      <button class="wallet-choice-btn active" type="button" data-deposit-target="deposit-pix-panel">Depositar via PIX</button>
-      <button class="wallet-choice-btn" type="button" data-deposit-target="deposit-card-panel">Depositar via cartão</button>
+      <button class="wallet-choice-btn active" type="button" data-deposit-target="deposit-pix-panel">PIX</button>
+      <button class="wallet-choice-btn" type="button" data-deposit-target="deposit-card-panel">Cartão</button>
     </div>
 
     <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active">
-      <div class="wallet-card-head">
-        <span class="wallet-icon">◆</span>
-        <div>
-          <h3>Depositar via PIX</h3>
-          <p>Informe o valor para iniciar a solicitação. O crédito só entra após confirmação do pagamento.</p>
-        </div>
-      </div>
       <label>Valor do depósito
-        <input type="number" step="0.01" min="1" name="amount" placeholder="Ex: 20,00" required>
+        <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
       </label>
       <button class="btn full" type="submit">Gerar PIX</button>
     </form>
 
     <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel">
-      <div class="wallet-card-head">
-        <span class="wallet-icon">▣</span>
-        <div>
-          <h3>Depositar via cartão</h3>
-          <p>Pagamento por cartão será liberado pela integração do gateway, com as taxas informadas antes da confirmação.</p>
-        </div>
-      </div>
       <label>Valor do depósito
-        <input type="number" step="0.01" min="1" name="amount" placeholder="Ex: 50,00" required>
+        <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
       </label>
-      <button class="btn full ghost" type="submit">Pagar com cartão</button>
+      <button class="btn full" type="submit">Pagar com cartão</button>
     </form>
   </div>
 
   <div id="wallet-withdraw-panel" class="wallet-mode-panel">
     <form method="post" action="/minha-conta/saque" class="wallet-card withdraw-card">
-      <div class="wallet-card-head">
-        <span class="wallet-icon">↧</span>
-        <div>
-          <h3>Solicitar saque</h3>
-          <p>Saque mínimo de R$ 1,00. Ao solicitar, o valor sai do seu saldo e fica reservado para pagamento manual pelo administrador.</p>
-        </div>
-      </div>
-      <div class="withdraw-fee-box">
-        <strong>Taxa de saque de 1%</strong>
-        <span>O valor solicitado sai integralmente do seu saldo. O administrador paga o valor líquido, já descontada a taxa de 1%.</span>
-      </div>
       <label>Valor do saque
-        <input type="number" step="0.01" min="1" name="amount" placeholder="Mínimo R$ 1,00" required data-withdraw-amount>
-        <small>Exemplo: pediu R$ 100,00 → taxa R$ 1,00 → recebe R$ 99,00.</small>
+        <input type="number" step="0.01" min="1" name="amount" placeholder="R$ 0,00" required>
+        <small>Taxa de saque: 1%</small>
       </label>
-      <div class="withdraw-fee-box withdraw-preview-box">
-        <strong>Valor líquido estimado</strong>
-        <span id="withdraw-net-preview">Digite um valor para ver quanto será recebido após a taxa.</span>
-      </div>
-      <label>Chave PIX para recebimento
+
+      <label>Chave PIX
         <input name="pix_key" placeholder="CPF, e-mail, telefone ou chave aleatória" required>
       </label>
+
       {% if user.identity_status == 'verified' %}
         <button class="btn full" type="submit">Solicitar saque</button>
       {% else %}
         <button class="btn full ghost" type="button" disabled>Conta precisa ser confirmada</button>
       {% endif %}
     </form>
-  </div>
-
-  <div class="wallet-notes">
-    <div><strong>Depósito</strong><span>PIX/cartão ficam registrados e dependem de confirmação automática do gateway.</span></div>
-    <div><strong>Saque</strong><span>Conta verificada obrigatória. Solicitações ficam registradas para auditoria.</span></div>
   </div>
 </div>
 
@@ -274,13 +241,6 @@
     </span>
   </div>
 
-  {% if user.identity_note %}
-  <div class="doc-admin-note">
-    <strong>Observação do administrador</strong>
-    <span>{{ user.identity_note }}</span>
-  </div>
-  {% endif %}
-
   <div class="doc-progress-line">
     <div class="doc-step done"><strong>1</strong><span>Cadastro enviado</span></div>
     <div class="doc-step {{ 'done' if user.document_file_url else '' }}"><strong>2</strong><span>Documento</span></div>
@@ -297,7 +257,7 @@
 
   <div class="doc-actions-row">
     <a href="/minha-conta/verificacao" class="btn">{{ 'Reenviar documentos' if user.identity_status == 'rejected' else 'Enviar ou reenviar documentos' }}</a>
-    <small>Ao reenviar, sua conta volta para análise e o administrador verá os novos arquivos.</small>
+    
   </div>
 </div>
 
