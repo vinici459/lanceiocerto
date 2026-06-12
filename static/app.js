@@ -144,9 +144,32 @@
       : `${m}m ${String(s).padStart(2, "0")}s`;
   }
 
+  let lcServerClockOffsetMs = 0;
+
+  function syncHomeServerClock(payload, sentMs, receivedMs) {
+    if (!payload) return;
+    let serverMs = Number(payload.server_time_ms || 0);
+    if (!serverMs && payload.server_time) {
+      const parsed = Date.parse(parseServerDate(payload.server_time) || "");
+      if (!Number.isNaN(parsed)) serverMs = parsed;
+    }
+    if (!serverMs) return;
+    const referenceMs = sentMs && receivedMs && receivedMs >= sentMs
+      ? Math.round((sentMs + receivedMs) / 2)
+      : Date.now();
+    lcServerClockOffsetMs = serverMs - referenceMs;
+  }
+
+  function homeServerNowMs() {
+    return Date.now() + lcServerClockOffsetMs;
+  }
+
   function parseServerDate(value) {
     if (!value) return null;
-    const normalized = String(value).trim().replace(" ", "T");
+    let normalized = String(value).trim().replace(" ", "T");
+    // Datas do backend são UTC. Sem timezone, alguns navegadores interpretam
+    // como horário local e a vitrine pode mostrar horas a mais/menos.
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) normalized += "Z";
     const date = new Date(normalized);
     return Number.isNaN(date.getTime()) ? null : date;
   }
@@ -154,7 +177,13 @@
   function secondsFromDate(value) {
     const date = parseServerDate(value);
     if (!date) return null;
-    return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
+    return Math.max(0, Math.ceil((date.getTime() - homeServerNowMs()) / 1000));
+  }
+
+  // Relógio inicial enviado pelo backend para a Home. Em seguida o polling
+  // abaixo corrige com compensação de latência.
+  if (Number(window.__LC_SERVER_TIME_MS || 0) > 0) {
+    lcServerClockOffsetMs = Number(window.__LC_SERVER_TIME_MS || 0) - Date.now();
   }
 
   function initHomeTabs() {
@@ -193,12 +222,25 @@
     const countdowns = Array.from(document.querySelectorAll(".countdown[data-seconds]"));
     if (!countdowns.length) return;
 
+    let homeReloadScheduled = false;
+
     function currentSeconds(el) {
       const endAt = el.dataset.endAt;
       const startAt = el.dataset.startAt;
       const fromDate = secondsFromDate(endAt || startAt);
       if (fromDate !== null) return fromDate;
       return Math.max(0, Number.parseInt(el.dataset.seconds || "0", 10) || 0);
+    }
+
+    function scheduleHomeRefresh(reason) {
+      if (homeReloadScheduled) return;
+      homeReloadScheduled = true;
+      window.setTimeout(() => {
+        // A home precisa mover card de "Próximos" para "Ao vivo" e de "Ao vivo"
+        // para "Encerrados". Recarregar é mais seguro do que tentar remontar todo
+        // o HTML parcialmente e evita mostrar status velho.
+        window.location.reload();
+      }, reason === "zero" ? 450 : 900);
     }
 
     function tickCountdowns() {
@@ -208,11 +250,35 @@
         if (!el.dataset.endAt && !el.dataset.startAt) {
           el.dataset.seconds = String(Math.max(0, seconds - 1));
         }
+        if (seconds <= 0) scheduleHomeRefresh("zero");
       });
+    }
+
+    async function refreshHomeState() {
+      if (!document.querySelector(".lc-home")) return;
+      const sent = Date.now();
+      try {
+        const res = await fetch("/api/home/state", { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+        const received = Date.now();
+        if (!res.ok || !json.ok) return;
+        syncHomeServerClock(json, sent, received);
+
+        const currentLive = document.querySelectorAll("#home-active-auctions .status-badge.live").length;
+        const currentUpcoming = document.querySelectorAll("#home-active-auctions .status-badge.scheduled").length;
+        const nextLive = Array.isArray(json.live_items) ? json.live_items.length : currentLive;
+        const nextUpcoming = Array.isArray(json.upcoming_items) ? json.upcoming_items.length : currentUpcoming;
+
+        if (currentLive !== nextLive || currentUpcoming !== nextUpcoming) {
+          scheduleHomeRefresh("state-change");
+        }
+      } catch (_) {}
     }
 
     tickCountdowns();
     setInterval(tickCountdowns, 1000);
+    refreshHomeState();
+    setInterval(refreshHomeState, 3000);
   }
 
   function initAccountHashHelpers() {

@@ -148,7 +148,7 @@
     }
     if ((minW && img.naturalWidth < minW) || (minH && img.naturalHeight < minH)) {
       card.dataset.validQuality = '0';
-      setMessage(card, 'warn', 'Imagem pequena. Recomendado trocar.');
+      setMessage(card, 'warn', 'Imagem pequena. Pendente trocar.');
       return;
     }
     card.dataset.validQuality = '1';

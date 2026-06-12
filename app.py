@@ -21,7 +21,7 @@ from email.message import EmailMessage
 from email.utils import parseaddr
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Optional
@@ -774,7 +774,7 @@ SUGGESTION_STATS_CACHE: dict[str, object] = {"expires_at": None, "value": []}
 # com saldo/sessão. Os blocos cacheados são dados já serializados ou resumos públicos.
 NAV_CACHE: dict[str, dict[str, object]] = {}
 HOME_SYNC_LAST_AT: Optional[datetime] = None
-HOME_SYNC_INTERVAL_SECONDS = 60
+HOME_SYNC_INTERVAL_SECONDS = 1
 # Evita poluir os logs com dezenas de prefetch/prerender bloqueados pelo navegador.
 # O bloqueio continua ativo, mas o mesmo caminho só é logado em janela curta.
 NAV_SKIP_LOG_MEMORY: dict[str, datetime] = {}
@@ -1057,7 +1057,7 @@ def apply_approved_mp_payment(db: Session, request: Request, payment_row: Mercad
         order = db.get(WinnerOrder, payment_row.order_id)
         paid_statuses = {"aguardando_escolha", "paid", "purchased", "sent", "delivered", "finalized", "completed"}
         if order and order.user_id == user.id and order.status not in paid_statuses:
-            order.status = "aguardando_escolha"
+            order.status = "paid"
             order.paid_at = datetime.utcnow()
             order.admin_note = f"Pagamento confirmado via {payment_label} Mercado Pago. Aguardando escolha do modo de recebimento."
             db.add(WalletTransaction(
@@ -2105,6 +2105,28 @@ def clamp_initial_duration(minutes: int | float | None) -> int:
     return minutes_int * 60
 
 
+
+
+def utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Retorna ISO UTC com Z para o navegador não interpretar como horário local.
+
+    O banco usa datetime naive em UTC. Sem o Z, alguns navegadores tratam como
+    horário local do computador e o cronômetro pode abrir com diferença de horas.
+    """
+    if not dt:
+        return None
+    if getattr(dt, "tzinfo", None) is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.isoformat(timespec="milliseconds") + "Z"
+
+
+def server_time_payload(now: Optional[datetime] = None) -> dict:
+    now = now or datetime.utcnow()
+    return {
+        "server_time": utc_iso(now),
+        "server_time_ms": int(now.timestamp() * 1000),
+    }
+
 def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] = None) -> dict:
     # Em produtos agendados/relançados, a vitrine deve parecer uma nova disputa.
     # Lances antigos ficam fora da visualização pública e o relançamento limpa o histórico.
@@ -2136,12 +2158,12 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "current_price": BR(item.current_price),
         "start_price": BR(item.start_price),
         "source_price": BR(item.source_price),
-        "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
+        "scheduled_start": utc_iso(item.scheduled_start),
         "start_remaining": start_remaining,
-        "ends_at": item.ends_at.isoformat() if item.ends_at else None,
+        "ends_at": utc_iso(item.ends_at),
         "remaining_seconds": remaining,
         "winner_name": public_user_name(item.winner) if item.winner else None,
-        "winner_deadline": item.winner_deadline.isoformat() if item.winner_deadline else None,
+        "winner_deadline": utc_iso(item.winner_deadline),
         "turbo_level": level,
         "turbo_label": turbo_label(level),
         "progress_percent": auction_progress_percent(item),
@@ -2172,6 +2194,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "chat_open": auction_chat_is_open(item),
         "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "cashback": cashback_payload(item, db),
+        **server_time_payload(),
     }
 
 
@@ -2230,12 +2253,12 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "current_price": BR(item.current_price),
         "start_price": BR(item.start_price),
         "source_price": BR(item.source_price),
-        "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
+        "scheduled_start": utc_iso(item.scheduled_start),
         "start_remaining": start_remaining,
-        "ends_at": item.ends_at.isoformat() if item.ends_at else None,
+        "ends_at": utc_iso(item.ends_at),
         "remaining_seconds": remaining,
         "winner_name": public_user_name(item.winner) if item.winner else None,
-        "winner_deadline": item.winner_deadline.isoformat() if item.winner_deadline else None,
+        "winner_deadline": utc_iso(item.winner_deadline),
         "turbo_level": level,
         "turbo_label": turbo_label(level),
         "progress_percent": auction_progress_percent(item),
@@ -2263,6 +2286,7 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "chat_open": auction_chat_is_open(item),
         "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "button_cooldown": bid_button_cooldown_seconds(0.10, level),
+        **server_time_payload(now),
     }
     if include_cashback:
         payload["cashback"] = cashback_payload(item, db)
@@ -2309,12 +2333,12 @@ def fast_bid_auction_payload(
         "current_price": BR(item.current_price),
         "start_price": BR(item.start_price),
         "source_price": BR(item.source_price),
-        "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
+        "scheduled_start": utc_iso(item.scheduled_start),
         "start_remaining": start_remaining,
-        "ends_at": item.ends_at.isoformat() if item.ends_at else None,
+        "ends_at": utc_iso(item.ends_at),
         "remaining_seconds": remaining,
         "winner_name": public_user_name(item.winner) if item.winner else None,
-        "winner_deadline": item.winner_deadline.isoformat() if item.winner_deadline else None,
+        "winner_deadline": utc_iso(item.winner_deadline),
         "turbo_level": level,
         "turbo_label": turbo_label(level),
         "progress_percent": auction_progress_percent(item),
@@ -2348,7 +2372,7 @@ def fast_bid_auction_payload(
         "fee_value": fee_value,
         "price_increment": price_increment,
         "client_bid_id": client_bid_id,
-        "server_time": datetime.utcnow().isoformat(),
+        **server_time_payload(now),
     }
     if wallet_balance is not None:
         payload["wallet_balance"] = BR(wallet_balance or 0.0)
@@ -2376,9 +2400,9 @@ def public_auction_card_payload(item: AuctionItem) -> dict:
         "status": public_display_status(item.status),
         "current_price": BR(item.current_price),
         "source_price": BR(item.source_price),
-        "scheduled_start": item.scheduled_start.isoformat() if item.scheduled_start else None,
+        "scheduled_start": utc_iso(item.scheduled_start),
         "start_remaining": start_remaining,
-        "ends_at": item.ends_at.isoformat() if item.ends_at else None,
+        "ends_at": utc_iso(item.ends_at),
         "remaining_seconds": remaining,
         "winner_name": public_user_name(item.winner) if item.winner else None,
         "image_url": safe_image_url(item.image_url),
@@ -2898,6 +2922,7 @@ ORDER_STATUS_LABELS = {
     "pending_gateway": "Aguardando confirmação do gateway",
     "paid": "Pagamento aprovado",
     "aguardando_escolha": "Aguardando escolha",
+    "aguardando_compra": "Aguardando compra",
     "aguardando_link": "Aguardando link de pagamento",
     "link_recebido": "Link recebido",
     "link_rejeitado": "Link rejeitado",
@@ -2920,6 +2945,7 @@ ORDER_STATUS_DESCRIPTIONS = {
     "pending_gateway": "Pagamento iniciado por Pix/cartão. Aguardando confirmação oficial antes de liberar o pedido.",
     "paid": "Pagamento aprovado. Escolha como deseja seguir com o recebimento do produto.",
     "aguardando_escolha": "Escolha se prefere que o LanceioCerto faça a compra ou se você mesmo fará o pedido no site original.",
+    "aguardando_compra": "Forma de recebimento escolhida. Aguardando o administrador registrar a compra do produto.",
     "aguardando_link": "Faça o pedido no site original do produto, escolha Pix e envie o link ou código de pagamento para validação.",
     "link_recebido": "Seu link foi recebido e está sendo validado.",
     "link_rejeitado": "O link enviado não passou na validação. Confira o motivo e envie novamente.",
@@ -3038,7 +3064,7 @@ def build_order_timeline(order: WinnerOrder) -> list[dict]:
     status = (order.status or "").strip().lower()
     finalized = status in {"finalized", "completed"}
     paid_done = bool(order.paid_at) or status in {
-        "paid", "aguardando_escolha", "aguardando_link", "link_recebido", "link_rejeitado",
+        "paid", "aguardando_escolha", "aguardando_compra", "aguardando_link", "link_recebido", "link_rejeitado",
         "aguardando_aprovacao", "aprovado_para_pagamento", "pagamento_pedido_realizado",
         "processing", "purchased", "sent", "delivered", "finalized", "completed"
     }
@@ -3847,20 +3873,23 @@ def should_sync_home_states() -> bool:
     return True
 
 
-def cached_home_public_context(db: Session, ttl_seconds: int = 90) -> dict:
-    """Dados públicos da Home com cache curto.
+def cached_home_public_context(db: Session, ttl_seconds: int = 2) -> dict:
+    """Dados públicos da Home com cache ultracurto e sincronização forte.
 
-    A Home era chamada várias vezes seguidas durante a navegação. Cada chamada
-    repetia consultas de leilões, indicações e payloads. O usuário/saldo NÃO
-    fica aqui; só blocos públicos.
+    A vitrine não pode mostrar relógio/status velho. Antes o cache de 90s podia
+    deixar a Home em "Próximo" enquanto a página do leilão já estava ao vivo.
+    Agora sincronizamos estados vencidos antes de consultar o cache e mantemos
+    o cache em apenas 2s, suficiente para aliviar cliques repetidos sem quebrar
+    a sensação de tempo real.
     """
+    if should_sync_home_states() and sync_due_auction_states(db, limit=50):
+        db.commit()
+        nav_cache_clear("home:")
+
     cached = nav_cache_get("home:public")
     if cached is not None:
         return cached
 
-    if should_sync_home_states() and sync_due_auction_states(db, limit=25):
-        db.commit()
-        nav_cache_clear("home:")
 
     live_items = (
         db.query(AuctionItem)
@@ -3926,8 +3955,28 @@ def home(request: Request):
                 "today_suggestion_vote": user_suggestion["today_suggestion_vote"],
                 "today_suggestion_nomination": user_suggestion["today_suggestion_nomination"],
                 "fee_percent": "1%",
+                **server_time_payload(),
             },
         )
+    finally:
+        db.close()
+
+
+@app.get("/api/home/state")
+def home_state(request: Request):
+    db = SessionLocal()
+    try:
+        if sync_due_auction_states(db, limit=50):
+            db.commit()
+            nav_cache_clear("home:")
+        public_home = cached_home_public_context(db, ttl_seconds=1)
+        return JSONResponse({
+            "ok": True,
+            "live_items": public_home["live_items"],
+            "upcoming_items": public_home["upcoming_items"],
+            "ended_items": public_home["ended_items"],
+            **server_time_payload(),
+        })
     finally:
         db.close()
 
@@ -4650,26 +4699,12 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             if bid_value not in ALLOWED_BIDS:
                 raise HTTPException(status_code=400, detail="Valor de lance inválido.")
 
-            # Idempotência: se o mesmo clique chegou novamente, devolve o estado oficial
-            # sem criar novo lance nem aplicar cooldown/tempo outra vez.
-            if client_bid_id:
-                existing_bid = (
-                    db.query(Bid)
-                    .filter(Bid.auction_id == item.id, Bid.user_id == user.id, Bid.client_bid_id == client_bid_id)
-                    .first()
-                )
-                if existing_bid:
-                    private_payload = public_auction_live_payload(
-                        item,
-                        db,
-                        last_bid_id_override=existing_bid.id,
-                        user=user,
-                    )
-                    private_payload["idempotent"] = True
-                    private_payload["client_bid_id"] = client_bid_id
-                    public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
-                    public_payload["idempotent"] = True
-                    return private_payload, public_payload, 0
+            # Idempotência otimizada:
+            # não fazemos SELECT prévio em todo clique. O índice único
+            # uq_bids_auction_user_client_bid protege duplicidade; se o mesmo
+            # client_bid_id repetir, o IntegrityError abaixo faz rollback e
+            # devolve o estado oficial. Isso reduz uma consulta no caminho quente
+            # de todo lance aceito.
 
             mode_for_bid = compute_turbo_level(item)
             button_cooldown = bid_button_cooldown_seconds(bid_value, mode_for_bid)
@@ -4832,7 +4867,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                             "idempotent": True,
                             "client_bid_id": client_bid_id,
                             "wallet_balance": BR(getattr(user_confirmed, "wallet_balance", 0.0) or 0.0),
-                            "server_time": datetime.utcnow().isoformat(),
+                            **server_time_payload(),
                         })
                         public_payload = public_auction_live_payload(
                             item_confirmed,
@@ -5553,9 +5588,11 @@ def account_choose_order_fulfillment(request: Request, order_id: int, fulfillmen
             audit_event(db, request, "order.fulfillment.customer_purchase", user, "order", order.id, "Cliente escolheu enviar link/código de pagamento do pedido.")
         elif fulfillment_mode == "site_purchase":
             order.fulfillment_mode = "site_purchase"
-            order.status = "processing"
+            # A escolha da forma de recebimento NÃO significa que o produto já foi comprado.
+            # Mantemos o pedido aguardando ação do admin até a compra ser registrada manualmente.
+            order.status = "aguardando_compra"
             order.order_choice_at = now
-            order.admin_note = ((order.admin_note or "") + "\nCliente escolheu compra assistida pelo LanceioCerto.").strip()
+            order.admin_note = ((order.admin_note or "") + "\nCliente escolheu compra assistida pelo LanceioCerto. Aguardando registro da compra pelo admin.").strip()
             audit_event(db, request, "order.fulfillment.site_purchase", user, "order", order.id, "Cliente escolheu compra e envio pelo site.")
         else:
             raise HTTPException(status_code=400, detail="Opção inválida.")
@@ -5814,7 +5851,9 @@ def confirm_payment_flow(
             return RedirectResponse(checkout["init_point"], status_code=303)
 
         # Pagamento com saldo interno confirmado.
-        order.status = "aguardando_escolha"
+        # Importante: pagar o pedido NÃO é a mesma coisa que comprar/enviar o produto.
+        # Depois do pagamento, o usuário ainda precisa escolher a forma de recebimento.
+        order.status = "paid"
         order.paid_at = datetime.utcnow()
         order.admin_note = "Pagamento confirmado com saldo interno. Aguardando escolha do modo de recebimento."
         audit_event(db, request, "order.payment_wallet_confirmed", user, "order", order.id, f"Valor: R$ {fmt_money(order.final_price)}")

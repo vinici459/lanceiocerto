@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
+<script>
+  window.__LC_SERVER_TIME_MS = {{ server_time_ms or 0 }};
+  window.__LC_SERVER_TIME = "{{ server_time or '' }}";
+</script>
 
 <section class="container lc-home">
 
@@ -70,7 +74,7 @@
 
       <div class="cards lc-auction-grid">
         {% for item in live_items %}
-        <article class="card lc-auction-card" data-auction-card data-title="{{ item.title|lower }}">
+        <article class="card lc-auction-card" data-auction-card data-auction-id="{{ item.id }}" data-auction-status="{{ item.status }}" data-title="{{ item.title|lower }}">
           <div class="auction-media">
             <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
             <span class="status-badge live">AO VIVO</span>
@@ -118,7 +122,7 @@
 
       <div class="cards lc-auction-grid">
         {% for item in upcoming_items %}
-        <article class="card lc-auction-card" data-auction-card data-title="{{ item.title|lower }}">
+        <article class="card lc-auction-card" data-auction-card data-auction-id="{{ item.id }}" data-auction-status="{{ item.status }}" data-title="{{ item.title|lower }}">
           <div class="auction-media">
             <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
             <span class="status-badge scheduled">PRÓXIMO</span>
@@ -174,7 +178,7 @@
 
       <div class="cards lc-auction-grid">
         {% for item in ended_items %}
-        <article class="card lc-auction-card ended" data-auction-card data-title="{{ item.title|lower }}">
+        <article class="card lc-auction-card ended" data-auction-card data-auction-id="{{ item.id }}" data-auction-status="{{ item.status }}" data-title="{{ item.title|lower }}">
           <div class="auction-media">
             <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async">
             <span class="status-badge ended">ENCERRADO</span>

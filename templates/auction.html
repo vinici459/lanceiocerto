@@ -409,6 +409,41 @@ window.__AUCTION__ = {{ item | tojson }};
   let localWalletBalance = Number(auction.wallet_balance ?? 0);
   let walletPendingReserve = 0;
   let localFinishTriggered = false;
+  let serverClockOffsetMs = 0;
+
+  function readServerMs(data){
+    if(!data) return null;
+    if(Number.isFinite(Number(data.server_time_ms))) return Number(data.server_time_ms);
+    if(data.server_time){
+      const parsed = Date.parse(ensureUtcDateString(data.server_time));
+      if(!Number.isNaN(parsed)) return parsed;
+    }
+    return null;
+  }
+  function syncServerClock(data){
+    const serverMs = readServerMs(data);
+    if(serverMs === null) return;
+
+    // Quando o payload veio de fetch, compensamos metade do tempo de ida/volta
+    // da requisição. Sem isso, dois computadores com internet diferente podem
+    // ficar alguns segundos defasados mesmo usando server_time.
+    const sent = Number(data.__client_sent_ms || 0);
+    const received = Number(data.__client_received_ms || 0);
+    const clientReferenceMs = sent > 0 && received >= sent
+      ? Math.round((sent + received) / 2)
+      : Date.now();
+
+    serverClockOffsetMs = serverMs - clientReferenceMs;
+  }
+  function estimatedServerNowMs(){
+    return Date.now() + serverClockOffsetMs;
+  }
+  function ensureUtcDateString(value){
+    if(!value) return "";
+    const normalized = String(value).trim().replace(" ", "T");
+    return /[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized) ? normalized : `${normalized}Z`;
+  }
+  syncServerClock(auction);
 
   function bidKey(value){ return Number(value || 0).toFixed(2); }
   function makeClientBidId(){
@@ -479,10 +514,9 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function secondsFromIso(value){
     if(!value) return null;
-    const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
-    const ms = Date.parse(normalized);
+    const ms = Date.parse(ensureUtcDateString(value));
     if(Number.isNaN(ms)) return null;
-    return Math.max(0, Math.ceil((ms - Date.now()) / 1000));
+    return Math.max(0, Math.ceil((ms - estimatedServerNowMs()) / 1000));
   }
 
   function currentClockSeconds(){
@@ -549,10 +583,10 @@ window.__AUCTION__ = {{ item | tojson }};
     // Date.now()+duração e por alguns segundos mostrava um cronômetro maior
     // que o real, causando o bug no começo do leilão.
     const duration = Math.max(1, Number(auction.initial_duration_seconds || auction.remaining_seconds || 1800));
-    const startMs = Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(String(auction.scheduled_start || "")) ? auction.scheduled_start : `${auction.scheduled_start}Z`);
-    const logicalStartMs = Number.isNaN(startMs) ? Date.now() : startMs;
+    const startMs = Date.parse(ensureUtcDateString(auction.scheduled_start));
+    const logicalStartMs = Number.isNaN(startMs) ? estimatedServerNowMs() : startMs;
     const logicalEndMs = logicalStartMs + duration * 1000;
-    const initialSeconds = Math.max(0, Math.ceil((logicalEndMs - Date.now()) / 1000));
+    const initialSeconds = Math.max(0, Math.ceil((logicalEndMs - estimatedServerNowMs()) / 1000));
 
     localFinishTriggered = false;
 
@@ -562,7 +596,7 @@ window.__AUCTION__ = {{ item | tojson }};
         status: "live",
         start_remaining: 0,
         remaining_seconds: 0,
-        ends_at: new Date(Date.now()).toISOString(),
+        ends_at: new Date(estimatedServerNowMs()).toISOString(),
         chat_open: true
       };
       applyAuctionState(auction, "local-start");
@@ -638,7 +672,7 @@ window.__AUCTION__ = {{ item | tojson }};
     }
 
     if(isLive(status())){
-      auction.ends_at = new Date(Date.now() + Math.max(1, remaining) * 1000).toISOString();
+      auction.ends_at = new Date(estimatedServerNowMs() + Math.max(1, remaining) * 1000).toISOString();
       auction.remaining_seconds = Math.max(1, Math.ceil(remaining));
     }
 
@@ -830,6 +864,7 @@ window.__AUCTION__ = {{ item | tojson }};
         data = {...data, user_turbo_eligible: auction.user_turbo_eligible};
       }
     }
+    syncServerClock(data);
     if(!shouldAcceptIncomingState(data, source)) return;
 
     auction = data;
@@ -885,9 +920,22 @@ window.__AUCTION__ = {{ item | tojson }};
   async function fetchJson(url, options={}, timeoutMs=8000){
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const clientSentMs = Date.now();
     try{
       const res = await fetch(url, {...options, signal:controller.signal, cache:"no-store"});
       const json = await res.json().catch(() => ({}));
+      const clientReceivedMs = Date.now();
+
+      // Metadados locais usados apenas para acertar o relógio do navegador.
+      // Não vão para o servidor e não aparecem para o usuário.
+      if(json && typeof json === "object"){
+        json.__client_sent_ms = clientSentMs;
+        json.__client_received_ms = clientReceivedMs;
+        if(json.auction && typeof json.auction === "object"){
+          json.auction.__client_sent_ms = clientSentMs;
+          json.auction.__client_received_ms = clientReceivedMs;
+        }
+      }
       return {res, json};
     } finally {
       clearTimeout(timer);
@@ -1082,6 +1130,9 @@ window.__AUCTION__ = {{ item | tojson }};
 
     ws.onopen = () => {
       wsConnected = true;
+      // Ao conectar em outro computador, confirma o estado real imediatamente
+      // para eliminar diferença de relógio causada por tempo de carregamento.
+      fetchState("ws-open-sync", 4000);
     };
 
     ws.onmessage = (event) => {
@@ -1126,6 +1177,11 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   applyAuctionState(auction, "initial");
+
+  // Sincronização logo ao abrir a página. Isso corrige o caso de um PC carregar
+  // a tela alguns segundos depois de outro e ficar contando atrasado.
+  setTimeout(() => fetchState("initial-sync", 4000), 120);
+
   if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero", 5000);
 })();
 </script>
