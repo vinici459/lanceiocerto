@@ -13,7 +13,7 @@
     {% if error %}<div class="alert">{{ error }}</div>{% endif %}
     {% if success %}<div class="alert success">{{ success }}</div>{% endif %}
 
-    {% set has_required_docs = user is defined and user and user.document_file_url and user.selfie_file_url %}
+    {% set has_required_docs = user is defined and user and user.document_file_url and user.selfie_file_url and user.residence_proof_file_url %}
     {% if user is defined and user and user.identity_status == 'verified' %}
       {% set status_class = 'ok' %}
       {% set status_label = 'Aprovado' %}
@@ -77,12 +77,12 @@
           <div class="doc-quality-message"></div>
         </div>
 
-        <div class="doc-clean-item" data-doc-upload data-min-width="700" data-min-height="450">
+        <div class="doc-clean-item" data-doc-upload data-required="1" data-min-width="700" data-min-height="450">
           <div class="doc-clean-title">
             <strong>Comprovante de residência</strong>
-            <span>Opcional</span>
+            <span>Obrigatório</span>
           </div>
-          <input class="doc-file-input" type="file" name="residence_proof_file" accept="image/*,.pdf" hidden>
+          <input class="doc-file-input" type="file" name="residence_proof_file" accept="image/*,.pdf" hidden required>
           <div class="doc-clean-actions">
             <button type="button" class="btn small" data-pick-camera="environment">Tirar foto</button>
             <button type="button" class="btn small ghost" data-pick-file>Arquivo</button>

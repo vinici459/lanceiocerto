@@ -98,7 +98,7 @@
     {% if user.identity_status == 'verified' %}
       <h2>Conta ativada</h2>
       <p>Seu cadastro e documentos estão aprovados.</p>
-    {% elif user.document_file_url and user.selfie_file_url %}
+    {% elif user.document_file_url and user.selfie_file_url and user.residence_proof_file_url %}
       <h2>Conta com documentos em análise</h2>
       <p>Recebemos seus documentos. Aguarde a conferência do administrador.</p>
     {% else %}
@@ -239,7 +239,7 @@
           required>
       </label>
 
-      <small class="payment-note">Você será direcionado para o Mercado Pago. O LanceioCerto não recebe nem armazena dados do cartão.</small>
+      <small class="payment-note">Para maior segunra você será direcionado para o Mercado Pago.</small>
       <button class="btn full" type="submit">Ir para pagamento</button>
     </form>
   </div>
@@ -306,14 +306,14 @@
         <h2>Cadastro aprovado</h2>
       {% elif user.identity_status == 'rejected' %}
         <h2>Documentos recusados</h2>
-      {% elif user.document_file_url and user.selfie_file_url %}
+      {% elif user.document_file_url and user.selfie_file_url and user.residence_proof_file_url %}
         <h2>Documentos em análise</h2>
       {% else %}
         <h2>Aguardando documentos</h2>
       {% endif %}
     </div>
     <span class="clean-doc-pill {% if user.identity_status == 'verified' %}ok{% elif user.identity_status == 'rejected' %}bad{% endif %}">
-      {% if user.identity_status == 'verified' %}Tudo certo{% elif user.identity_status == 'rejected' %}Reenviar{% elif user.document_file_url and user.selfie_file_url %}Em análise{% else %}Pendente{% endif %}
+      {% if user.identity_status == 'verified' %}Tudo certo{% elif user.identity_status == 'rejected' %}Reenviar{% elif user.document_file_url and user.selfie_file_url and user.residence_proof_file_url %}Em análise{% else %}Pendente{% endif %}
     </span>
   </div>
 
@@ -332,7 +332,7 @@
     </div>
     <div class="clean-doc-row">
       <span>Comprovante de residência</span>
-      <strong class="{{ 'done' if user.residence_proof_file_url else '' }}">{{ 'Enviado' if user.residence_proof_file_url else 'Opcional' }}</strong>
+      <strong class="{{ 'done' if user.residence_proof_file_url else 'pending' }}">{{ 'Enviado' if user.residence_proof_file_url else 'Pendente' }}</strong>
     </div>
   </div>
 
