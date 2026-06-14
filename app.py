@@ -425,37 +425,77 @@ class ProductSuggestionNomination(Base):
 
 class ConnectionManager:
     def __init__(self) -> None:
-        self.connections: dict[int, list[WebSocket]] = defaultdict(list)
+        self.connections: dict[int, dict[WebSocket, asyncio.Queue]] = defaultdict(dict)
+        self.writer_tasks: dict[WebSocket, asyncio.Task] = {}
+
+    def _with_realtime_clock(self, payload: dict) -> dict:
+        """Carimba o horário real do envio pelo WebSocket.
+
+        O payload do lance é montado quando o banco confirma o lance. Se a rede ou
+        uma conexão lenta atrasar o envio, usar aquele horário antigo pode deixar o
+        cronômetro de alguns computadores alguns segundos para trás. Por isso o
+        relógio é atualizado no último instante antes do send_json.
+        """
+        try:
+            cloned = dict(payload or {})
+            auction_payload = cloned.get("auction")
+            if isinstance(auction_payload, dict):
+                stamped = dict(auction_payload)
+                now_payload = server_time_payload()
+                stamped.update(now_payload)
+                stamped["realtime_sent_ms"] = now_payload["server_time_ms"]
+                cloned["auction"] = stamped
+            return cloned
+        except Exception:
+            return payload
+
+    async def _writer(self, auction_id: int, websocket: WebSocket, queue: asyncio.Queue) -> None:
+        try:
+            while True:
+                payload = await queue.get()
+                await asyncio.wait_for(websocket.send_json(self._with_realtime_clock(payload)), timeout=1.2)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.disconnect(auction_id, websocket)
 
     async def connect(self, auction_id: int, websocket: WebSocket) -> None:
         await websocket.accept()
-        self.connections[auction_id].append(websocket)
+        queue: asyncio.Queue = asyncio.Queue(maxsize=24)
+        self.connections[auction_id][websocket] = queue
+        self.writer_tasks[websocket] = asyncio.create_task(self._writer(auction_id, websocket, queue))
 
     def disconnect(self, auction_id: int, websocket: WebSocket) -> None:
-        if auction_id in self.connections and websocket in self.connections[auction_id]:
-            self.connections[auction_id].remove(websocket)
+        if auction_id in self.connections:
+            self.connections[auction_id].pop(websocket, None)
+            if not self.connections[auction_id]:
+                self.connections.pop(auction_id, None)
+        task = self.writer_tasks.pop(websocket, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def send_to(self, auction_id: int, websocket: WebSocket, payload: dict) -> None:
+        queue = self.connections.get(auction_id, {}).get(websocket)
+        if not queue:
+            return
+        try:
+            queue.put_nowait(payload)
+        except asyncio.QueueFull:
+            self.disconnect(auction_id, websocket)
 
     async def broadcast(self, auction_id: int, payload: dict) -> None:
-        # Broadcast não pode travar lance. Envia para todos em paralelo e corta
-        # conexões lentas/travadas rapidamente. Antes, um websocket ruim podia
-        # segurar atualizações em sequência.
-        sockets = list(self.connections.get(auction_id, []))
+        # Caminho quente dos lances: não espera rede de usuário nenhum.
+        # Cada conexão tem sua própria fila, preservando a ordem dos eventos e
+        # evitando send_json simultâneo no mesmo WebSocket. Conexão lenta demais
+        # é cortada para não atrasar o leilão para todos.
+        sockets = list(self.connections.get(auction_id, {}).items())
         if not sockets:
             return
-
-        async def _send(ws: WebSocket) -> tuple[WebSocket, bool]:
+        for ws, queue in sockets:
             try:
-                await asyncio.wait_for(ws.send_json(payload), timeout=1.2)
-                return ws, True
-            except Exception:
-                return ws, False
-
-        results = await asyncio.gather(*(_send(ws) for ws in sockets), return_exceptions=True)
-        for result in results:
-            if isinstance(result, tuple):
-                ws, ok = result
-                if not ok:
-                    self.disconnect(auction_id, ws)
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                self.disconnect(auction_id, ws)
 
 
 app = FastAPI(title=APP_NAME)
@@ -463,7 +503,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260608-nav-cache-v2")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260614-realtime-auction-v2")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -2231,7 +2271,10 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
                 .order_by(desc(Bid.created_at))
                 .first()
             )
-            last_bidder = public_user_name(last_bid.user) if last_bid else None
+            if last_bid and user is not None and last_bid.user_id == user.id:
+                last_bidder = "Você"
+            else:
+                last_bidder = public_user_name(last_bid.user) if last_bid else None
 
     now = datetime.utcnow()
     remaining = 0
@@ -4894,7 +4937,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             private_payload = fast_bid_auction_payload(
                 item,
                 bids_count=accepted_count,
-                last_bidder=accepted_bidder,
+                last_bidder="Você",
                 last_bid_id=bid.id,
                 user_turbo_eligible=True,
                 button_cooldown=button_cooldown,
@@ -4966,7 +5009,9 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
 
     # Nunca espera WebSocket para responder o clique. O JSON do POST já atualiza a tela.
     if public_payload:
-        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
+        # Agora o broadcast só enfileira a atualização por conexão; não espera rede.
+        # Isso faz outro computador receber o lance praticamente junto da resposta do POST.
+        await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload})
     return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
 @app.get("/api/auction/{auction_id}/state")
@@ -7365,7 +7410,7 @@ async def auction_socket(websocket: WebSocket, auction_id: int):
             if start_auction_if_due(item):
                 db.commit()
                 item = db.get(AuctionItem, auction_id)
-            await websocket.send_json({"type": "auction_update", "auction": public_auction_live_payload(item, db)})
+            await manager.send_to(auction_id, websocket, {"type": "auction_update", "auction": public_auction_live_payload(item, db)})
     finally:
         db.close()
 

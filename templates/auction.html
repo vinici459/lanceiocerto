@@ -402,6 +402,7 @@ window.__AUCTION__ = {{ item | tojson }};
   let stateFetchInFlight = false;
   let lastZeroSyncAt = 0;
   let lastAcceptedBidId = Number(auction.last_bid_id || auction.state_version || 0);
+  let ownLastBidId = 0;
   let lastAcceptedBidCount = Number(auction.bids_count || 0);
   let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
@@ -413,6 +414,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function readServerMs(data){
     if(!data) return null;
+    if(Number.isFinite(Number(data.realtime_sent_ms))) return Number(data.realtime_sent_ms);
     if(Number.isFinite(Number(data.server_time_ms))) return Number(data.server_time_ms);
     if(data.server_time){
       const parsed = Date.parse(ensureUtcDateString(data.server_time));
@@ -867,6 +869,14 @@ window.__AUCTION__ = {{ item | tojson }};
     syncServerClock(data);
     if(!shouldAcceptIncomingState(data, source)) return;
 
+    const incomingIdForSelf = Number(data.last_bid_id || data.state_version || 0);
+    if(source === "bid" && incomingIdForSelf > 0 && data.client_bid_id){
+      ownLastBidId = incomingIdForSelf;
+    }
+    if(source === "ws" && ownLastBidId > 0 && incomingIdForSelf === ownLastBidId){
+      data = {...data, last_bidder: "Você"};
+    }
+
     auction = data;
     if(typeof data.wallet_balance !== "undefined" && data.wallet_balance !== null){
       localWalletBalance = Number(data.wallet_balance || 0);
@@ -1127,9 +1137,14 @@ window.__AUCTION__ = {{ item | tojson }};
 
     const protocol = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${protocol}://${location.host}/ws/auction/${auctionId}`);
+    let pingTimer = 0;
 
     ws.onopen = () => {
       wsConnected = true;
+      if(pingTimer) clearInterval(pingTimer);
+      pingTimer = setInterval(() => {
+        try{ if(ws.readyState === WebSocket.OPEN) ws.send("ping"); } catch(e){}
+      }, 18000);
       // Ao conectar em outro computador, confirma o estado real imediatamente
       // para eliminar diferença de relógio causada por tempo de carregamento.
       fetchState("ws-open-sync", 4000);
@@ -1145,11 +1160,13 @@ window.__AUCTION__ = {{ item | tojson }};
 
     ws.onclose = () => {
       wsConnected = false;
-      wsReconnectTimer = setTimeout(connectSocket, 3500);
+      if(pingTimer) clearInterval(pingTimer);
+      wsReconnectTimer = setTimeout(connectSocket, 900);
     };
 
     ws.onerror = () => {
       wsConnected = false;
+      if(pingTimer) clearInterval(pingTimer);
       try{ ws.close(); } catch(e){}
     };
   }

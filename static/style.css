@@ -471,3 +471,442 @@ body.page-loading a,body.page-loading button{cursor:progress;}
     display:block;
 }
 
+
+/* =========================================================
+   RESPONSIVO GLOBAL - Lancei o Certo
+   Correções para celular/tablet sem alterar o layout desktop.
+   Foco: capa da home, menu, cards, leilão, formulários, admin e tabelas.
+   ========================================================= */
+html{
+  -webkit-text-size-adjust:100%;
+  scroll-padding-top:86px;
+}
+body{
+  overflow-x:hidden;
+}
+img,video,canvas,svg{
+  max-width:100%;
+}
+button,a,input,select,textarea{
+  touch-action:manipulation;
+}
+
+@media (max-width: 1100px){
+  .container{
+    max-width:100%;
+    padding-left:18px;
+    padding-right:18px;
+  }
+
+  .topbar-inner{
+    height:auto !important;
+    min-height:68px;
+    padding-top:10px !important;
+    padding-bottom:10px !important;
+    align-items:flex-start !important;
+    flex-wrap:wrap;
+  }
+
+  .topbar .brand{
+    min-width:0;
+    flex:1 1 auto;
+  }
+
+  .topbar .brand .logo-text{
+    white-space:normal !important;
+    line-height:1.05;
+    font-size:19px !important;
+  }
+
+  .nav{
+    width:100%;
+    display:flex !important;
+    flex-wrap:nowrap !important;
+    gap:8px !important;
+    overflow-x:auto;
+    overflow-y:hidden;
+    padding:2px 0 4px;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+
+  .nav::-webkit-scrollbar{display:none;}
+
+  .nav a,
+  .nav .btn,
+  .user-box{
+    flex:0 0 auto;
+    white-space:nowrap;
+  }
+
+  .user-box{
+    max-width:210px;
+    overflow:hidden;
+  }
+
+  .user-name,
+  .user-balance{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+}
+
+@media (max-width: 900px){
+  .container{
+    padding-left:14px !important;
+    padding-right:14px !important;
+  }
+
+  .lc-home{
+    padding-top:14px !important;
+    padding-bottom:28px !important;
+  }
+
+  .lc-hero,
+  .lc-hero-pro,
+  .lc-toolbar,
+  .lane-head,
+  .auction-layout,
+  .auction-main,
+  .register-pro-card,
+  .account-layout,
+  .admin-layout-pro,
+  .orders-page-marketplace,
+  .order-detail-page{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:14px !important;
+  }
+
+  .lc-hero{
+    margin-bottom:18px !important;
+  }
+
+  /* Capa principal: no celular mostra a arte inteira em vez de cortar. */
+  .hero-slider,
+  .lc-hero-copy.hero-slider,
+  .lc-hero-pro .lc-hero-copy.hero-slider{
+    width:100% !important;
+    min-height:0 !important;
+    aspect-ratio: 1080 / 720;
+    padding:0 !important;
+    border-radius:20px !important;
+    background:#020817 !important;
+  }
+
+  .hero-slides,
+  .hero-slide{
+    position:absolute !important;
+    inset:0 !important;
+  }
+
+  .hero-slide img{
+    width:100% !important;
+    height:100% !important;
+    object-fit:contain !important;
+    object-position:center center !important;
+    animation:none !important;
+    transform:none !important;
+    background:#020817;
+  }
+
+  .hero-slider::after{
+    background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0) 28%) !important;
+  }
+
+  .hero-arrow{
+    width:34px !important;
+    height:34px !important;
+    font-size:26px !important;
+  }
+
+  .hero-prev{left:8px !important;}
+  .hero-next{right:8px !important;}
+
+  .lc-market-card{
+    min-width:0 !important;
+    width:100% !important;
+    border-radius:18px !important;
+    padding:12px !important;
+  }
+
+  .market-row{
+    padding:9px 0 !important;
+  }
+
+  .lc-toolbar{
+    align-items:stretch !important;
+  }
+
+  .lc-toolbar h2,
+  .lane-head h3,
+  .section-head h1,
+  .orders-head-marketplace h1{
+    font-size:clamp(24px,7vw,32px) !important;
+    line-height:1.1 !important;
+  }
+
+  .lc-tools,
+  .lc-tabs{
+    width:100% !important;
+  }
+
+  .lc-tabs{
+    display:flex !important;
+    flex-wrap:nowrap !important;
+    overflow-x:auto;
+    gap:8px !important;
+    padding-bottom:4px;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+
+  .lc-tabs::-webkit-scrollbar{display:none;}
+
+  .lc-tab{
+    flex:0 0 auto;
+    white-space:nowrap;
+    padding:10px 12px !important;
+  }
+
+  .cards,
+  .lc-auction-grid,
+  .suggestion-grid,
+  .stats-grid,
+  .admin-kpi-grid,
+  .admin-finance-grid,
+  .grid-2,
+  .docs-clean-grid,
+  .price-line,
+  .timer-line,
+  .meta-grid,
+  .price-box,
+  .bid-grid,
+  .order-summary-meta,
+  .order-detail-values,
+  .order-detail-timeline,
+  .fulfillment-choice-grid{
+    grid-template-columns:1fr !important;
+  }
+
+  .card,
+  .panel-card,
+  .stat,
+  .auction-panel,
+  .chat-card,
+  .form-card,
+  .register-pro-left,
+  .register-pro-form,
+  .docs-clean-card{
+    border-radius:18px !important;
+  }
+
+  .card-body,
+  .panel-card,
+  .stat,
+  .auction-panel,
+  .chat-card,
+  .form-card,
+  .register-pro-left,
+  .register-pro-form,
+  .docs-clean-card{
+    padding:14px !important;
+  }
+
+  .card-image,
+  .auction-media img{
+    height:auto !important;
+    aspect-ratio: 4 / 3;
+    object-fit:cover !important;
+  }
+
+  .auction-layout{
+    padding-top:14px !important;
+  }
+
+  .auction-main{
+    align-items:stretch !important;
+  }
+
+  .auction-image{
+    width:100% !important;
+    height:auto !important;
+    max-height:none !important;
+    aspect-ratio:4 / 3;
+    object-fit:contain !important;
+    background:rgba(255,255,255,.035);
+    border-radius:18px !important;
+  }
+
+  .bid-grid{
+    gap:9px !important;
+  }
+
+  .bid-btn,
+  .btn,
+  input,
+  select,
+  textarea{
+    min-height:44px;
+  }
+
+  .chat-messages{
+    max-height:320px !important;
+  }
+
+  .table-wrap,
+  .admin-scroll-table,
+  .audit-table-wrap,
+  .responsive-table,
+  .orders-table-wrap{
+    width:100% !important;
+    overflow-x:auto !important;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  table{
+    min-width:680px;
+  }
+
+  .account-sidebar,
+  .admin-production-sidebar{
+    position:static !important;
+    max-height:none !important;
+    overflow:visible !important;
+    border-radius:18px !important;
+  }
+
+  .admin-sidebar-nav,
+  .account-sidebar nav{
+    display:flex !important;
+    flex-wrap:nowrap !important;
+    overflow-x:auto !important;
+    gap:10px !important;
+    padding-bottom:4px;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+
+  .admin-sidebar-nav::-webkit-scrollbar,
+  .account-sidebar nav::-webkit-scrollbar{display:none;}
+
+  .admin-menu-group{
+    flex:0 0 min(78vw, 300px);
+  }
+
+  .order-summary-card,
+  .order-detail-hero,
+  .order-detail-product,
+  .order-detail-topbar,
+  .account-status-panel,
+  .section-head,
+  .compact-head,
+  .docs-clean-head{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:12px !important;
+    align-items:start !important;
+  }
+
+  .order-summary-left img,
+  .order-detail-product img{
+    width:100% !important;
+    height:auto !important;
+    aspect-ratio:4 / 3;
+    max-width:none !important;
+  }
+
+  .auth-modal{
+    padding:20px !important;
+    border-radius:22px !important;
+  }
+}
+
+@media (max-width: 560px){
+  .container{
+    padding-left:12px !important;
+    padding-right:12px !important;
+  }
+
+  .topbar .brand .logo-mark{
+    width:36px !important;
+    height:36px !important;
+    border-radius:12px !important;
+  }
+
+  .topbar .brand .logo-text{
+    font-size:17px !important;
+  }
+
+  .nav{
+    font-size:13px;
+  }
+
+  .nav a,
+  .nav .btn.small{
+    padding:8px 10px !important;
+    border-radius:12px !important;
+    background:rgba(255,255,255,.055);
+    border:1px solid rgba(148,163,184,.14);
+  }
+
+  .user-box{
+    max-width:160px;
+    padding:7px 9px !important;
+    font-size:12px !important;
+  }
+
+  .hero-slider,
+  .lc-hero-copy.hero-slider,
+  .lc-hero-pro .lc-hero-copy.hero-slider{
+    aspect-ratio:1080 / 900;
+    border-radius:18px !important;
+  }
+
+  .lc-toolbar p,
+  .lane-head p,
+  .lc-hero p,
+  small,
+  .muted{
+    line-height:1.45 !important;
+  }
+
+  .auction-lane{
+    margin:18px 0 !important;
+  }
+
+  .btn.full,
+  .auction-panel .btn,
+  .card .btn,
+  form .btn{
+    width:100% !important;
+  }
+
+  .form-wrap,
+  .register-pro-shell{
+    padding:18px 12px !important;
+  }
+
+  .login-links,
+  .auth-modal-links{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:10px !important;
+    text-align:center;
+  }
+
+  #admin-shipping .winner-order-summary{
+    grid-template-columns:1fr !important;
+  }
+
+  #admin-shipping .winner-order-product > img,
+  #admin-shipping .winner-order-summary img,
+  #admin-shipping .winner-order-card summary img{
+    width:72px !important;
+    height:72px !important;
+    min-width:72px !important;
+    min-height:72px !important;
+    flex-basis:72px !important;
+  }
+}
