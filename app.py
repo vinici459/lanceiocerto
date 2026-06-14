@@ -449,6 +449,12 @@ class ConnectionManager:
         except Exception:
             return payload
 
+    async def _safe_close(self, websocket: WebSocket) -> None:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
     async def _writer(self, auction_id: int, websocket: WebSocket, queue: asyncio.Queue) -> None:
         try:
             while True:
@@ -457,7 +463,11 @@ class ConnectionManager:
         except asyncio.CancelledError:
             raise
         except Exception:
+            # Se uma conexão quebra no envio, remove e fecha de verdade.
+            # Antes removia do manager, mas o receive_text podia ficar preso,
+            # mantendo tarefa e socket vivos em pico.
             self.disconnect(auction_id, websocket)
+            await self._safe_close(websocket)
 
     async def connect(self, auction_id: int, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -471,7 +481,8 @@ class ConnectionManager:
             if not self.connections[auction_id]:
                 self.connections.pop(auction_id, None)
         task = self.writer_tasks.pop(websocket, None)
-        if task and not task.done():
+        current = asyncio.current_task()
+        if task and not task.done() and task is not current:
             task.cancel()
 
     async def send_to(self, auction_id: int, websocket: WebSocket, payload: dict) -> None:
@@ -482,12 +493,13 @@ class ConnectionManager:
             queue.put_nowait(payload)
         except asyncio.QueueFull:
             self.disconnect(auction_id, websocket)
+            asyncio.create_task(self._safe_close(websocket))
 
     async def broadcast(self, auction_id: int, payload: dict) -> None:
         # Caminho quente dos lances: não espera rede de usuário nenhum.
         # Cada conexão tem sua própria fila, preservando a ordem dos eventos e
         # evitando send_json simultâneo no mesmo WebSocket. Conexão lenta demais
-        # é cortada para não atrasar o leilão para todos.
+        # é cortada e fechada para não acumular tarefas/zumbis.
         sockets = list(self.connections.get(auction_id, {}).items())
         if not sockets:
             return
@@ -496,6 +508,7 @@ class ConnectionManager:
                 queue.put_nowait(payload)
             except asyncio.QueueFull:
                 self.disconnect(auction_id, ws)
+                asyncio.create_task(self._safe_close(ws))
 
 
 app = FastAPI(title=APP_NAME)
@@ -503,7 +516,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260614-realtime-auction-v2")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260614-realtime-audit-v3")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -2233,7 +2246,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "chat_paused": item.chat_paused,
         "chat_open": auction_chat_is_open(item),
         "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
-        "cashback": cashback_payload(item, db),
+        "cashback": cashback_payload(item, db, user),
         **server_time_payload(),
     }
 
@@ -4638,6 +4651,7 @@ def auction_page(request: Request, auction_id: int):
 
         messages = (
             db.query(ChatMessage)
+            .options(selectinload(ChatMessage.user))
             .filter(ChatMessage.auction_id == auction_id)
             .order_by(desc(ChatMessage.created_at))
             .limit(50)
@@ -4649,7 +4663,7 @@ def auction_page(request: Request, auction_id: int):
             {
                 "request": request,
                 "user": user,
-                "item": {**public_auction_payload(item, db, user), "cashback": cashback_payload(item, db, user)},
+                "item": public_auction_payload(item, db, user),
                 "entity": item,
                 "chat_messages": messages,
                 "allowed_bids": sorted(ALLOWED_BIDS),
@@ -7419,3 +7433,9 @@ async def auction_socket(websocket: WebSocket, auction_id: int):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(auction_id, websocket)
+    except Exception:
+        manager.disconnect(auction_id, websocket)
+        try:
+            await websocket.close()
+        except Exception:
+            pass

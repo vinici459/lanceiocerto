@@ -399,6 +399,7 @@ window.__AUCTION__ = {{ item | tojson }};
   let lastTurbo = Number(auction.turbo_level || 0);
   let wsConnected = false;
   let wsReconnectTimer = null;
+  let lastWsMessageAt = 0;
   let stateFetchInFlight = false;
   let lastZeroSyncAt = 0;
   let lastAcceptedBidId = Number(auction.last_bid_id || auction.state_version || 0);
@@ -1023,10 +1024,15 @@ window.__AUCTION__ = {{ item | tojson }};
     if(!wsConnected) fetchState("ws-offline", 8000);
   }, 5000);
 
-  // Sincronização leve, sem disputar com lances pendentes.
+  // Sincronização leve apenas como segurança.
+  // Antes todos os clientes faziam /state a cada 30s mesmo com WebSocket ok.
+  // Com 1000 pessoas isso vira ~33 req/s sem necessidade. Agora só confirma
+  // quando o WS está offline ou ficou muito tempo sem nenhum evento.
+  const slowSyncEveryMs = 120000 + Math.floor(Math.random() * 20000);
   setInterval(() => {
-    if(pendingBidCount() === 0) fetchState("slow-sync", 8000);
-  }, 30000);
+    const wsSilentForMs = Date.now() - Number(lastWsMessageAt || 0);
+    if(pendingBidCount() === 0 && (!wsConnected || wsSilentForMs > 90000)) fetchState("slow-sync", 8000);
+  }, slowSyncEveryMs);
 
   document.querySelectorAll(".bid-btn").forEach((btn) => {
     btn.dataset.bid = bidKey(btn.dataset.bid);
@@ -1139,21 +1145,30 @@ window.__AUCTION__ = {{ item | tojson }};
     const ws = new WebSocket(`${protocol}://${location.host}/ws/auction/${auctionId}`);
     let pingTimer = 0;
 
+    let firstWsStateSeen = false;
+
     ws.onopen = () => {
       wsConnected = true;
       if(pingTimer) clearInterval(pingTimer);
       pingTimer = setInterval(() => {
         try{ if(ws.readyState === WebSocket.OPEN) ws.send("ping"); } catch(e){}
       }, 18000);
-      // Ao conectar em outro computador, confirma o estado real imediatamente
-      // para eliminar diferença de relógio causada por tempo de carregamento.
-      fetchState("ws-open-sync", 4000);
+
+      // O servidor já envia o estado inicial pelo próprio WebSocket.
+      // Só fazemos /state se esse primeiro pacote não chegar rápido.
+      setTimeout(() => {
+        if(!firstWsStateSeen) fetchState("ws-open-sync-fallback", 4000);
+      }, 900);
     };
 
     ws.onmessage = (event) => {
+      lastWsMessageAt = Date.now();
       try{
         const payload = JSON.parse(event.data);
-        if(payload.type === "auction_update") applyAuctionState(payload.auction, "ws");
+        if(payload.type === "auction_update"){
+          firstWsStateSeen = true;
+          applyAuctionState(payload.auction, "ws");
+        }
         if(payload.type === "chat_message") appendChatMessage(payload.message);
       } catch(e){}
     };
