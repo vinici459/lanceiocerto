@@ -516,7 +516,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v11-final-consistency")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v12-natural-flow")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -4115,6 +4115,11 @@ def home_state(request: Request):
             "live_count": live_count,
             "upcoming_count": upcoming_count,
             "ended_count": ended_count,
+            # IDs ajudam o front a detectar mudança real sem depender só de contagem.
+            # Mantemos leve: são apenas inteiros, sem remontar cards/imagens.
+            "live_ids": [row[0] for row in db.query(AuctionItem.id).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(20).all()],
+            "upcoming_ids": [row[0] for row in db.query(AuctionItem.id).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(20).all()],
+            "ended_ids": [row[0] for row in db.query(AuctionItem.id).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(20).all()],
             **server_time_payload(),
         })
     finally:

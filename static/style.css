@@ -995,3 +995,34 @@ button,a,input,select,textarea{
     transform:none !important;
   }
 }
+
+
+/* V12 - Home/leilão mais natural: evita piscada brusca e deixa transições de estado suaves. */
+.countdown,.auction-countdown{
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  contain: layout paint;
+  backface-visibility:hidden;
+}
+.lc-auction-card.home-card-checking{
+  opacity:.86;
+  border-color:rgba(251,191,36,.38) !important;
+}
+.lc-auction-card.home-card-checking .countdown{
+  color:#fde68a;
+}
+.lc-auction-card.home-card-checking .status-badge{
+  background:rgba(251,191,36,.14) !important;
+  border-color:rgba(251,191,36,.34) !important;
+  color:#fde68a !important;
+}
+body.home-soft-refreshing .lc-home{
+  opacity:.92;
+  transition:opacity .28s ease;
+}
+.auction-panel,.lc-auction-card,.price-box>div,.meta-grid>div{
+  transform:translateZ(0);
+}
+.auction-countdown,.countdown{
+  animation:none !important;
+}

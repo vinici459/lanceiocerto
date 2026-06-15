@@ -235,7 +235,8 @@
     const countdowns = Array.from(document.querySelectorAll(".countdown[data-seconds]"));
     if (!countdowns.length) return;
 
-    let homeReloadScheduled = false;
+    let homeRefreshCheckScheduled = false;
+    let homeHardReloadScheduled = false;
 
     function currentSeconds(el) {
       const endAt = el.dataset.endAt;
@@ -245,33 +246,55 @@
       return Math.max(0, Number.parseInt(el.dataset.seconds || "0", 10) || 0);
     }
 
-    function scheduleHomeRefresh(reason) {
-      if (homeReloadScheduled) return;
-      homeReloadScheduled = true;
-      window.setTimeout(() => {
-        // A home precisa mover card de "Próximos" para "Ao vivo" e de "Ao vivo"
-        // para "Encerrados". Recarregar é mais seguro do que tentar remontar todo
-        // o HTML parcialmente e evita mostrar status velho.
-        window.location.reload();
-      }, reason === "zero" ? 450 : 900);
+    function markCardChecking(el) {
+      const card = el?.closest?.("[data-auction-card]");
+      if (!card) return;
+      card.classList.add("home-card-checking");
+      const badge = card.querySelector(".status-badge");
+      if (badge && !badge.dataset.originalText) badge.dataset.originalText = badge.textContent || "";
+      if (badge) badge.textContent = "CONFERINDO";
+    }
+
+    function reloadHomeSoftly(reason) {
+      if (homeHardReloadScheduled) return;
+      homeHardReloadScheduled = true;
+      document.body.classList.add("home-soft-refreshing");
+      window.setTimeout(() => window.location.reload(), reason === "zero" ? 1200 : 950);
+    }
+
+    function scheduleHomeRefresh(reason, el) {
+      if (el) {
+        markCardChecking(el);
+        setTextIfChanged(el, "Conferindo...");
+      }
+      if (homeRefreshCheckScheduled) return;
+      homeRefreshCheckScheduled = true;
+      window.setTimeout(async () => {
+        homeRefreshCheckScheduled = false;
+        await refreshHomeState(true, reason);
+      }, reason === "zero" ? 650 : 900);
     }
 
     function tickCountdowns() {
       countdowns.forEach((el) => {
         const seconds = currentSeconds(el);
+        if (seconds <= 0) {
+          setTextIfChanged(el, "Conferindo...");
+          scheduleHomeRefresh("zero", el);
+          return;
+        }
         setTextIfChanged(el, formatTime(seconds));
         if (!el.dataset.endAt && !el.dataset.startAt) {
           el.dataset.seconds = String(Math.max(0, seconds - 1));
         }
-        if (seconds <= 0) scheduleHomeRefresh("zero");
       });
     }
 
     let homeStateInFlight = false;
 
-    async function refreshHomeState() {
+    async function refreshHomeState(force = false, reason = "timer") {
       if (!document.querySelector(".lc-home")) return;
-      if (document.hidden || homeStateInFlight) return;
+      if ((!force && document.hidden) || homeStateInFlight) return;
       homeStateInFlight = true;
       const sent = Date.now();
       try {
@@ -290,8 +313,20 @@
           ? Number(json.upcoming_count)
           : (Array.isArray(json.upcoming_items) ? json.upcoming_items.length : currentUpcoming);
 
-        if (currentLive !== nextLive || currentUpcoming !== nextUpcoming) {
-          scheduleHomeRefresh("state-change");
+        const visibleLiveIds = Array.from(document.querySelectorAll("#home-active-auctions .status-badge.live"))
+          .map((badge) => Number(badge.closest("[data-auction-card]")?.dataset.auctionId || 0))
+          .filter(Boolean);
+        const visibleUpcomingIds = Array.from(document.querySelectorAll("#home-active-auctions .status-badge.scheduled"))
+          .map((badge) => Number(badge.closest("[data-auction-card]")?.dataset.auctionId || 0))
+          .filter(Boolean);
+        const nextLiveIds = Array.isArray(json.live_ids) ? json.live_ids.map(Number).filter(Boolean) : visibleLiveIds;
+        const nextUpcomingIds = Array.isArray(json.upcoming_ids) ? json.upcoming_ids.map(Number).filter(Boolean) : visibleUpcomingIds;
+        const idsChanged =
+          visibleLiveIds.join(",") !== nextLiveIds.join(",") ||
+          visibleUpcomingIds.join(",") !== nextUpcomingIds.join(",");
+
+        if (currentLive !== nextLive || currentUpcoming !== nextUpcoming || idsChanged) {
+          reloadHomeSoftly(reason);
         }
       } catch (_) {
       } finally {

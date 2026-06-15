@@ -435,6 +435,11 @@ window.__AUCTION__ = {{ item | tojson }};
   let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
+  // Um único lance pendente por aba evita empilhar estados otimistas que depois
+  // seriam corrigidos pelo servidor, causando sensação de preço voltando.
+  let bidInFlight = false;
+  let bidInFlightValue = "";
+  let bidInFlightStartedAt = 0;
   let localWalletBalance = Number(auction.wallet_balance ?? 0);
   let walletPendingReserve = 0;
   let localFinishTriggered = false;
@@ -562,7 +567,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
     // Fontes locais do próprio clique podem atualizar a tela imediatamente.
     // Mesmo assim, não podem voltar abaixo do maior lance já confirmado.
-    const ownImmediateSources = new Set(["initial", "bid", "local-start"]);
+    const ownImmediateSources = new Set(["initial", "local-start"]);
     const isOwnImmediate = ownImmediateSources.has(source);
 
     // Piso absoluto: preço e taxas de um mesmo leilão nunca diminuem.
@@ -599,9 +604,9 @@ window.__AUCTION__ = {{ item | tojson }};
     if(incomingCount < currentCount && !isOwnImmediate) return false;
     if(incomingBidId === currentBidId && incomingCount < currentCount) return false;
 
-    // Durante o efeito otimista, só aceitamos estado menor se for rollback explícito
-    // do próprio POST com erro. Polling e websocket nunca derrubam a tela otimista.
-    if((pendingBidCount() > 0 || Date.now() < optimisticHoldUntil) && !isOwnImmediate){
+    // Durante o efeito otimista, polling, websocket e respostas HTTP antigas nunca
+    // derrubam a tela para um estado igual/menor. O servidor pode avançar; voltar não.
+    if((bidInFlight || pendingBidCount() > 0 || Date.now() < optimisticHoldUntil) && !isOwnImmediate){
       if(incomingBidId <= currentBidId && incomingCount <= currentCount) return false;
     }
 
@@ -822,7 +827,7 @@ window.__AUCTION__ = {{ item | tojson }};
   function renderButton(btn){
     const key = bidKey(btn.dataset.bid);
     const cd = Math.max(Number(cooldowns[key] || 0));
-    const busy = Boolean(pendingBids[key]);
+    const busy = Boolean(pendingBids[key]) || bidInFlight;
     const canBid = isLive(status()) && !finishConfirming;
     const turboLocked = isTurboLockedForUser();
     const insufficientBalance = Number(key) > (Number(localWalletBalance || 0) - Number(walletPendingReserve || 0) + 0.000001);
@@ -1031,13 +1036,20 @@ window.__AUCTION__ = {{ item | tojson }};
     }
     const s = status();
     localFinishTriggered = isClosed(s);
-    finishConfirming = false;
 
     remaining = currentClockSeconds();
+    const stillAwaitingOfficialFinish = isLive(s) && remaining <= 0 && source !== "local-start";
+    finishConfirming = Boolean(stillAwaitingOfficialFinish);
     lastZeroSyncAt = 0;
 
-    setTextIfChanged(els.countdownLabel, isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status");
-    setTextIfChanged(els.countdown, isClosed(s) ? "Encerrado" : timeLabel(remaining));
+    if(finishConfirming){
+      setTextIfChanged(els.countdownLabel, "Status");
+      setTextIfChanged(els.countdown, "Conferindo...");
+      setTimeout(() => fetchState("confirm-local-finish", 7000), 180);
+    } else {
+      setTextIfChanged(els.countdownLabel, isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status");
+      setTextIfChanged(els.countdown, isClosed(s) ? "Encerrado" : timeLabel(remaining));
+    }
     if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
     if(els.adminTotalBidFees) els.adminTotalBidFees.textContent = moneyBR(auction.total_bid_fees);
     if(els.adminCashReserved) els.adminCashReserved.textContent = moneyBR(auction.cash_reserved_before_payment ?? auction.collected_total);
@@ -1098,7 +1110,10 @@ window.__AUCTION__ = {{ item | tojson }};
     "slow-bid-confirm",
     "bid-error",
     "turbo-eligibility",
-    "ws-open-sync-fallback"
+    "ws-open-sync-fallback",
+    "initial-sync-fallback",
+    "confirm-local-start",
+    "confirm-local-start-ended"
   ]);
 
   function isCriticalStateReason(reason){
@@ -1161,7 +1176,11 @@ window.__AUCTION__ = {{ item | tojson }};
   function tick(){
     const s = status();
 
-    if(isScheduled(s) || isLive(s)){
+    if(finishConfirming){
+      remaining = 0;
+      setTextIfChanged(els.countdownLabel, "Status");
+      setTextIfChanged(els.countdown, "Conferindo...");
+    } else if(isScheduled(s) || isLive(s)){
       remaining = currentClockSeconds();
       setTextIfChanged(els.countdown, timeLabel(remaining));
 
@@ -1202,7 +1221,8 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function stateSyncIntervalMs(){
     const s = status();
-    if(pendingBidCount() > 0) return 900;
+    if(finishConfirming) return 650;
+    if(bidInFlight || pendingBidCount() > 0) return 750;
     if(!wsConnected) return offlineStateSyncMs;
     if(isLive(s)) return liveStateSyncMs;
     if(isScheduled(s) && Number(remaining || 0) <= 20) return scheduledNearStartSyncMs;
@@ -1220,11 +1240,25 @@ window.__AUCTION__ = {{ item | tojson }};
     fetchState(reason, wsConnected ? 3500 : 3000);
   }, 350);
 
+  // Trava de segurança: se por algum motivo uma requisição de lance ficar presa
+  // além do timeout visual, não deixa a interface congelada indefinidamente.
+  setInterval(() => {
+    if(bidInFlight && bidInFlightStartedAt && Date.now() - bidInFlightStartedAt > 17000){
+      const value = bidInFlightValue;
+      if(value) delete pendingBids[value];
+      bidInFlight = false;
+      bidInFlightValue = "";
+      bidInFlightStartedAt = 0;
+      fetchState("slow-bid-confirm", 9000);
+      renderButtons();
+    }
+  }, 1200);
+
   document.querySelectorAll(".bid-btn").forEach((btn) => {
     btn.dataset.bid = bidKey(btn.dataset.bid);
     btn.addEventListener("click", async () => {
       const value = bidKey(btn.dataset.bid);
-      if(btn.disabled || pendingBids[value]) return;
+      if(btn.disabled || bidInFlight || pendingBids[value]) return;
       if(isTurboLockedForUser()){
         setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
         renderButtons();
@@ -1242,6 +1276,9 @@ window.__AUCTION__ = {{ item | tojson }};
       const previousWalletBalance = localWalletBalance;
       const previousWalletReserve = walletPendingReserve;
 
+      bidInFlight = true;
+      bidInFlightValue = value;
+      bidInFlightStartedAt = Date.now();
       pendingBids[value] = true;
       applyOptimisticBid(value);
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
@@ -1292,6 +1329,9 @@ window.__AUCTION__ = {{ item | tojson }};
           setTimeout(async () => {
             await fetchState("slow-bid-confirm", 9000);
             delete pendingBids[value];
+            bidInFlight = false;
+            bidInFlightValue = "";
+            bidInFlightStartedAt = 0;
             renderButtons();
           }, 500);
         } else {
@@ -1306,6 +1346,9 @@ window.__AUCTION__ = {{ item | tojson }};
       } finally {
         if(!keepLockedForStateCheck){
           delete pendingBids[value];
+          bidInFlight = false;
+          bidInFlightValue = "";
+          bidInFlightStartedAt = 0;
           renderButtons();
         }
       }
