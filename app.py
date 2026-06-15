@@ -516,11 +516,14 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-guarded-v4")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-stable-v7")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
+# Fila assíncrona por leilão: evita várias requisições ocupando threads só esperando
+# o mesmo lock de lance. Mantém a ordem real dos cliques no caminho quente.
+AUCTION_BID_ASYNC_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 SUGGESTION_USER_VOTE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 WITHDRAWAL_USER_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
@@ -2180,6 +2183,46 @@ def server_time_payload(now: Optional[datetime] = None) -> dict:
         "server_time_ms": int(now.timestamp() * 1000),
     }
 
+
+def money_cents(value: float | int | Decimal | None) -> int:
+    """Converte valores monetários para centavos inteiros.
+
+    O front usa esses campos como piso anti-retrocesso: preço/taxas/lances nunca
+    podem voltar para trás por causa de WebSocket ou /state atrasado.
+    """
+    try:
+        amount = Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return int(amount * 100)
+    except Exception:
+        return 0
+
+
+def datetime_ms(dt: Optional[datetime]) -> Optional[int]:
+    if not dt:
+        return None
+    if getattr(dt, "tzinfo", None) is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return int(dt.timestamp() * 1000)
+
+
+def auction_state_guard_fields(item: AuctionItem, *, last_bid_id: int, bids_count: int, now: Optional[datetime] = None) -> dict:
+    """Campos de versão usados pelo navegador para aceitar somente estado novo.
+
+    Todo payload que atualiza a tela do leilão precisa carregar a mesma base de
+    comparação. Assim /state, WebSocket e resposta do POST obedecem uma única
+    regra e não conseguem fazer preço/lances/cronômetro voltarem para trás.
+    """
+    now = now or datetime.utcnow()
+    return {
+        "state_bid_id": int(last_bid_id or 0),
+        "state_bids_count": int(bids_count or 0),
+        "state_price_cents": money_cents(getattr(item, "current_price", 0.0)),
+        "state_total_bid_fees_cents": money_cents(getattr(item, "total_bid_fees", 0.0) or 0.0),
+        "state_generated_ms": int(now.timestamp() * 1000),
+        "ends_at_ms": datetime_ms(getattr(item, "ends_at", None)),
+        "scheduled_start_ms": datetime_ms(getattr(item, "scheduled_start", None)),
+    }
+
 def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] = None) -> dict:
     # Em produtos agendados/relançados, a vitrine deve parecer uma nova disputa.
     # Lances antigos ficam fora da visualização pública e o relançamento limpa o histórico.
@@ -2247,6 +2290,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "chat_open": auction_chat_is_open(item),
         "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "cashback": cashback_payload(item, db, user),
+        **auction_state_guard_fields(item, last_bid_id=last_bid_id, bids_count=bids_count),
         **server_time_payload(),
     }
 
@@ -2342,6 +2386,7 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "chat_open": auction_chat_is_open(item),
         "wallet_balance": BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user is not None else None,
         "button_cooldown": bid_button_cooldown_seconds(0.10, level),
+        **auction_state_guard_fields(item, last_bid_id=last_bid_id, bids_count=bids_count, now=now),
         **server_time_payload(now),
     }
     if include_cashback:
@@ -2428,6 +2473,7 @@ def fast_bid_auction_payload(
         "fee_value": fee_value,
         "price_increment": price_increment,
         "client_bid_id": client_bid_id,
+        **auction_state_guard_fields(item, last_bid_id=last_bid_id, bids_count=bids_count, now=now),
         **server_time_payload(now),
     }
     if wallet_balance is not None:
@@ -4996,13 +5042,17 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
 async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...), client_bid_id: str = Form("")):
     public_payload = None
     try:
-        private_payload, public_payload, button_cooldown = await asyncio.to_thread(
-            _place_bid_sync,
-            request,
-            auction_id,
-            bid_value,
-            client_bid_id,
-        )
+        # Uma fila assíncrona por leilão evita ocupar várias threads com lances
+        # parados esperando o mesmo lock. O processamento continua serializado,
+        # mas o servidor fica mais estável em pico.
+        async with AUCTION_BID_ASYNC_LOCKS[auction_id]:
+            private_payload, public_payload, button_cooldown = await asyncio.to_thread(
+                _place_bid_sync,
+                request,
+                auction_id,
+                bid_value,
+                client_bid_id,
+            )
     except AuctionStateHTTPException as exc:
         body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
         if exc.retry_after:

@@ -570,6 +570,12 @@ window.__AUCTION__ = {{ item | tojson }};
     return `${m}m ${String(s).padStart(2,"0")}s`;
   }
 
+  function secondsFromMs(value){
+    const ms = Number(value || 0);
+    if(!Number.isFinite(ms) || ms <= 0) return null;
+    return Math.max(0, Math.ceil((ms - estimatedServerNowMs()) / 1000));
+  }
+
   function secondsFromIso(value){
     if(!value) return null;
     const ms = Date.parse(ensureUtcDateString(value));
@@ -580,10 +586,14 @@ window.__AUCTION__ = {{ item | tojson }};
   function currentClockSeconds(){
     const s = status();
     if(isScheduled(s)){
+      const byMs = secondsFromMs(auction.scheduled_start_ms);
+      if(byMs !== null) return byMs;
       const byDate = secondsFromIso(auction.scheduled_start);
       return byDate === null ? Number(auction.start_remaining || 0) : byDate;
     }
     if(isLive(s)){
+      const byMs = secondsFromMs(auction.ends_at_ms);
+      if(byMs !== null) return byMs;
       const byDate = secondsFromIso(auction.ends_at);
       return byDate === null ? Number(auction.remaining_seconds || 0) : byDate;
     }
@@ -1076,20 +1086,35 @@ window.__AUCTION__ = {{ item | tojson }};
 
   setInterval(tick, 1000);
 
-  // Polling só como fallback. Com websocket ativo, não fica batendo no backend o tempo todo.
-  setInterval(() => {
-    if(!wsConnected) fetchState("ws-offline", 8000);
-  }, 5000);
+  // Sincronização dupla: WebSocket para instantâneo + /state curto para correção.
+  // O vídeo mostrou que o WebSocket pode ficar aberto, mas uma tela perder/ignorar
+  // eventos e só corrigir muito tempo depois. Por isso, durante leilão ao vivo,
+  // o /state volta a conferir frequentemente. O guard anti-retrocesso impede que
+  // qualquer resposta atrasada volte preço/lances para trás.
+  const liveStateSyncMs = 1800 + Math.floor(Math.random() * 700);
+  const offlineStateSyncMs = 1000 + Math.floor(Math.random() * 400);
+  const scheduledNearStartSyncMs = 1500 + Math.floor(Math.random() * 700);
+  const idleStateSyncMs = 15000 + Math.floor(Math.random() * 3000);
+  let lastStateSyncAt = 0;
 
-  // Sincronização leve apenas como segurança.
-  // Antes todos os clientes faziam /state a cada 30s mesmo com WebSocket ok.
-  // Com 1000 pessoas isso vira ~33 req/s sem necessidade. Agora só confirma
-  // quando o WS está offline ou ficou muito tempo sem nenhum evento.
-  const slowSyncEveryMs = 120000 + Math.floor(Math.random() * 20000);
+  function stateSyncIntervalMs(){
+    const s = status();
+    if(pendingBidCount() > 0) return 900;
+    if(!wsConnected) return offlineStateSyncMs;
+    if(isLive(s)) return liveStateSyncMs;
+    if(isScheduled(s) && Number(remaining || 0) <= 20) return scheduledNearStartSyncMs;
+    return idleStateSyncMs;
+  }
+
   setInterval(() => {
-    const wsSilentForMs = Date.now() - Number(lastWsMessageAt || 0);
-    if(pendingBidCount() === 0 && (!wsConnected || wsSilentForMs > 90000)) fetchState("slow-sync", 8000);
-  }, slowSyncEveryMs);
+    if(!auctionId || isClosed(status())) return;
+    const now = Date.now();
+    const interval = stateSyncIntervalMs();
+    if(now - lastStateSyncAt < interval) return;
+    lastStateSyncAt = now;
+    const reason = !wsConnected ? "state-ws-offline" : isLive(status()) ? "state-live-guard" : "state-scheduled-guard";
+    fetchState(reason, wsConnected ? 4500 : 3500);
+  }, 350);
 
   document.querySelectorAll(".bid-btn").forEach((btn) => {
     btn.dataset.bid = bidKey(btn.dataset.bid);
