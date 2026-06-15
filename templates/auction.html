@@ -482,21 +482,55 @@ window.__AUCTION__ = {{ item | tojson }};
   }
   function shouldAcceptIncomingState(data, source){
     if(!data) return false;
-    const safeSources = new Set(["initial", "bid", "bid-error", "local-start", "confirm-local-start"]);
+
     const incomingStatus = String(data.status || "").toLowerCase();
-    if(["ended", "pending_payment", "expired", "finished", "closed"].includes(incomingStatus)) return true;
-    if(safeSources.has(source)) return true;
+    const currentStatus = status();
+    const incomingClosed = ["ended", "pending_payment", "expired", "finished", "closed"].includes(incomingStatus);
+    const currentClosed = isClosed(currentStatus);
 
     const incomingBidId = Number(data.last_bid_id || data.state_version || 0);
     const incomingCount = Number(data.bids_count || 0);
     const currentBidId = Number(auction.last_bid_id || auction.state_version || lastAcceptedBidId || 0);
     const currentCount = Number(auction.bids_count || lastAcceptedBidCount || 0);
+    const acceptedBidId = Number(lastAcceptedBidId || 0);
+    const acceptedCount = Number(lastAcceptedBidCount || 0);
 
-    // Proteção principal contra o bug do vídeo: websocket/polling antigo não pode
-    // sobrescrever um lance recém exibido na tela.
+    // Fontes locais do próprio clique podem atualizar a tela imediatamente.
+    // Mesmo assim, não podem voltar abaixo do maior lance já confirmado.
+    const ownImmediateSources = new Set(["initial", "bid", "bid-error", "local-start", "local-finish"]);
+    const isOwnImmediate = ownImmediateSources.has(source);
+
+    // Se a tela já foi encerrada localmente ou oficialmente, só aceita reabrir se vier
+    // um lance realmente mais novo. Isso evita o efeito "0s / encerra / volta ao vivo".
+    if(currentClosed && !incomingClosed && incomingBidId <= currentBidId && incomingCount <= currentCount){
+      return false;
+    }
+
+    // Estado fechado vindo do servidor é importante, mas fechado antigo não pode apagar
+    // um lance mais novo que já apareceu na tela, nem derrubar um clique otimista
+    // antes do POST confirmar/recusar.
+    if(incomingClosed){
+      if(!isOwnImmediate && incomingCount < currentCount) return false;
+      if(!isOwnImmediate && incomingBidId < currentBidId) return false;
+      if(incomingBidId < acceptedBidId) return false;
+      if(incomingBidId === acceptedBidId && incomingCount < acceptedCount) return false;
+      return true;
+    }
+
+    // Proteção principal contra o bug do vídeo:
+    // qualquer pacote antigo de websocket/polling/HTTP atrasado é ignorado.
+    if(incomingBidId < acceptedBidId) return false;
+    if(incomingCount < acceptedCount) return false;
     if(incomingBidId && currentBidId && incomingBidId < currentBidId) return false;
-    if(incomingCount < currentCount && (pendingBidCount() > 0 || Date.now() < optimisticHoldUntil)) return false;
-    if(incomingBidId === currentBidId && incomingCount < currentCount && Date.now() < optimisticHoldUntil) return false;
+    if(incomingCount < currentCount && !isOwnImmediate) return false;
+    if(incomingBidId === currentBidId && incomingCount < currentCount) return false;
+
+    // Durante o efeito otimista, só aceitamos estado menor se for rollback explícito
+    // do próprio POST com erro. Polling e websocket nunca derrubam a tela otimista.
+    if((pendingBidCount() > 0 || Date.now() < optimisticHoldUntil) && !isOwnImmediate){
+      if(incomingBidId <= currentBidId && incomingCount <= currentCount) return false;
+    }
+
     return true;
   }
   function labelStatus(s){
@@ -1210,9 +1244,12 @@ window.__AUCTION__ = {{ item | tojson }};
 
   applyAuctionState(auction, "initial");
 
-  // Sincronização logo ao abrir a página. Isso corrige o caso de um PC carregar
-  // a tela alguns segundos depois de outro e ficar contando atrasado.
-  setTimeout(() => fetchState("initial-sync", 4000), 120);
+  // Sincronização logo ao abrir a página:
+  // evita duplicar /state quando o WebSocket já entregou o estado inicial.
+  // Se o WS não responder, confirma pelo HTTP uma vez.
+  setTimeout(() => {
+    if(!lastWsMessageAt) fetchState("initial-sync-fallback", 4000);
+  }, 1400);
 
   if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero", 5000);
 })();
