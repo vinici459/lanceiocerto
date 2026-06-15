@@ -516,7 +516,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v12-natural-flow")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v13-home-live-dom")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -4098,33 +4098,64 @@ def home(request: Request):
 
 @app.get("/api/home/state")
 def home_state(request: Request):
-    """Estado ultraleve da Home.
+    """Estado leve da Home, mas suficiente para atualizar cards sem reload.
 
-    O app.js só precisa saber se mudou a quantidade de cards para recarregar a
-    vitrine. Antes esta rota remontava todos os cards e ainda sincronizava
-    estados vencidos, disputando banco com a sala do leilão e aparecendo nos
-    logs com 4-6s. O watcher já faz as transições; aqui retornamos apenas counts.
+    A Home não deve recarregar a página inteira quando um leilão sai de
+    PRÓXIMO para AO VIVO ou de AO VIVO para ENCERRADO. Esta rota sincroniza
+    apenas os leilões vencidos/iniciados e devolve os dados mínimos dos cards
+    já visíveis, permitindo que o app.js atualize o DOM suavemente.
     """
     db = SessionLocal()
     try:
-        live_count = int(db.query(func.count(AuctionItem.id)).filter(AuctionItem.status == "live").scalar() or 0)
-        upcoming_count = int(db.query(func.count(AuctionItem.id)).filter(AuctionItem.status.in_(["scheduled", "relisted"])).scalar() or 0)
-        ended_count = int(db.query(func.count(AuctionItem.id)).filter(AuctionItem.status.in_(["pending_payment", "ended"])).scalar() or 0)
+        # Sincronização sob demanda para evitar a Home ficar vários segundos em
+        # "Conferindo/Iniciando" esperando o watcher. A consulta é limitada e
+        # só pega itens realmente vencidos/iniciados.
+        if sync_due_auction_states(db, limit=30):
+            db.commit()
+            nav_cache_clear("home:")
+
+        live_items = (
+            db.query(AuctionItem)
+            .filter(AuctionItem.status == "live")
+            .order_by(AuctionItem.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        upcoming_items = (
+            db.query(AuctionItem)
+            .filter(AuctionItem.status.in_(["scheduled", "relisted"]))
+            .order_by(AuctionItem.scheduled_start.asc())
+            .limit(8)
+            .all()
+        )
+        ended_items = (
+            db.query(AuctionItem)
+            .options(selectinload(AuctionItem.winner))
+            .filter(AuctionItem.status.in_(["pending_payment", "ended"]))
+            .order_by(desc(AuctionItem.created_at))
+            .limit(8)
+            .all()
+        )
+
+        live_payloads = [public_auction_card_payload(x) for x in live_items]
+        upcoming_payloads = [public_auction_card_payload(x) for x in upcoming_items]
+        ended_payloads = [public_auction_card_payload(x) for x in ended_items]
+
         return JSONResponse({
             "ok": True,
-            "live_count": live_count,
-            "upcoming_count": upcoming_count,
-            "ended_count": ended_count,
-            # IDs ajudam o front a detectar mudança real sem depender só de contagem.
-            # Mantemos leve: são apenas inteiros, sem remontar cards/imagens.
-            "live_ids": [row[0] for row in db.query(AuctionItem.id).filter(AuctionItem.status == "live").order_by(AuctionItem.created_at.desc()).limit(20).all()],
-            "upcoming_ids": [row[0] for row in db.query(AuctionItem.id).filter(AuctionItem.status.in_(["scheduled", "relisted"])).order_by(AuctionItem.scheduled_start.asc()).limit(20).all()],
-            "ended_ids": [row[0] for row in db.query(AuctionItem.id).filter(AuctionItem.status.in_(["pending_payment", "ended"])).order_by(desc(AuctionItem.created_at)).limit(20).all()],
+            "live_count": len(live_payloads),
+            "upcoming_count": len(upcoming_payloads),
+            "ended_count": len(ended_payloads),
+            "live_ids": [x["id"] for x in live_payloads],
+            "upcoming_ids": [x["id"] for x in upcoming_payloads],
+            "ended_ids": [x["id"] for x in ended_payloads],
+            "live_items": live_payloads,
+            "upcoming_items": upcoming_payloads,
+            "ended_items": ended_payloads,
             **server_time_payload(),
         })
     finally:
         db.close()
-
 
 @app.post("/indicacao/indicar")
 def nominate_product_suggestion(request: Request, product_key: str = Form(...)):

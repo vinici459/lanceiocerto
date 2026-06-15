@@ -1026,3 +1026,26 @@ body.home-soft-refreshing .lc-home{
 .auction-countdown,.countdown{
   animation:none !important;
 }
+
+/* V13 - Home sem reload bruto: transições suaves de PRÓXIMO → AO VIVO → ENCERRADO */
+.lc-auction-card.home-card-syncing{
+  border-color:rgba(96,165,250,.40)!important;
+  box-shadow:0 16px 38px rgba(37,99,235,.18)!important;
+}
+.lc-auction-card.home-card-moving{
+  animation:lcHomeCardMove .24s ease-out both;
+}
+.lc-auction-card .countdown,
+.auction-countdown{
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;
+  white-space:nowrap;
+  contain:paint;
+}
+@keyframes lcHomeCardMove{
+  from{opacity:.72;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@media (prefers-reduced-motion: reduce){
+  .lc-auction-card.home-card-moving{animation:none!important;}
+}

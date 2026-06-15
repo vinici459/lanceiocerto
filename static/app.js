@@ -235,10 +235,13 @@
     const countdowns = Array.from(document.querySelectorAll(".countdown[data-seconds]"));
     if (!countdowns.length) return;
 
-    let homeRefreshCheckScheduled = false;
-    let homeHardReloadScheduled = false;
+    let homeStateInFlight = false;
+    let homeStateQueued = false;
+    let homeFastSyncUntil = 0;
+    let homeLastStateAt = 0;
 
     function currentSeconds(el) {
+      if (!el || el.dataset.homeInactive === "true") return null;
       const endAt = el.dataset.endAt;
       const startAt = el.dataset.startAt;
       const fromDate = secondsFromDate(endAt || startAt);
@@ -246,100 +249,230 @@
       return Math.max(0, Number.parseInt(el.dataset.seconds || "0", 10) || 0);
     }
 
-    function markCardChecking(el) {
-      const card = el?.closest?.("[data-auction-card]");
-      if (!card) return;
-      card.classList.add("home-card-checking");
+    function homeGrids() {
+      const lanes = document.querySelectorAll("#home-active-auctions .auction-lane");
+      return {
+        live: lanes[0] ? lanes[0].querySelector(".lc-auction-grid") : null,
+        upcoming: lanes[1] ? lanes[1].querySelector(".lc-auction-grid") : null,
+        ended: document.querySelector("#home-ended-auctions .lc-auction-grid"),
+      };
+    }
+
+    function cardById(id) {
+      return document.querySelector(`[data-auction-card][data-auction-id="${String(id)}"]`);
+    }
+
+    function removeEmptyState(grid) {
+      if (!grid) return;
+      grid.querySelectorAll(":scope > .empty-state").forEach((item) => item.remove());
+    }
+
+    function moveCard(card, grid) {
+      if (!card || !grid || card.parentElement === grid) return;
+      removeEmptyState(grid);
+      card.classList.add("home-card-moving");
+      grid.appendChild(card);
+      window.setTimeout(() => card.classList.remove("home-card-moving"), 260);
+    }
+
+    function formatMoney(value) {
+      const number = Number(value || 0);
+      return `R$ ${number.toFixed(2).replace(".", ",")}`;
+    }
+
+    function setBadge(card, status) {
       const badge = card.querySelector(".status-badge");
-      if (badge && !badge.dataset.originalText) badge.dataset.originalText = badge.textContent || "";
-      if (badge) badge.textContent = "CONFERINDO";
-    }
-
-    function reloadHomeSoftly(reason) {
-      if (homeHardReloadScheduled) return;
-      homeHardReloadScheduled = true;
-      document.body.classList.add("home-soft-refreshing");
-      window.setTimeout(() => window.location.reload(), reason === "zero" ? 1200 : 950);
-    }
-
-    function scheduleHomeRefresh(reason, el) {
-      if (el) {
-        markCardChecking(el);
-        setTextIfChanged(el, "Conferindo...");
+      if (!badge) return;
+      badge.classList.remove("live", "scheduled", "ended");
+      if (status === "live") {
+        badge.classList.add("live");
+        setTextIfChanged(badge, "AO VIVO");
+      } else if (status === "scheduled" || status === "relisted") {
+        badge.classList.add("scheduled");
+        setTextIfChanged(badge, "PRÓXIMO");
+      } else {
+        badge.classList.add("ended");
+        setTextIfChanged(badge, "ENCERRADO");
       }
-      if (homeRefreshCheckScheduled) return;
-      homeRefreshCheckScheduled = true;
-      window.setTimeout(async () => {
-        homeRefreshCheckScheduled = false;
-        await refreshHomeState(true, reason);
-      }, reason === "zero" ? 650 : 900);
+    }
+
+    function ensureCountdownElement(timerLine) {
+      if (!timerLine) return null;
+      let strong = timerLine.querySelector("strong");
+      if (!strong) {
+        strong = document.createElement("strong");
+        timerLine.appendChild(strong);
+      }
+      strong.classList.add("countdown");
+      strong.dataset.homeInactive = "false";
+      return strong;
+    }
+
+    function updateTimer(card, item, status) {
+      const timerLine = card.querySelector(".timer-line");
+      if (!timerLine) return;
+      let label = timerLine.querySelector("span");
+      if (!label) {
+        label = document.createElement("span");
+        timerLine.prepend(label);
+      }
+      const strong = ensureCountdownElement(timerLine);
+      if (!strong) return;
+
+      strong.dataset.homeSyncing = "false";
+      card.classList.remove("home-card-syncing");
+
+      if (status === "live") {
+        setTextIfChanged(label, "Tempo restante");
+        strong.dataset.endAt = item.ends_at || "";
+        delete strong.dataset.startAt;
+        strong.dataset.seconds = String(Math.max(0, Number.parseInt(item.remaining_seconds || "0", 10) || 0));
+        setTextIfChanged(strong, formatTime(currentSeconds(strong) ?? 0));
+      } else if (status === "scheduled" || status === "relisted") {
+        setTextIfChanged(label, "Começa em");
+        strong.dataset.startAt = item.scheduled_start || "";
+        delete strong.dataset.endAt;
+        strong.dataset.seconds = String(Math.max(0, Number.parseInt(item.start_remaining || "0", 10) || 0));
+        setTextIfChanged(strong, formatTime(currentSeconds(strong) ?? 0));
+      } else {
+        setTextIfChanged(label, "Status");
+        strong.dataset.homeInactive = "true";
+        delete strong.dataset.endAt;
+        delete strong.dataset.startAt;
+        delete strong.dataset.seconds;
+        setTextIfChanged(strong, "Encerrado");
+      }
+    }
+
+    function updatePrice(card, item, status) {
+      const priceLine = card.querySelector(".price-line");
+      if (!priceLine) return;
+      const firstBox = priceLine.children[0];
+      if (!firstBox) return;
+      const label = firstBox.querySelector("span");
+      const strong = firstBox.querySelector("strong");
+      if (label) {
+        setTextIfChanged(label, status === "live" ? "Atual" : (status === "ended" ? "Final" : "Inicial"));
+      }
+      if (strong) setTextIfChanged(strong, formatMoney(item.current_price));
+    }
+
+    function updateButton(card, item, status) {
+      const btn = card.querySelector("a.btn");
+      if (!btn) return;
+      btn.href = `/auction/${item.id}`;
+      btn.classList.toggle("ghost", status !== "live");
+      setTextIfChanged(btn, status === "live" ? "Participar" : (status === "ended" ? "Ver detalhes" : "Ver produto"));
+    }
+
+    function updateCardFromItem(item) {
+      if (!item || !item.id) return;
+      const card = cardById(item.id);
+      if (!card) return;
+      const status = (item.status === "pending_payment" ? "ended" : String(item.status || "").toLowerCase()) || "scheduled";
+      const grids = homeGrids();
+
+      card.dataset.auctionStatus = status;
+      card.classList.toggle("ended", status === "ended");
+      setBadge(card, status);
+      updatePrice(card, item, status);
+      updateTimer(card, item, status);
+      updateButton(card, item, status);
+
+      if (status === "live") moveCard(card, grids.live);
+      else if (status === "scheduled" || status === "relisted") moveCard(card, grids.upcoming);
+      else moveCard(card, grids.ended);
+    }
+
+    function updateHomeCounts(json) {
+      const live = Number(json.live_count || 0);
+      const upcoming = Number(json.upcoming_count || 0);
+      const ended = Number(json.ended_count || 0);
+      document.querySelectorAll(".market-live strong,.lane-count.live").forEach((el) => setTextIfChanged(el, live));
+      document.querySelectorAll(".market-next strong,.lane-count.scheduled").forEach((el) => setTextIfChanged(el, upcoming));
+      document.querySelectorAll(".market-ended strong,.lane-count.ended").forEach((el) => setTextIfChanged(el, ended));
+    }
+
+    function applyHomeState(json) {
+      updateHomeCounts(json);
+      [json.live_items, json.upcoming_items, json.ended_items].forEach((items) => {
+        if (Array.isArray(items)) items.forEach(updateCardFromItem);
+      });
+    }
+
+    function requestHomeStateSoon(reason, critical) {
+      const now = Date.now();
+      if (critical) homeFastSyncUntil = Math.max(homeFastSyncUntil, now + 7000);
+      const minGap = critical ? 350 : 1500;
+      if (now - homeLastStateAt < minGap) return;
+      window.setTimeout(() => refreshHomeState(reason || "timer", Boolean(critical)), critical ? 40 : 120);
     }
 
     function tickCountdowns() {
       countdowns.forEach((el) => {
         const seconds = currentSeconds(el);
+        if (seconds === null) return;
+        const card = el.closest("[data-auction-card]");
+
         if (seconds <= 0) {
-          setTextIfChanged(el, "Conferindo...");
-          scheduleHomeRefresh("zero", el);
+          const status = String(card?.dataset.auctionStatus || "").toLowerCase();
+          if (status === "scheduled" || status === "relisted") {
+            setTextIfChanged(el, "Iniciando...");
+          } else if (status === "live") {
+            setTextIfChanged(el, "Encerrando...");
+          } else {
+            setTextIfChanged(el, "Conferindo...");
+          }
+          el.dataset.homeSyncing = "true";
+          if (card) card.classList.add("home-card-syncing");
+          requestHomeStateSoon("zero", true);
           return;
         }
+
         setTextIfChanged(el, formatTime(seconds));
         if (!el.dataset.endAt && !el.dataset.startAt) {
           el.dataset.seconds = String(Math.max(0, seconds - 1));
         }
       });
+
+      if (Date.now() < homeFastSyncUntil) {
+        requestHomeStateSoon("fast-sync", true);
+      }
     }
 
-    let homeStateInFlight = false;
-
-    async function refreshHomeState(force = false, reason = "timer") {
+    async function refreshHomeState(reason, critical) {
       if (!document.querySelector(".lc-home")) return;
-      if ((!force && document.hidden) || homeStateInFlight) return;
+      if (document.hidden && !critical) return;
+      if (homeStateInFlight) {
+        if (critical) homeStateQueued = true;
+        return;
+      }
       homeStateInFlight = true;
+      homeLastStateAt = Date.now();
       const sent = Date.now();
       try {
-        const res = await fetch("/api/home/state", { cache: "no-store" });
+        const res = await fetch(`/api/home/state?reason=${encodeURIComponent(reason || "poll")}`, { cache: "no-store" });
         const json = await res.json().catch(() => ({}));
         const received = Date.now();
         if (!res.ok || !json.ok) return;
         syncHomeServerClock(json, sent, received);
-
-        const currentLive = document.querySelectorAll("#home-active-auctions .status-badge.live").length;
-        const currentUpcoming = document.querySelectorAll("#home-active-auctions .status-badge.scheduled").length;
-        const nextLive = Number.isFinite(Number(json.live_count))
-          ? Number(json.live_count)
-          : (Array.isArray(json.live_items) ? json.live_items.length : currentLive);
-        const nextUpcoming = Number.isFinite(Number(json.upcoming_count))
-          ? Number(json.upcoming_count)
-          : (Array.isArray(json.upcoming_items) ? json.upcoming_items.length : currentUpcoming);
-
-        const visibleLiveIds = Array.from(document.querySelectorAll("#home-active-auctions .status-badge.live"))
-          .map((badge) => Number(badge.closest("[data-auction-card]")?.dataset.auctionId || 0))
-          .filter(Boolean);
-        const visibleUpcomingIds = Array.from(document.querySelectorAll("#home-active-auctions .status-badge.scheduled"))
-          .map((badge) => Number(badge.closest("[data-auction-card]")?.dataset.auctionId || 0))
-          .filter(Boolean);
-        const nextLiveIds = Array.isArray(json.live_ids) ? json.live_ids.map(Number).filter(Boolean) : visibleLiveIds;
-        const nextUpcomingIds = Array.isArray(json.upcoming_ids) ? json.upcoming_ids.map(Number).filter(Boolean) : visibleUpcomingIds;
-        const idsChanged =
-          visibleLiveIds.join(",") !== nextLiveIds.join(",") ||
-          visibleUpcomingIds.join(",") !== nextUpcomingIds.join(",");
-
-        if (currentLive !== nextLive || currentUpcoming !== nextUpcoming || idsChanged) {
-          reloadHomeSoftly(reason);
-        }
+        applyHomeState(json);
       } catch (_) {
       } finally {
         homeStateInFlight = false;
+        if (homeStateQueued) {
+          homeStateQueued = false;
+          window.setTimeout(() => refreshHomeState("queued-critical", true), 80);
+        }
       }
     }
 
     tickCountdowns();
     setInterval(tickCountdowns, 1000);
-    window.setTimeout(refreshHomeState, 2500);
-    setInterval(refreshHomeState, 15000);
+    window.setTimeout(() => refreshHomeState("initial", true), 700);
+    setInterval(() => refreshHomeState("poll", false), 12000);
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) window.setTimeout(refreshHomeState, 600);
+      if (!document.hidden) window.setTimeout(() => refreshHomeState("visible", true), 250);
     });
   }
 
