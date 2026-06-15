@@ -1299,7 +1299,6 @@ window.__AUCTION__ = {{ item | tojson }};
       bidInFlightValue = value;
       bidInFlightStartedAt = Date.now();
       pendingBids[value] = true;
-      scheduleStateSync();
       applyOptimisticBid(value);
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
       renderButtons();

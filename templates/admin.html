@@ -219,7 +219,7 @@
               <label>Preço original<input type="number" step="0.01" name="source_price" required></label>
               <label>Imagem do computador<input type="file" name="image_file" accept="image/*"></label>
             </div>
-            <label>Descrição do produto<textarea name="description" placeholder="Descreva o produto com clareza, sem exageros e com informações reais."></textarea></label>
+            <label>Descrição do produto<textarea name="description" placeholder="Descreva o produto."></textarea></label>
 
             <div class="form-section-title"><h2>Agendamento</h2><p>Escolha início por tempo ou por data exata.</p></div>
             <div class="profile-grid admin-form-grid">
@@ -233,7 +233,7 @@
               <label class="schedule-datetime-field">Data e hora do início<input type="datetime-local" name="scheduled_start_at"></label>
               <label>Tempo inicial do leilão em minutos
                 <input type="number" name="initial_duration_minutes" value="30" min="1" max="60">
-                <small>Máximo recomendado: 60 minutos. O backend limita automaticamente.</small>
+                <small>Máximo recomendado: 60 minutos.</small>
               </label>
             </div>
 

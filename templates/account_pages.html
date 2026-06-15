@@ -730,6 +730,8 @@
 </div>
 
 {% elif section == 'checkout' %}
+{% set has_order_pix_payment = pix_payment is defined and pix_payment and pix_payment.qr_code_base64 %}
+{% set checkout_payment_active = has_order_pix_payment or (checkout_force_payment is defined and checkout_force_payment) %}
 <div class="panel-card checkout-page-card">
   <div class="section-head">
     <div>
@@ -784,10 +786,10 @@
     </div>
 
     <!-- DIREITA -->
-    <form id="checkoutForm" class="form-card checkout-form-pro" method="post" action="/minha-conta/pagamentos/{{ entity.auction_id }}/confirmar">
+    <form id="checkoutForm" class="form-card checkout-form-pro" method="post" action="/minha-conta/pagamentos/{{ entity.auction_id }}/confirmar" data-checkout-initial-step="{{ 'payment' if checkout_payment_active else 'delivery' }}">
 
       <!-- ETAPA 1 -->
-      <div class="checkout-step active" data-checkout-step="delivery">
+      <div class="checkout-step {% if not checkout_payment_active %}active{% endif %}" data-checkout-step="delivery">
         <div class="checkout-step-head">
           <span>1</span>
           <div>
@@ -851,7 +853,7 @@
         </div>
 
         <label class="terms-check">
-          <input id="deliveryTerms" type="checkbox" required>
+          <input id="deliveryTerms" type="checkbox" required {% if checkout_payment_active %}checked{% endif %}>
           <span>
             Ao selecionar esta caixa, você confirma que leu e concorda com os
             <button type="button" class="link-button" data-open-terms>termos de compra</button>.
@@ -862,7 +864,7 @@
       </div>
 
       <!-- ETAPA 2 -->
-      <div class="checkout-step" data-checkout-step="payment">
+      <div class="checkout-step {% if checkout_payment_active %}active{% endif %}" data-checkout-step="payment">
         <div class="checkout-step-head">
           <span>2</span>
           <div>
@@ -911,7 +913,11 @@
 
         <div id="pixPaymentPanel" class="payment-panel active">
           <h3>Pagamento via PIX</h3>
+          {% if has_order_pix_payment %}
+          <p>Seu Pix já foi gerado. Pague pelo QR Code abaixo ou copie o código Pix.</p>
+          {% else %}
           <p>Ao confirmar, o sistema gera o QR Code Pix pelo Mercado Pago.</p>
+          {% endif %}
 
           {% if pix_payment and pix_payment.qr_code_base64 %}
           <div class="pix-payment-box" data-pix-payment="order" data-payment-id="{{ pix_payment.payment_id }}" data-auction-id="{{ entity.auction_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
@@ -941,7 +947,7 @@
         </div>
 
         <label class="terms-check">
-          <input id="paymentTerms" name="accepted_terms" value="1" type="checkbox" required>
+          <input id="paymentTerms" name="accepted_terms" value="1" type="checkbox" required {% if checkout_payment_active %}checked{% endif %}>
           <span>
             Confirmo novamente que li e aceito os
             <button type="button" class="link-button" data-open-terms>termos de compra</button>
@@ -951,7 +957,7 @@
 
         <div class="checkout-actions">
           <button class="btn ghost" type="button" id="backToDelivery">Voltar aos dados</button>
-          <button class="btn full" type="submit">Confirmar pagamento</button>
+          <button class="btn full" type="submit" id="confirmPaymentButton">{% if has_order_pix_payment %}Pix gerado — atualizar confirmação{% else %}Confirmar pagamento{% endif %}</button>
         </div>
       </div>
 
@@ -1175,6 +1181,8 @@
       if (selected) selected.classList.add("active");
     });
   });
+  const checkoutForm = document.getElementById("checkoutForm");
+  const confirmPaymentButton = document.getElementById("confirmPaymentButton");
   const goToPayment = document.getElementById("goToPayment");
   const backToDelivery = document.getElementById("backToDelivery");
   const deliveryTerms = document.getElementById("deliveryTerms");
@@ -1192,14 +1200,41 @@
     if (!deliveryStep || !paymentStep) return;
     deliveryStep.classList.toggle("active", step === "delivery");
     paymentStep.classList.toggle("active", step === "payment");
-    const form = document.getElementById("checkoutForm");
-    if (form) form.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (checkoutForm) checkoutForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  if (checkoutForm && checkoutForm.dataset.checkoutInitialStep === "payment" && deliveryStep && paymentStep) {
+    deliveryStep.classList.remove("active");
+    paymentStep.classList.add("active");
+  }
+
+  if (checkoutForm) {
+    checkoutForm.addEventListener("submit", function (event) {
+      if (checkoutForm.dataset.submitting === "1") {
+        event.preventDefault();
+        return;
+      }
+
+      checkoutForm.dataset.submitting = "1";
+
+      if (confirmPaymentButton) {
+        const method = paymentMethodInput ? paymentMethodInput.value : "pix";
+        confirmPaymentButton.disabled = true;
+        confirmPaymentButton.setAttribute("aria-busy", "true");
+        if (method === "wallet") {
+          confirmPaymentButton.textContent = "Confirmando saldo...";
+        } else if (method === "credit_card") {
+          confirmPaymentButton.textContent = "Abrindo Mercado Pago...";
+        } else {
+          confirmPaymentButton.textContent = "Gerando Pix...";
+        }
+      }
+    });
   }
 
   if (goToPayment) {
     goToPayment.addEventListener("click", function () {
-      const form = document.getElementById("checkoutForm");
-      if (!form) return;
+      if (!checkoutForm) return;
 
       const deliveryInputs = deliveryStep.querySelectorAll("input[required]");
       for (const input of deliveryInputs) {
