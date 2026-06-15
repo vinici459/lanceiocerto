@@ -516,15 +516,11 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-quality-v6")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-guarded-v4")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
-# Fila assíncrona por leilão: evita que centenas de POSTs simultâneos ocupem
-# threads só esperando o lock síncrono. O evento fica leve e apenas um lance por
-# leilão entra no executor por vez.
-AUCTION_BID_ASYNC_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 SUGGESTION_USER_VOTE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 WITHDRAWAL_USER_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
@@ -2184,44 +2180,6 @@ def server_time_payload(now: Optional[datetime] = None) -> dict:
         "server_time_ms": int(now.timestamp() * 1000),
     }
 
-
-def money_cents(value: float | Decimal | int | str | None) -> int:
-    """Converte valores monetários para centavos inteiros.
-
-    O front usa esse campo como trava anti-retrocesso. Comparar float direto
-    pode aceitar pequenas diferenças de arredondamento; centavos inteiros deixam
-    a ordem do estado objetiva.
-    """
-    try:
-        return int((Decimal(str(value or 0)) * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-    except Exception:
-        return 0
-
-
-def auction_state_guard_fields(
-    item: AuctionItem,
-    *,
-    bids_count: int,
-    last_bid_id: int,
-    now: Optional[datetime] = None,
-) -> dict:
-    """Campos monotônicos usados pelo navegador para rejeitar estado antigo.
-
-    last_bid_id e bids_count protegem a ordem dos lances; current_price_cents
-    impede o bug visto no vídeo: um payload atrasado com preço menor sobrescrever
-    um estado mais novo.
-    """
-    now = now or datetime.utcnow()
-    return {
-        "state_version": int(last_bid_id or 0),
-        "state_bid_id": int(last_bid_id or 0),
-        "state_bids_count": int(bids_count or 0),
-        "state_price_cents": money_cents(getattr(item, "current_price", 0.0) or 0.0),
-        "state_total_bid_fees_cents": money_cents(getattr(item, "total_bid_fees", 0.0) or 0.0),
-        "state_generated_ms": int(now.timestamp() * 1000),
-    }
-
-
 def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] = None) -> dict:
     # Em produtos agendados/relançados, a vitrine deve parecer uma nova disputa.
     # Lances antigos ficam fora da visualização pública e o relançamento limpa o histórico.
@@ -2232,7 +2190,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         last_bid_id = 0
     else:
         bids_count = int(getattr(item, "bids_count_cached", 0) or 0)
-        last_bid = db.query(Bid).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
+        last_bid = db.query(Bid).options(selectinload(Bid.user)).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
         last_bidder = public_user_name(last_bid.user) if last_bid else None
         last_bid_id = int(last_bid.id if last_bid else 0)
     remaining = 0
@@ -2281,7 +2239,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         "initial_duration_seconds": getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS),
         "bids_count": bids_count,
         "last_bid_id": last_bid_id,
-        **auction_state_guard_fields(item, bids_count=bids_count, last_bid_id=last_bid_id),
+        "state_version": int(last_bid_id),
         "user_turbo_eligible": user_turbo_eligible,
         "last_bidder": last_bidder,
         "image_url": safe_image_url(item.image_url),
@@ -2376,7 +2334,7 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         "initial_duration_seconds": getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS),
         "bids_count": bids_count,
         "last_bid_id": last_bid_id,
-        **auction_state_guard_fields(item, bids_count=bids_count, last_bid_id=last_bid_id),
+        "state_version": int(last_bid_id),
         "user_turbo_eligible": user_turbo_eligible,
         "last_bidder": last_bidder,
         "image_url": safe_image_url(item.image_url),
@@ -2456,7 +2414,7 @@ def fast_bid_auction_payload(
         "initial_duration_seconds": getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS),
         "bids_count": int(bids_count or 0),
         "last_bid_id": int(last_bid_id or 0),
-        **auction_state_guard_fields(item, bids_count=int(bids_count or 0), last_bid_id=int(last_bid_id or 0), now=now),
+        "state_version": int(last_bid_id or 0),
         "user_turbo_eligible": user_turbo_eligible,
         "last_bidder": last_bidder,
         "image_url": safe_image_url(item.image_url),
@@ -5038,16 +4996,13 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
 async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...), client_bid_id: str = Form("")):
     public_payload = None
     try:
-        # Não deixamos vários workers do threadpool parados esperando o mesmo
-        # leilão. A fila fica no event loop e o caminho de DB roda um por vez.
-        async with AUCTION_BID_ASYNC_LOCKS[auction_id]:
-            private_payload, public_payload, button_cooldown = await asyncio.to_thread(
-                _place_bid_sync,
-                request,
-                auction_id,
-                bid_value,
-                client_bid_id,
-            )
+        private_payload, public_payload, button_cooldown = await asyncio.to_thread(
+            _place_bid_sync,
+            request,
+            auction_id,
+            bid_value,
+            client_bid_id,
+        )
     except AuctionStateHTTPException as exc:
         body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
         if exc.retry_after:
@@ -5066,11 +5021,11 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             body["retry_after"] = retry_after
         return JSONResponse(body, status_code=exc.status_code)
 
-    # Caminho crítico do clique: responde primeiro ao usuário que clicou.
-    # O broadcast é agendado imediatamente em background; assim, com 100/1000 sockets,
-    # o POST não fica preso percorrendo todas as conexões antes de devolver confirmação.
+    # Nunca espera WebSocket para responder o clique. O JSON do POST já atualiza a tela.
     if public_payload:
-        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
+        # Agora o broadcast só enfileira a atualização por conexão; não espera rede.
+        # Isso faz outro computador receber o lance praticamente junto da resposta do POST.
+        await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload})
     return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
 @app.get("/api/auction/{auction_id}/state")
@@ -7466,9 +7421,19 @@ async def auction_socket(websocket: WebSocket, auction_id: int):
     try:
         item = db.get(AuctionItem, auction_id)
         if item:
-            if start_auction_if_due(item):
+            now = datetime.utcnow()
+            changed = start_auction_if_due(item, now)
+            finished_now = finish_auction_if_due(item, db, now, create_side_effects=False)
+            changed = finished_now or changed
+            if changed:
                 db.commit()
                 item = db.get(AuctionItem, auction_id)
+                if finished_now:
+                    asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
+
+            # Estado inicial do WS também precisa respeitar o fechamento oficial.
+            # Sem isso, uma aba recém aberta podia receber "live" com ends_at vencido
+            # e reabrir visualmente um leilão que já chegou a 0s.
             await manager.send_to(auction_id, websocket, {"type": "auction_update", "auction": public_auction_live_payload(item, db)})
     finally:
         db.close()
