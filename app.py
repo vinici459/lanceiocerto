@@ -59,6 +59,8 @@ UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(8 * 1024 * 1024)))
+PRODUCT_IMAGE_MAX_WIDTH = int(os.getenv("PRODUCT_IMAGE_MAX_WIDTH", "1200"))
+PRODUCT_IMAGE_WEBP_QUALITY = int(os.getenv("PRODUCT_IMAGE_WEBP_QUALITY", "78"))
 ALLOWED_UPLOAD_MIME_TYPES = {
     "image/jpeg",
     "image/png",
@@ -516,7 +518,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v13-home-live-dom")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v14-single-home-clock")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -3324,8 +3326,8 @@ def cashback_payload(item: AuctionItem, db: Session, user: Optional[User] = None
     joined = False
     user_spent = 0.0
     if user:
-        joined = db.query(CashbackEntry).filter(CashbackEntry.event_id == event.id, CashbackEntry.user_id == user.id).first() is not None
-        user_spent = sum((b.bid_value or 0.0) for b in db.query(Bid).filter(Bid.auction_id == item.id, Bid.user_id == user.id).all())
+        joined = db.query(CashbackEntry.id).filter(CashbackEntry.event_id == event.id, CashbackEntry.user_id == user.id).first() is not None
+        user_spent = float(db.query(func.coalesce(func.sum(Bid.bid_value), 0.0)).filter(Bid.auction_id == item.id, Bid.user_id == user.id).scalar() or 0.0)
     remaining = max(0, int((event.join_deadline - datetime.utcnow()).total_seconds())) if event.join_deadline else 0
     return {
         "available": True,
@@ -3703,12 +3705,11 @@ def save_uploaded_image(file: Optional[UploadFile]) -> str:
 
 
 def save_product_image_data_url(file: Optional[UploadFile]) -> str:
-    """Salva imagem do produto no próprio banco como data URL.
+    """Salva imagem do produto como data URL otimizada.
 
-    No Railway, arquivos enviados para /static/uploads podem sumir em redeploy
-    ou reinício do container. Para produto de leilão, a imagem precisa acompanhar
-    o cadastro. Por isso, produto usa data URL; documentos continuam usando
-    arquivo normal para não inflar demais o banco com PDFs.
+    Mantém a lógica de persistir a imagem junto do cadastro do produto, mas
+    reduz o peso antes de gravar no banco. Isso evita HTML enorme na Home/Admin
+    quando vários cards usam imagens em base64.
     """
     if not file or not file.filename:
         return ""
@@ -3726,39 +3727,45 @@ def save_product_image_data_url(file: Optional[UploadFile]) -> str:
         file.file.seek(0)
     except Exception:
         pass
+
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if not data:
         raise HTTPException(status_code=400, detail="Imagem vazia ou inválida.")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Imagem muito grande. Envie uma imagem menor.")
+
+    # GIF animado é preservado. Para JPG/PNG/WEBP, convertemos para WEBP e
+    # limitamos a largura para acelerar Home/Admin sem mudar a regra de negócio.
+    if declared_type != "image/gif":
+        try:
+            from PIL import Image, ImageOps
+
+            img = Image.open(io.BytesIO(data))
+            img = ImageOps.exif_transpose(img)
+            if img.mode not in {"RGB", "RGBA"}:
+                img = img.convert("RGB")
+            if img.width > PRODUCT_IMAGE_MAX_WIDTH:
+                ratio = PRODUCT_IMAGE_MAX_WIDTH / float(img.width)
+                new_size = (PRODUCT_IMAGE_MAX_WIDTH, max(1, int(img.height * ratio)))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+            out = io.BytesIO()
+            save_kwargs = {"format": "WEBP", "quality": PRODUCT_IMAGE_WEBP_QUALITY, "method": 6}
+            if img.mode == "RGBA":
+                save_kwargs["lossless"] = False
+            img.save(out, **save_kwargs)
+            optimized = out.getvalue()
+            # Usa a versão otimizada só quando ela realmente reduzir o payload.
+            if optimized and len(optimized) < len(data):
+                data = optimized
+                declared_type = "image/webp"
+        except Exception:
+            # Em caso de imagem exótica/corrompida que o Pillow não processe,
+            # mantém a validação de tamanho e salva o original para não quebrar o cadastro.
+            pass
+
     encoded = base64.b64encode(data).decode("ascii")
     return f"data:{declared_type};base64,{encoded}"
-
-    with engine.begin() as conn:
-        inspector = inspect(engine)
-        if "admin_direct_messages" not in inspector.get_table_names():
-            conn.execute(text("""
-                CREATE TABLE admin_direct_messages (
-                    id INTEGER PRIMARY KEY,
-                    order_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    admin_id INTEGER NOT NULL,
-                    message TEXT DEFAULT '',
-                    is_open BOOLEAN DEFAULT 1,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-        order_cols = {c["name"] for c in inspector.get_columns("winner_orders")}
-        if "purchase_link" not in order_cols:
-            conn.execute(text("ALTER TABLE winner_orders ADD COLUMN purchase_link VARCHAR(600) DEFAULT ''"))
-        if "purchase_status" not in order_cols:
-            conn.execute(text("ALTER TABLE winner_orders ADD COLUMN purchase_status VARCHAR(40) DEFAULT ''"))
-        if "purchased_at" not in order_cols:
-            conn.execute(text("ALTER TABLE winner_orders ADD COLUMN purchased_at DATETIME"))
-        if "sent_at" not in order_cols:
-            conn.execute(text("ALTER TABLE winner_orders ADD COLUMN sent_at DATETIME"))
-        if "delivered_at" not in order_cols:
-            conn.execute(text("ALTER TABLE winner_orders ADD COLUMN delivered_at DATETIME"))
 
 
 def seed() -> None:
@@ -3807,7 +3814,7 @@ def seed() -> None:
                 default_admin.is_banned = True
                 default_admin.password = secrets.token_urlsafe(24)
             db.flush()
-        elif DATABASE_URL.startswith("sqlite"):
+        elif DATABASE_URL.startswith("sqlite") and os.getenv("ENV", "development").lower() != "production":
             admin = db.query(User).filter(User.email == "admin@lanceiocerto.local").first()
             if not admin:
                 admin = User(
@@ -3883,6 +3890,7 @@ def _auction_watcher_sync() -> list[tuple[int, dict]]:
     try:
         now = datetime.utcnow()
         changed_ids: set[int] = set()
+        cashback_changed = False
 
         to_start = (
             db.query(AuctionItem)
@@ -3918,7 +3926,17 @@ def _auction_watcher_sync() -> list[tuple[int, dict]]:
             .all()
         )
         for cashback in due_cashbacks:
+            previous_status = cashback.status
+            previous_winner_id = cashback.winner_user_id
+            previous_amount = cashback.cashback_amount
             draw_cashback_if_due(cashback, db, now)
+            if (
+                cashback.status != previous_status
+                or cashback.winner_user_id != previous_winner_id
+                or cashback.cashback_amount != previous_amount
+            ):
+                cashback_changed = True
+                changed_ids.add(cashback.auction_id)
 
         expired_orders = (
             db.query(WinnerOrder)
@@ -3940,7 +3958,7 @@ def _auction_watcher_sync() -> list[tuple[int, dict]]:
                 item.chat_paused = True
                 changed_ids.add(item.id)
 
-        if not changed_ids:
+        if not changed_ids and not cashback_changed:
             db.rollback()
             return []
 
@@ -5205,7 +5223,7 @@ def join_cashback(request: Request, auction_id: int):
             raise HTTPException(status_code=404, detail="Sorteio de cashback ainda não disponível.")
         if event.status != "open" or event.join_deadline <= datetime.utcnow():
             raise HTTPException(status_code=400, detail="Prazo para participar do cashback encerrado.")
-        spent = sum((b.bid_value or 0.0) for b in db.query(Bid).filter(Bid.auction_id == auction_id, Bid.user_id == user.id).all())
+        spent = float(db.query(func.coalesce(func.sum(Bid.bid_value), 0.0)).filter(Bid.auction_id == auction_id, Bid.user_id == user.id).scalar() or 0.0)
         if spent <= 0:
             raise HTTPException(status_code=403, detail="Apenas participantes deste leilão podem entrar no cashback.")
         existing = db.query(CashbackEntry).filter(CashbackEntry.event_id == event.id, CashbackEntry.user_id == user.id).first()
@@ -5217,8 +5235,7 @@ def join_cashback(request: Request, auction_id: int):
     finally:
         db.close()
 
-@app.post("/api/auction/{auction_id}/chat")
-async def send_chat(request: Request, auction_id: int, message: str = Form(...)):
+def _send_chat_sync(request: Request, auction_id: int, message: str) -> dict:
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -5242,13 +5259,17 @@ async def send_chat(request: Request, auction_id: int, message: str = Form(...))
         db.add(msg)
         db.commit()
         db.refresh(msg)
-        payload = {
+        return {
             "type": "chat_message",
             "message": {"author": public_user_name(user), "text": msg.message, "created_at": msg.created_at.strftime("%H:%M:%S")},
         }
     finally:
         db.close()
 
+
+@app.post("/api/auction/{auction_id}/chat")
+async def send_chat(request: Request, auction_id: int, message: str = Form(...)):
+    payload = await asyncio.to_thread(_send_chat_sync, request, auction_id, message)
     await manager.broadcast(auction_id, payload)
     return JSONResponse({"ok": True})
 
@@ -6780,7 +6801,7 @@ async def admin_create_item(
     db = SessionLocal()
     try:
         require_admin(request, db)
-        final_image = save_product_image_data_url(image_file) or STATIC_FALLBACK_IMAGE
+        final_image = await asyncio.to_thread(save_product_image_data_url, image_file) or STATIC_FALLBACK_IMAGE
         now = datetime.utcnow()
         if schedule_mode == "datetime" and scheduled_start_at.strip():
             try:
@@ -6855,7 +6876,7 @@ async def admin_returned_update_relist(
         if turbo_base_value <= 0:
             raise HTTPException(status_code=400, detail="Valor-base do turbo inválido.")
 
-        final_image = save_product_image_data_url(image_file) or item.image_url
+        final_image = await asyncio.to_thread(save_product_image_data_url, image_file) or item.image_url
 
         turbo_trigger_amount = BR(turbo_base_value / 2.0)
         turbo_trigger_percent = max(1.0, min(95.0, (turbo_trigger_amount / source_price) * 100.0))
@@ -7364,8 +7385,7 @@ def account_request_withdrawal(request: Request, amount: float = Form(...), pix_
     finally:
         db.close()
 
-@app.post("/minha-conta/chamado")
-async def account_open_ticket(request: Request, subject: str = Form(...), message: str = Form(...), order_id: int = Form(0), proof_file: UploadFile | None = File(None)):
+def _account_open_ticket_sync(request: Request, subject: str, message: str, order_id: int, proof_file: UploadFile | None) -> None:
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -7380,9 +7400,14 @@ async def account_open_ticket(request: Request, subject: str = Form(...), messag
             order.status = "dispute"
         db.add(SupportTicket(user_id=user.id, order_id=linked_order_id, subject=subject.strip(), message=message.strip(), proof_url=proof_url, status="open"))
         db.commit()
-        return RedirectResponse("/minha-conta", status_code=303)
     finally:
         db.close()
+
+
+@app.post("/minha-conta/chamado")
+async def account_open_ticket(request: Request, subject: str = Form(...), message: str = Form(...), order_id: int = Form(0), proof_file: UploadFile | None = File(None)):
+    await asyncio.to_thread(_account_open_ticket_sync, request, subject, message, order_id, proof_file)
+    return RedirectResponse("/minha-conta", status_code=303)
 
 
 @app.post("/admin/user/{user_id}/verify")

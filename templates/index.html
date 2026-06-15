@@ -454,43 +454,9 @@
   suggestionCategoryFilter?.addEventListener("change", filterSuggestionProducts);
   suggestionSearchInput?.addEventListener("input", filterSuggestionProducts);
 
-  function formatTime(totalSeconds) {
-    let seconds = Math.max(0, parseInt(totalSeconds || 0, 10));
-    const days = Math.floor(seconds / 86400);
-    seconds %= 86400;
-    const hours = Math.floor(seconds / 3600);
-    seconds %= 3600;
-    const minutes = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-
-    if (days > 0) return `${days}d ${String(hours).padStart(2, "0")}h`;
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  }
-
-  function secondsFromIso(value) {
-    if (!value) return null;
-    const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
-    const ms = Date.parse(normalized);
-    if (Number.isNaN(ms)) return null;
-    return Math.max(0, Math.ceil((ms - Date.now()) / 1000));
-  }
-
-  function tickCountdowns() {
-    document.querySelectorAll(".countdown[data-seconds]").forEach((el) => {
-      const startAt = el.getAttribute("data-start-at");
-      const endAt = el.getAttribute("data-end-at");
-
-      let current = secondsFromIso(endAt);
-      if (current === null) current = secondsFromIso(startAt);
-      if (current === null) current = parseInt(el.getAttribute("data-seconds") || "0", 10);
-
-      el.textContent = formatTime(current);
-      el.setAttribute("data-seconds", Math.max(0, current - 1));
-    });
-  }
-
-  tickCountdowns();
-  setInterval(tickCountdowns, 1000);
+  // Countdown da Home é controlado exclusivamente por /static/app.js.
+  // Antes este template também tinha um setInterval próprio que alternava
+  // o formato do relógio (ex.: 1m 03s ↔ 00:01:03) e causava piscada no celular.
 })();
 </script>
 

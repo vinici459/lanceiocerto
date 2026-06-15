@@ -1229,16 +1229,35 @@ window.__AUCTION__ = {{ item | tojson }};
     return idleStateSyncMs;
   }
 
-  setInterval(() => {
-    if(!auctionId || (isClosed(status()) && !finishConfirming)) return;
-    if(document.hidden && wsConnected && pendingBidCount() === 0) return;
-    const now = Date.now();
-    const interval = stateSyncIntervalMs();
-    if(now - lastStateSyncAt < interval) return;
-    lastStateSyncAt = now;
-    const reason = !wsConnected ? "state-ws-offline" : isLive(status()) ? "state-live-guard" : "state-scheduled-guard";
-    fetchState(reason, wsConnected ? 3500 : 3000);
-  }, 350);
+  let stateSyncTimer = 0;
+
+  function scheduleStateSync(){
+    if(stateSyncTimer) window.clearTimeout(stateSyncTimer);
+    const delay = Math.max(500, stateSyncIntervalMs());
+    stateSyncTimer = window.setTimeout(async () => {
+      if(!auctionId || (isClosed(status()) && !finishConfirming)){
+        stateSyncTimer = 0;
+        return;
+      }
+
+      if(!(document.hidden && wsConnected && pendingBidCount() === 0)){
+        const now = Date.now();
+        const interval = stateSyncIntervalMs();
+        if(now - lastStateSyncAt >= interval){
+          lastStateSyncAt = now;
+          const reason = !wsConnected ? "state-ws-offline" : isLive(status()) ? "state-live-guard" : "state-scheduled-guard";
+          await fetchState(reason, wsConnected ? 3500 : 3000);
+        }
+      }
+
+      scheduleStateSync();
+    }, delay);
+  }
+
+  scheduleStateSync();
+  document.addEventListener("visibilitychange", () => {
+    if(!document.hidden) scheduleStateSync();
+  });
 
   // Trava de segurança: se por algum motivo uma requisição de lance ficar presa
   // além do timeout visual, não deixa a interface congelada indefinidamente.
@@ -1280,6 +1299,7 @@ window.__AUCTION__ = {{ item | tojson }};
       bidInFlightValue = value;
       bidInFlightStartedAt = Date.now();
       pendingBids[value] = true;
+      scheduleStateSync();
       applyOptimisticBid(value);
       applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
       renderButtons();
@@ -1365,6 +1385,9 @@ window.__AUCTION__ = {{ item | tojson }};
     const text = String(message.text || "").replace(/[<>&"]/g, "");
     line.innerHTML = `<strong>${author}</strong> <span>${time}</span><p>${text}</p>`;
     box.appendChild(line);
+    while(box.children.length > 120){
+      box.removeChild(box.firstElementChild);
+    }
     box.scrollTop = box.scrollHeight;
   }
 

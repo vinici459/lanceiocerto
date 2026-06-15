@@ -239,6 +239,10 @@
     let homeStateQueued = false;
     let homeFastSyncUntil = 0;
     let homeLastStateAt = 0;
+    const homeCardMap = new Map();
+    document.querySelectorAll("[data-auction-card][data-auction-id]").forEach((card) => {
+      homeCardMap.set(String(card.dataset.auctionId), card);
+    });
 
     function currentSeconds(el) {
       if (!el || el.dataset.homeInactive === "true") return null;
@@ -259,7 +263,7 @@
     }
 
     function cardById(id) {
-      return document.querySelector(`[data-auction-card][data-auction-id="${String(id)}"]`);
+      return homeCardMap.get(String(id)) || null;
     }
 
     function removeEmptyState(grid) {
@@ -272,6 +276,7 @@
       removeEmptyState(grid);
       card.classList.add("home-card-moving");
       grid.appendChild(card);
+      if(card.dataset.auctionId) homeCardMap.set(String(card.dataset.auctionId), card);
       window.setTimeout(() => card.classList.remove("home-card-moving"), 260);
     }
 

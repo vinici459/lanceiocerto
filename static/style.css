@@ -250,7 +250,7 @@ body.page-leaving .page-content-shell{opacity:.97;transform:translateY(1px);tran
 .home-tab-panel,.admin-panel,.wallet-mode-panel,.deposit-panel{animation:lcPanelIn .16s ease-out both;}
 @keyframes lcPanelIn{from{opacity:.55;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 
-.admin-production-sidebar,.account-sidebar{will-change:transform;}
+/* Evita camada permanente na sidebar: melhora memória/renderização no mobile. */
 .countdown{font-variant-numeric:tabular-nums;}
 
 @media (prefers-reduced-motion: reduce){
@@ -965,7 +965,6 @@ button,a,input,select,textarea{
   text-align:left;
   contain:layout paint;
   backface-visibility:hidden;
-  transform:translateZ(0);
   transition:none !important;
   animation:none !important;
 }
@@ -977,10 +976,7 @@ button,a,input,select,textarea{
   content-visibility:visible !important;
 }
 
-.lc-auction-card .countdown,
-.auction-panel .auction-countdown{
-  will-change:contents;
-}
+/* Sem will-change permanente no cronômetro: evita repintura desnecessária em mobile. */
 
 @media(max-width:900px){
   .lc-auction-card,
@@ -1020,9 +1016,7 @@ body.home-soft-refreshing .lc-home{
   opacity:.92;
   transition:opacity .28s ease;
 }
-.auction-panel,.lc-auction-card,.price-box>div,.meta-grid>div{
-  transform:translateZ(0);
-}
+/* Removido translateZ(0) permanente nos cards para reduzir camadas e piscadas no celular. */
 .auction-countdown,.countdown{
   animation:none !important;
 }
@@ -1040,7 +1034,7 @@ body.home-soft-refreshing .lc-home{
   font-variant-numeric:tabular-nums;
   font-feature-settings:"tnum" 1;
   white-space:nowrap;
-  contain:paint;
+  contain:layout;
 }
 @keyframes lcHomeCardMove{
   from{opacity:.72;transform:translateY(8px)}
