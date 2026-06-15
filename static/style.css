@@ -910,3 +910,47 @@ button,a,input,select,textarea{
     flex-basis:72px !important;
   }
 }
+
+
+/* V9: cronômetro mais natural, sem “piscar”/pular largura a cada sincronização. */
+.countdown,
+.auction-countdown,
+#countdown,
+#cashback-countdown{
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  white-space: nowrap;
+}
+.auction-countdown,
+#countdown{
+  display:inline-block;
+  min-width:6.2ch;
+}
+
+/* V10: no celular alguns navegadores repintavam cards com content-visibility,
+   fazendo o cronômetro parecer piscar. Mantemos a otimização nas áreas pesadas
+   do admin/conta, mas deixamos cards de leilão e painel de disputa sempre
+   renderizados de forma estável. */
+.lc-auction-card,
+.lc-home .lc-auction-card,
+.auction-layout .auction-panel,
+.auction-layout .chat-card,
+.auction-layout .price-box > div,
+.auction-layout .meta-grid > div{
+  content-visibility: visible !important;
+  contain: none !important;
+}
+
+.countdown,
+.auction-countdown,
+#countdown,
+#cashback-countdown{
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.auction-countdown,
+#countdown{
+  min-width:7ch;
+  text-align:left;
+}

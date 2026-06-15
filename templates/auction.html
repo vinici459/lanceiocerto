@@ -409,8 +409,30 @@ window.__AUCTION__ = {{ item | tojson }};
     const n = Number(value || 0);
     return Number.isFinite(n) ? Math.round(n * 100) : 0;
   }
-  let lastAcceptedPriceCents = Number(auction.state_price_cents || priceCents(auction.current_price));
-  let lastAcceptedFeeCents = Number(auction.state_total_bid_fees_cents || priceCents(auction.total_bid_fees));
+  function maxNumber(...values){
+    let best = 0;
+    values.forEach((value) => {
+      const n = Number(value || 0);
+      if(Number.isFinite(n) && n > best) best = n;
+    });
+    return best;
+  }
+  function stateBidId(data){
+    return maxNumber(data?.last_bid_id, data?.state_bid_id, data?.state_version);
+  }
+  function stateBidCount(data){
+    return maxNumber(data?.bids_count, data?.state_bids_count);
+  }
+  function statePriceCents(data){
+    return maxNumber(data?.state_price_cents, priceCents(data?.current_price));
+  }
+  function stateFeeCents(data){
+    return maxNumber(data?.state_total_bid_fees_cents, priceCents(data?.total_bid_fees));
+  }
+  lastAcceptedBidId = Math.max(lastAcceptedBidId, stateBidId(auction));
+  lastAcceptedBidCount = Math.max(lastAcceptedBidCount, stateBidCount(auction));
+  let lastAcceptedPriceCents = statePriceCents(auction);
+  let lastAcceptedFeeCents = stateFeeCents(auction);
   let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
@@ -505,14 +527,14 @@ window.__AUCTION__ = {{ item | tojson }};
     const incomingClosed = ["ended", "pending_payment", "expired", "finished", "closed"].includes(incomingStatus);
     const currentClosed = isClosed(currentStatus);
 
-    const incomingBidId = Number(data.last_bid_id || data.state_bid_id || data.state_version || 0);
-    const incomingCount = Number(data.bids_count || data.state_bids_count || 0);
-    const incomingPriceCents = Number(data.state_price_cents || priceCents(data.current_price));
-    const incomingFeeCents = Number(data.state_total_bid_fees_cents || priceCents(data.total_bid_fees));
-    const currentBidId = Number(auction.last_bid_id || auction.state_bid_id || auction.state_version || lastAcceptedBidId || 0);
-    const currentCount = Number(auction.bids_count || auction.state_bids_count || lastAcceptedBidCount || 0);
-    const currentPriceCents = Number(auction.state_price_cents || priceCents(auction.current_price));
-    const currentFeeCents = Number(auction.state_total_bid_fees_cents || priceCents(auction.total_bid_fees));
+    const incomingBidId = stateBidId(data);
+    const incomingCount = stateBidCount(data);
+    const incomingPriceCents = statePriceCents(data);
+    const incomingFeeCents = stateFeeCents(data);
+    const currentBidId = Math.max(stateBidId(auction), Number(lastAcceptedBidId || 0));
+    const currentCount = Math.max(stateBidCount(auction), Number(lastAcceptedBidCount || 0));
+    const currentPriceCents = Math.max(statePriceCents(auction), Number(lastAcceptedPriceCents || 0));
+    const currentFeeCents = Math.max(stateFeeCents(auction), Number(lastAcceptedFeeCents || 0));
     const acceptedBidId = Number(lastAcceptedBidId || 0);
     const acceptedCount = Number(lastAcceptedBidCount || 0);
     const acceptedPriceCents = Number(lastAcceptedPriceCents || 0);
@@ -738,12 +760,20 @@ window.__AUCTION__ = {{ item | tojson }};
     const predictedLevel = localTurboLevelFromProgress(predictedProgress);
     const timingLevel = predictedLevel >= 2 ? predictedLevel : levelBefore;
 
+    const predictedPrice = Math.round((Number(auction.current_price || 0) + increment) * 100) / 100;
+    const predictedFees = Math.round((Number(auction.total_bid_fees || 0) + fee) * 100) / 100;
+    const predictedSpent = Math.round((Number(auction.total_bid_spent || 0) + gross) * 100) / 100;
+    const predictedCount = Number(auction.bids_count || auction.state_bids_count || 0) + 1;
+
     auction = {
       ...auction,
-      current_price: Math.round((Number(auction.current_price || 0) + increment) * 100) / 100,
-      total_bid_fees: Math.round((Number(auction.total_bid_fees || 0) + fee) * 100) / 100,
-      total_bid_spent: Math.round((Number(auction.total_bid_spent || 0) + gross) * 100) / 100,
-      bids_count: Number(auction.bids_count || 0) + 1,
+      current_price: predictedPrice,
+      total_bid_fees: predictedFees,
+      total_bid_spent: predictedSpent,
+      bids_count: predictedCount,
+      state_bids_count: predictedCount,
+      state_price_cents: priceCents(predictedPrice),
+      state_total_bid_fees_cents: priceCents(predictedFees),
       last_bidder: "Você",
       progress_percent: Math.round(predictedProgress * 100) / 100,
       turbo_level: predictedLevel,
@@ -757,7 +787,9 @@ window.__AUCTION__ = {{ item | tojson }};
     }
 
     if(isLive(status())){
-      auction.ends_at = new Date(estimatedServerNowMs() + Math.max(1, remaining) * 1000).toISOString();
+      const optimisticEndsAtMs = estimatedServerNowMs() + Math.max(1, remaining) * 1000;
+      auction.ends_at_ms = optimisticEndsAtMs;
+      auction.ends_at = new Date(optimisticEndsAtMs).toISOString();
       auction.remaining_seconds = Math.max(1, Math.ceil(remaining));
     }
 
@@ -966,12 +998,12 @@ window.__AUCTION__ = {{ item | tojson }};
       walletPendingReserve = 0;
       updateHeaderWalletBalance(localWalletBalance);
     }
-    const incomingAcceptedId = Number(auction.last_bid_id || auction.state_bid_id || auction.state_version || 0);
+    const incomingAcceptedId = stateBidId(auction);
     const previousAcceptedId = lastAcceptedBidId;
     lastAcceptedBidId = Math.max(lastAcceptedBidId, incomingAcceptedId);
-    lastAcceptedBidCount = Math.max(lastAcceptedBidCount, Number(auction.bids_count || auction.state_bids_count || 0));
-    lastAcceptedPriceCents = Math.max(lastAcceptedPriceCents, Number(auction.state_price_cents || priceCents(auction.current_price)));
-    lastAcceptedFeeCents = Math.max(lastAcceptedFeeCents, Number(auction.state_total_bid_fees_cents || priceCents(auction.total_bid_fees)));
+    lastAcceptedBidCount = Math.max(lastAcceptedBidCount, stateBidCount(auction));
+    lastAcceptedPriceCents = Math.max(lastAcceptedPriceCents, statePriceCents(auction));
+    lastAcceptedFeeCents = Math.max(lastAcceptedFeeCents, stateFeeCents(auction));
     if(source === "bid" || incomingAcceptedId > previousAcceptedId){
       optimisticHoldUntil = 0;
     }

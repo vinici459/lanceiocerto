@@ -144,7 +144,14 @@
       : `${m}m ${String(s).padStart(2, "0")}s`;
   }
 
+  function setTextIfChanged(el, value) {
+    if (!el) return;
+    const text = String(value ?? "");
+    if (el.textContent !== text) el.textContent = text;
+  }
+
   let lcServerClockOffsetMs = 0;
+  let lcServerClockSynced = false;
 
   function syncHomeServerClock(payload, sentMs, receivedMs) {
     if (!payload) return;
@@ -157,7 +164,13 @@
     const referenceMs = sentMs && receivedMs && receivedMs >= sentMs
       ? Math.round((sentMs + receivedMs) / 2)
       : Date.now();
-    lcServerClockOffsetMs = serverMs - referenceMs;
+    const nextOffsetMs = serverMs - referenceMs;
+    if (!lcServerClockSynced || Math.abs(nextOffsetMs - lcServerClockOffsetMs) > 1500) {
+      lcServerClockOffsetMs = nextOffsetMs;
+      lcServerClockSynced = true;
+    } else {
+      lcServerClockOffsetMs = Math.round((lcServerClockOffsetMs * 0.85) + (nextOffsetMs * 0.15));
+    }
   }
 
   function homeServerNowMs() {
@@ -246,7 +259,7 @@
     function tickCountdowns() {
       countdowns.forEach((el) => {
         const seconds = currentSeconds(el);
-        el.textContent = formatTime(seconds);
+        setTextIfChanged(el, formatTime(seconds));
         if (!el.dataset.endAt && !el.dataset.startAt) {
           el.dataset.seconds = String(Math.max(0, seconds - 1));
         }
