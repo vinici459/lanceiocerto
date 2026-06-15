@@ -516,7 +516,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-stable-v7")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-faststate-v8")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -1248,6 +1248,36 @@ def public_user_name(user: Optional["User"]) -> str:
     first = (getattr(user, "full_name", "") or "Participante").strip().split()[0]
     return first or "Participante"
 
+def public_name_from_parts(public_name: str | None, full_name: str | None) -> str:
+    """Monta o nome público sem precisar hidratar o objeto User inteiro."""
+    nickname = (public_name or "").strip()
+    if nickname:
+        return f"@{nickname}"
+    first = (full_name or "Participante").strip().split()[0]
+    return first or "Participante"
+
+
+def auction_last_bid_meta(db: Session, auction_id: int, viewer_user_id: Optional[int] = None) -> tuple[int, Optional[str]]:
+    """Busca o último lance do leilão em uma única consulta leve.
+
+    A versão anterior fazia MAX(id) e depois outra busca do último Bid + User.
+    Em /state isso era chamado repetidamente e virava gargalo. Ordenar por id
+    usa o índice ix_bids_auction_id_desc e devolve bid_id + nome em uma ida só.
+    """
+    row = (
+        db.query(Bid.id, Bid.user_id, User.public_name, User.full_name)
+        .join(User, User.id == Bid.user_id)
+        .filter(Bid.auction_id == auction_id)
+        .order_by(desc(Bid.id))
+        .first()
+    )
+    if not row:
+        return 0, None
+    bid_id, user_id, public_name, full_name = row
+    if viewer_user_id and int(user_id or 0) == int(viewer_user_id):
+        return int(bid_id or 0), "Você"
+    return int(bid_id or 0), public_name_from_parts(public_name, full_name)
+
 
 def normalize_public_name(value: str) -> str:
     value = (value or "").strip().lower()
@@ -1879,7 +1909,8 @@ def compute_turbo_level(item: AuctionItem) -> int:
 
 
 def auction_last_bid_id(db: Session, auction_id: int) -> int:
-    return int(db.query(func.coalesce(func.max(Bid.id), 0)).filter(Bid.auction_id == auction_id).scalar() or 0)
+    row = db.query(Bid.id).filter(Bid.auction_id == auction_id).order_by(desc(Bid.id)).first()
+    return int((row[0] if row else 0) or 0)
 
 
 def user_has_bid_in_auction(db: Session, auction_id: int, user_id: Optional[int]) -> bool:
@@ -2070,7 +2101,7 @@ def ensure_finished_auction_side_effects(auction_id: int) -> None:
         last_bid = (
             db.query(Bid)
             .filter(Bid.auction_id == auction_id)
-            .order_by(desc(Bid.created_at))
+            .order_by(desc(Bid.id))
             .first()
         )
         if not last_bid:
@@ -2233,7 +2264,7 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
         last_bid_id = 0
     else:
         bids_count = int(getattr(item, "bids_count_cached", 0) or 0)
-        last_bid = db.query(Bid).options(selectinload(Bid.user)).filter(Bid.auction_id == item.id).order_by(desc(Bid.created_at)).first()
+        last_bid = db.query(Bid).options(selectinload(Bid.user)).filter(Bid.auction_id == item.id).order_by(desc(Bid.id)).first()
         last_bidder = public_user_name(last_bid.user) if last_bid else None
         last_bid_id = int(last_bid.id if last_bid else 0)
     remaining = 0
@@ -2313,25 +2344,13 @@ def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashb
         else:
             bids_count = int(bids_count_override or 0)
 
-        if last_bid_id_override is not None:
+        if last_bid_id_override is not None and last_bidder_override is not None:
             last_bid_id = int(last_bid_id_override or 0)
-        else:
-            last_bid_id = auction_last_bid_id(db, item.id)
-
-        if last_bidder_override is not None:
             last_bidder = last_bidder_override
         else:
-            last_bid = (
-                db.query(Bid)
-                .options(selectinload(Bid.user))
-                .filter(Bid.auction_id == item.id)
-                .order_by(desc(Bid.created_at))
-                .first()
-            )
-            if last_bid and user is not None and last_bid.user_id == user.id:
-                last_bidder = "Você"
-            else:
-                last_bidder = public_user_name(last_bid.user) if last_bid else None
+            meta_bid_id, meta_bidder = auction_last_bid_meta(db, item.id, getattr(user, "id", None) if user is not None else None)
+            last_bid_id = int(last_bid_id_override if last_bid_id_override is not None else meta_bid_id or 0)
+            last_bidder = last_bidder_override if last_bidder_override is not None else meta_bidder
 
     now = datetime.utcnow()
     remaining = 0
@@ -3586,6 +3605,8 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_auction_items_status_created ON auction_items (status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_auction_items_status_start ON auction_items (status, scheduled_start)",
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_created ON bids (auction_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_auction_id_desc ON bids (auction_id, id DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_id_desc ON bids (auction_id, user_id, id DESC)",
             "CREATE INDEX IF NOT EXISTS ix_bids_user ON bids (user_id)",
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_created ON bids (auction_id, user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_bids_auction_user_value_created ON bids (auction_id, user_id, bid_value, created_at DESC)",
@@ -3856,83 +3877,94 @@ async def startup_event():
     asyncio.create_task(auction_watcher())
 
 
+def _auction_watcher_sync() -> list[tuple[int, dict]]:
+    """Executa consultas do watcher em thread separada e devolve payloads prontos."""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        changed_ids: set[int] = set()
+
+        to_start = (
+            db.query(AuctionItem)
+            .filter(AuctionItem.status.in_(["scheduled", "relisted"]))
+            .filter(AuctionItem.scheduled_start <= now)
+            .order_by(AuctionItem.scheduled_start.asc())
+            .limit(50)
+            .all()
+        )
+        for item in to_start:
+            if start_auction_if_due(item, now):
+                changed_ids.add(item.id)
+
+        live_to_finish = (
+            db.query(AuctionItem)
+            .filter(AuctionItem.status == "live")
+            .filter(AuctionItem.ends_at.isnot(None))
+            .filter(AuctionItem.ends_at <= now)
+            .order_by(AuctionItem.ends_at.asc())
+            .limit(50)
+            .all()
+        )
+        for item in live_to_finish:
+            if finish_auction_if_due(item, db, now):
+                changed_ids.add(item.id)
+
+        due_cashbacks = (
+            db.query(CashbackEvent)
+            .filter(CashbackEvent.status == "open")
+            .filter(CashbackEvent.join_deadline <= now)
+            .order_by(CashbackEvent.join_deadline.asc())
+            .limit(50)
+            .all()
+        )
+        for cashback in due_cashbacks:
+            draw_cashback_if_due(cashback, db, now)
+
+        expired_orders = (
+            db.query(WinnerOrder)
+            .filter(WinnerOrder.status.in_(["pending_payment", "pending_gateway"]))
+            .filter(WinnerOrder.payment_deadline.isnot(None))
+            .filter(WinnerOrder.payment_deadline <= now)
+            .order_by(WinnerOrder.payment_deadline.asc())
+            .limit(50)
+            .all()
+        )
+        for order in expired_orders:
+            order.status = "expired"
+            order.expired_at = now
+            item = db.get(AuctionItem, order.auction_id)
+            if item:
+                item.status = "ended"
+                item.winner_deadline = None
+                item.ends_at = None
+                item.chat_paused = True
+                changed_ids.add(item.id)
+
+        if not changed_ids:
+            db.rollback()
+            return []
+
+        db.commit()
+        payloads: list[tuple[int, dict]] = []
+        for auction_id in changed_ids:
+            fresh = db.get(AuctionItem, auction_id)
+            if fresh:
+                payloads.append((auction_id, public_auction_live_payload(fresh, db)))
+        return payloads
+    finally:
+        db.close()
+
+
 async def auction_watcher():
-    """Atualiza transições de leilão sem varrer tabelas inteiras a cada ciclo."""
+    """Atualiza transições sem bloquear o event loop/WebSocket."""
     while True:
         await asyncio.sleep(1)
-        db = SessionLocal()
         try:
-            now = datetime.utcnow()
-            changed_ids: set[int] = set()
-
-            to_start = (
-                db.query(AuctionItem)
-                .filter(AuctionItem.status.in_(["scheduled", "relisted"]))
-                .filter(AuctionItem.scheduled_start <= now)
-                .order_by(AuctionItem.scheduled_start.asc())
-                .limit(50)
-                .all()
-            )
-            for item in to_start:
-                if start_auction_if_due(item, now):
-                    changed_ids.add(item.id)
-
-            # Só leilões cujo prazo já venceu precisam ser finalizados. Antes o
-            # watcher varria todos os leilões ao vivo a cada segundo.
-            live_to_finish = (
-                db.query(AuctionItem)
-                .filter(AuctionItem.status == "live")
-                .filter(AuctionItem.ends_at.isnot(None))
-                .filter(AuctionItem.ends_at <= now)
-                .order_by(AuctionItem.ends_at.asc())
-                .limit(50)
-                .all()
-            )
-            for item in live_to_finish:
-                if finish_auction_if_due(item, db, now):
-                    changed_ids.add(item.id)
-
-            due_cashbacks = (
-                db.query(CashbackEvent)
-                .filter(CashbackEvent.status == "open")
-                .filter(CashbackEvent.join_deadline <= now)
-                .order_by(CashbackEvent.join_deadline.asc())
-                .limit(50)
-                .all()
-            )
-            for cashback in due_cashbacks:
-                draw_cashback_if_due(cashback, db, now)
-
-            expired_orders = (
-                db.query(WinnerOrder)
-                .filter(WinnerOrder.status.in_(["pending_payment", "pending_gateway"]))
-                .filter(WinnerOrder.payment_deadline.isnot(None))
-                .filter(WinnerOrder.payment_deadline <= now)
-                .order_by(WinnerOrder.payment_deadline.asc())
-                .limit(50)
-                .all()
-            )
-            for order in expired_orders:
-                order.status = "expired"
-                order.expired_at = now
-                item = db.get(AuctionItem, order.auction_id)
-                if item:
-                    item.status = "ended"
-                    item.winner_deadline = None
-                    item.ends_at = None
-                    item.chat_paused = True
-                    changed_ids.add(item.id)
-
-            if changed_ids:
-                db.commit()
-                for auction_id in changed_ids:
-                    fresh = db.get(AuctionItem, auction_id)
-                    if fresh:
-                        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_auction_live_payload(fresh, db)}))
-            else:
-                db.rollback()
-        finally:
-            db.close()
+            payloads = await asyncio.to_thread(_auction_watcher_sync)
+            for auction_id, payload in payloads:
+                await manager.broadcast(auction_id, {"type": "auction_update", "auction": payload})
+        except Exception as exc:
+            print(f"[WATCHER-ERROR] {exc}")
 
 
 def cached_suggestion_vote_stats(db: Session, ttl_seconds: int = 45) -> list[dict]:
@@ -4066,17 +4098,23 @@ def home(request: Request):
 
 @app.get("/api/home/state")
 def home_state(request: Request):
+    """Estado ultraleve da Home.
+
+    O app.js só precisa saber se mudou a quantidade de cards para recarregar a
+    vitrine. Antes esta rota remontava todos os cards e ainda sincronizava
+    estados vencidos, disputando banco com a sala do leilão e aparecendo nos
+    logs com 4-6s. O watcher já faz as transições; aqui retornamos apenas counts.
+    """
     db = SessionLocal()
     try:
-        if sync_due_auction_states(db, limit=50):
-            db.commit()
-            nav_cache_clear("home:")
-        public_home = cached_home_public_context(db, ttl_seconds=1)
+        live_count = int(db.query(func.count(AuctionItem.id)).filter(AuctionItem.status == "live").scalar() or 0)
+        upcoming_count = int(db.query(func.count(AuctionItem.id)).filter(AuctionItem.status.in_(["scheduled", "relisted"])).scalar() or 0)
+        ended_count = int(db.query(func.count(AuctionItem.id)).filter(AuctionItem.status.in_(["pending_payment", "ended"])).scalar() or 0)
         return JSONResponse({
             "ok": True,
-            "live_items": public_home["live_items"],
-            "upcoming_items": public_home["upcoming_items"],
-            "ended_items": public_home["ended_items"],
+            "live_count": live_count,
+            "upcoming_count": upcoming_count,
+            "ended_count": ended_count,
             **server_time_payload(),
         })
     finally:
@@ -5078,8 +5116,13 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
         await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload})
     return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
-@app.get("/api/auction/{auction_id}/state")
-async def auction_state(request: Request, auction_id: int):
+def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Optional[dict], bool]:
+    """Monta /state fora do event loop para não travar WebSocket.
+
+    SQLAlchemy usado aqui é síncrono. Em uma rota async direta ele bloqueava o
+    mesmo loop que mantém WebSocket vivo. A rota abaixo chama esta função via
+    asyncio.to_thread().
+    """
     db = SessionLocal()
     try:
         user = current_user(request, db)
@@ -5092,15 +5135,25 @@ async def auction_state(request: Request, auction_id: int):
         changed = finished_now or changed
         if changed:
             db.commit()
-            private_payload = public_auction_live_payload(item, db, user=user)
+            db.refresh(item)
+
+        private_payload = public_auction_live_payload(item, db, user=user)
+        public_payload = None
+        if changed:
             public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
-            asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
-            if finished_now:
-                asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
-            return JSONResponse({"ok": True, "auction": private_payload})
-        return JSONResponse({"ok": True, "auction": public_auction_live_payload(item, db, user=user)})
+        return {"ok": True, "auction": private_payload}, public_payload, bool(finished_now)
     finally:
         db.close()
+
+
+@app.get("/api/auction/{auction_id}/state")
+async def auction_state(request: Request, auction_id: int):
+    body, public_payload, finished_now = await asyncio.to_thread(_auction_state_sync, request, auction_id)
+    if public_payload:
+        await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload})
+    if finished_now:
+        asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
+    return JSONResponse(body)
 
 
 @app.post("/api/auction/{auction_id}/cashback/join")
@@ -7464,31 +7517,34 @@ def admin_set_ticket_status(request: Request, ticket_id: int, status: str = Form
         db.close()
 
 
-@app.websocket("/ws/auction/{auction_id}")
-async def auction_socket(websocket: WebSocket, auction_id: int):
-    await manager.connect(auction_id, websocket)
+def _auction_ws_initial_payload_sync(auction_id: int) -> tuple[Optional[dict], bool]:
     db = SessionLocal()
     try:
         item = db.get(AuctionItem, auction_id)
-        if item:
-            now = datetime.utcnow()
-            changed = start_auction_if_due(item, now)
-            finished_now = finish_auction_if_due(item, db, now, create_side_effects=False)
-            changed = finished_now or changed
-            if changed:
-                db.commit()
-                item = db.get(AuctionItem, auction_id)
-                if finished_now:
-                    asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
-
-            # Estado inicial do WS também precisa respeitar o fechamento oficial.
-            # Sem isso, uma aba recém aberta podia receber "live" com ends_at vencido
-            # e reabrir visualmente um leilão que já chegou a 0s.
-            await manager.send_to(auction_id, websocket, {"type": "auction_update", "auction": public_auction_live_payload(item, db)})
+        if not item:
+            return None, False
+        now = datetime.utcnow()
+        changed = start_auction_if_due(item, now)
+        finished_now = finish_auction_if_due(item, db, now, create_side_effects=False)
+        changed = finished_now or changed
+        if changed:
+            db.commit()
+            db.refresh(item)
+        return public_auction_live_payload(item, db), bool(finished_now)
     finally:
         db.close()
 
+
+@app.websocket("/ws/auction/{auction_id}")
+async def auction_socket(websocket: WebSocket, auction_id: int):
+    await manager.connect(auction_id, websocket)
     try:
+        payload, finished_now = await asyncio.to_thread(_auction_ws_initial_payload_sync, auction_id)
+        if payload:
+            await manager.send_to(auction_id, websocket, {"type": "auction_update", "auction": payload})
+        if finished_now:
+            asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
+
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

@@ -254,8 +254,12 @@
       });
     }
 
+    let homeStateInFlight = false;
+
     async function refreshHomeState() {
       if (!document.querySelector(".lc-home")) return;
+      if (document.hidden || homeStateInFlight) return;
+      homeStateInFlight = true;
       const sent = Date.now();
       try {
         const res = await fetch("/api/home/state", { cache: "no-store" });
@@ -266,19 +270,29 @@
 
         const currentLive = document.querySelectorAll("#home-active-auctions .status-badge.live").length;
         const currentUpcoming = document.querySelectorAll("#home-active-auctions .status-badge.scheduled").length;
-        const nextLive = Array.isArray(json.live_items) ? json.live_items.length : currentLive;
-        const nextUpcoming = Array.isArray(json.upcoming_items) ? json.upcoming_items.length : currentUpcoming;
+        const nextLive = Number.isFinite(Number(json.live_count))
+          ? Number(json.live_count)
+          : (Array.isArray(json.live_items) ? json.live_items.length : currentLive);
+        const nextUpcoming = Number.isFinite(Number(json.upcoming_count))
+          ? Number(json.upcoming_count)
+          : (Array.isArray(json.upcoming_items) ? json.upcoming_items.length : currentUpcoming);
 
         if (currentLive !== nextLive || currentUpcoming !== nextUpcoming) {
           scheduleHomeRefresh("state-change");
         }
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        homeStateInFlight = false;
+      }
     }
 
     tickCountdowns();
     setInterval(tickCountdowns, 1000);
-    refreshHomeState();
-    setInterval(refreshHomeState, 3000);
+    window.setTimeout(refreshHomeState, 2500);
+    setInterval(refreshHomeState, 15000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) window.setTimeout(refreshHomeState, 600);
+    });
   }
 
   function initAccountHashHelpers() {

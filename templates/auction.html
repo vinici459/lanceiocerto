@@ -1091,10 +1091,10 @@ window.__AUCTION__ = {{ item | tojson }};
   // eventos e só corrigir muito tempo depois. Por isso, durante leilão ao vivo,
   // o /state volta a conferir frequentemente. O guard anti-retrocesso impede que
   // qualquer resposta atrasada volte preço/lances para trás.
-  const liveStateSyncMs = 1800 + Math.floor(Math.random() * 700);
-  const offlineStateSyncMs = 1000 + Math.floor(Math.random() * 400);
-  const scheduledNearStartSyncMs = 1500 + Math.floor(Math.random() * 700);
-  const idleStateSyncMs = 15000 + Math.floor(Math.random() * 3000);
+  const liveStateSyncMs = 2600 + Math.floor(Math.random() * 900);
+  const offlineStateSyncMs = 1100 + Math.floor(Math.random() * 500);
+  const scheduledNearStartSyncMs = 2000 + Math.floor(Math.random() * 800);
+  const idleStateSyncMs = 22000 + Math.floor(Math.random() * 4000);
   let lastStateSyncAt = 0;
 
   function stateSyncIntervalMs(){
@@ -1108,12 +1108,13 @@ window.__AUCTION__ = {{ item | tojson }};
 
   setInterval(() => {
     if(!auctionId || isClosed(status())) return;
+    if(document.hidden && wsConnected && pendingBidCount() === 0) return;
     const now = Date.now();
     const interval = stateSyncIntervalMs();
     if(now - lastStateSyncAt < interval) return;
     lastStateSyncAt = now;
     const reason = !wsConnected ? "state-ws-offline" : isLive(status()) ? "state-live-guard" : "state-scheduled-guard";
-    fetchState(reason, wsConnected ? 4500 : 3500);
+    fetchState(reason, wsConnected ? 3500 : 3000);
   }, 350);
 
   document.querySelectorAll(".bid-btn").forEach((btn) => {
