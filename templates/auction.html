@@ -405,6 +405,12 @@ window.__AUCTION__ = {{ item | tojson }};
   let lastAcceptedBidId = Number(auction.last_bid_id || auction.state_version || 0);
   let ownLastBidId = 0;
   let lastAcceptedBidCount = Number(auction.bids_count || 0);
+  function priceCents(value){
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? Math.round(n * 100) : 0;
+  }
+  let lastAcceptedPriceCents = Number(auction.state_price_cents || priceCents(auction.current_price));
+  let lastAcceptedFeeCents = Number(auction.state_total_bid_fees_cents || priceCents(auction.total_bid_fees));
   let optimisticHoldUntil = 0;
   const cooldowns = Object.create(null);
   const pendingBids = Object.create(null);
@@ -488,17 +494,32 @@ window.__AUCTION__ = {{ item | tojson }};
     const incomingClosed = ["ended", "pending_payment", "expired", "finished", "closed"].includes(incomingStatus);
     const currentClosed = isClosed(currentStatus);
 
-    const incomingBidId = Number(data.last_bid_id || data.state_version || 0);
-    const incomingCount = Number(data.bids_count || 0);
-    const currentBidId = Number(auction.last_bid_id || auction.state_version || lastAcceptedBidId || 0);
-    const currentCount = Number(auction.bids_count || lastAcceptedBidCount || 0);
+    const incomingBidId = Number(data.last_bid_id || data.state_bid_id || data.state_version || 0);
+    const incomingCount = Number(data.bids_count || data.state_bids_count || 0);
+    const incomingPriceCents = Number(data.state_price_cents || priceCents(data.current_price));
+    const incomingFeeCents = Number(data.state_total_bid_fees_cents || priceCents(data.total_bid_fees));
+    const currentBidId = Number(auction.last_bid_id || auction.state_bid_id || auction.state_version || lastAcceptedBidId || 0);
+    const currentCount = Number(auction.bids_count || auction.state_bids_count || lastAcceptedBidCount || 0);
+    const currentPriceCents = Number(auction.state_price_cents || priceCents(auction.current_price));
+    const currentFeeCents = Number(auction.state_total_bid_fees_cents || priceCents(auction.total_bid_fees));
     const acceptedBidId = Number(lastAcceptedBidId || 0);
     const acceptedCount = Number(lastAcceptedBidCount || 0);
+    const acceptedPriceCents = Number(lastAcceptedPriceCents || 0);
+    const acceptedFeeCents = Number(lastAcceptedFeeCents || 0);
 
     // Fontes locais do próprio clique podem atualizar a tela imediatamente.
     // Mesmo assim, não podem voltar abaixo do maior lance já confirmado.
     const ownImmediateSources = new Set(["initial", "bid", "bid-error", "local-start", "local-finish"]);
     const isOwnImmediate = ownImmediateSources.has(source);
+
+    // Piso absoluto: preço e taxas de um mesmo leilão nunca diminuem.
+    // Se um /state ou WebSocket atrasado trouxer preço menor, ele é velho.
+    // A única queda permitida é rollback local do próprio clique rejeitado,
+    // mas nunca abaixo do maior preço já confirmado oficialmente.
+    if(incomingPriceCents < acceptedPriceCents) return false;
+    if(incomingFeeCents < acceptedFeeCents) return false;
+    if(!isOwnImmediate && incomingPriceCents < currentPriceCents) return false;
+    if(!isOwnImmediate && incomingFeeCents < currentFeeCents) return false;
 
     // Se a tela já foi encerrada localmente ou oficialmente, só aceita reabrir se vier
     // um lance realmente mais novo. Isso evita o efeito "0s / encerra / volta ao vivo".
@@ -715,7 +736,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
     walletPendingReserve = Math.round((walletPendingReserve + gross) * 100) / 100;
     setHeaderWalletBalanceText(Math.max(0, Number(localWalletBalance || 0) - walletPendingReserve));
-    optimisticHoldUntil = Date.now() + 2200;
+    optimisticHoldUntil = Date.now() + 6000;
     renderAll();
   }
 
@@ -904,7 +925,7 @@ window.__AUCTION__ = {{ item | tojson }};
     syncServerClock(data);
     if(!shouldAcceptIncomingState(data, source)) return;
 
-    const incomingIdForSelf = Number(data.last_bid_id || data.state_version || 0);
+    const incomingIdForSelf = Number(data.last_bid_id || data.state_bid_id || data.state_version || 0);
     if(source === "bid" && incomingIdForSelf > 0 && data.client_bid_id){
       ownLastBidId = incomingIdForSelf;
     }
@@ -918,10 +939,12 @@ window.__AUCTION__ = {{ item | tojson }};
       walletPendingReserve = 0;
       updateHeaderWalletBalance(localWalletBalance);
     }
-    const incomingAcceptedId = Number(auction.last_bid_id || auction.state_version || 0);
+    const incomingAcceptedId = Number(auction.last_bid_id || auction.state_bid_id || auction.state_version || 0);
     const previousAcceptedId = lastAcceptedBidId;
     lastAcceptedBidId = Math.max(lastAcceptedBidId, incomingAcceptedId);
-    lastAcceptedBidCount = Math.max(lastAcceptedBidCount, Number(auction.bids_count || 0));
+    lastAcceptedBidCount = Math.max(lastAcceptedBidCount, Number(auction.bids_count || auction.state_bids_count || 0));
+    lastAcceptedPriceCents = Math.max(lastAcceptedPriceCents, Number(auction.state_price_cents || priceCents(auction.current_price)));
+    lastAcceptedFeeCents = Math.max(lastAcceptedFeeCents, Number(auction.state_total_bid_fees_cents || priceCents(auction.total_bid_fees)));
     if(source === "bid" || incomingAcceptedId > previousAcceptedId){
       optimisticHoldUntil = 0;
     }
