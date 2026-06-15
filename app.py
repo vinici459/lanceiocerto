@@ -516,7 +516,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v10-no-rollback")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v11-final-consistency")
 templates.env.globals["asset_version"] = ASSET_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
@@ -2036,7 +2036,7 @@ def finish_auction_if_due(item: AuctionItem, db: Session, now: Optional[datetime
     last_bid = (
         db.query(Bid)
         .filter(Bid.auction_id == item.id)
-        .order_by(desc(Bid.created_at))
+        .order_by(desc(Bid.id))
         .first()
     )
 

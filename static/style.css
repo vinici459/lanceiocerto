@@ -954,3 +954,44 @@ button,a,input,select,textarea{
   min-width:7ch;
   text-align:left;
 }
+
+/* V11 - estabilidade visual do cronômetro em mobile e cards de leilão */
+.auction-countdown,
+.countdown{
+  font-variant-numeric: tabular-nums !important;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  display:inline-block;
+  min-width:5.8ch;
+  text-align:left;
+  contain:layout paint;
+  backface-visibility:hidden;
+  transform:translateZ(0);
+  transition:none !important;
+  animation:none !important;
+}
+
+.lc-auction-card,
+.auction-panel,
+.price-box > div,
+.meta-grid > div{
+  content-visibility:visible !important;
+}
+
+.lc-auction-card .countdown,
+.auction-panel .auction-countdown{
+  will-change:contents;
+}
+
+@media(max-width:900px){
+  .lc-auction-card,
+  .auction-panel,
+  .price-box > div,
+  .meta-grid > div{
+    transform:none !important;
+  }
+  .lc-auction-card:hover,
+  .panel-card:hover,
+  .auction-panel:hover{
+    transform:none !important;
+  }
+}

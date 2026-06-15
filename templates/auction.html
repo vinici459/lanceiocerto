@@ -400,7 +400,6 @@ window.__AUCTION__ = {{ item | tojson }};
   let wsConnected = false;
   let wsReconnectTimer = null;
   let lastWsMessageAt = 0;
-  let stateFetchInFlight = false;
   let lastZeroSyncAt = 0;
   let lastAcceptedBidId = Number(auction.last_bid_id || auction.state_version || 0);
   let ownLastBidId = 0;
@@ -439,8 +438,14 @@ window.__AUCTION__ = {{ item | tojson }};
   let localWalletBalance = Number(auction.wallet_balance ?? 0);
   let walletPendingReserve = 0;
   let localFinishTriggered = false;
+  let finishConfirming = false;
   let serverClockOffsetMs = 0;
   let serverClockSynced = false;
+  let lastAcceptedGeneratedMs = Number(auction.state_generated_ms || 0);
+  let stateFetchInFlight = false;
+  let criticalStateFetchInFlight = false;
+  let stateFetchSeq = 0;
+  let lastStateResponseSeqApplied = 0;
 
   function readServerMs(data){
     if(!data) return null;
@@ -539,10 +544,25 @@ window.__AUCTION__ = {{ item | tojson }};
     const acceptedCount = Number(lastAcceptedBidCount || 0);
     const acceptedPriceCents = Number(lastAcceptedPriceCents || 0);
     const acceptedFeeCents = Number(lastAcceptedFeeCents || 0);
+    const incomingGeneratedMs = Number(data.state_generated_ms || data.server_time_ms || 0);
+
+    // Se uma resposta HTTP antiga chegar depois de uma resposta/WebSocket mais novo,
+    // ela não pode sobrescrever status, relógio ou metadados. Preço/lance menor já
+    // é barrado abaixo; esse carimbo fecha a brecha para estados iguais mas velhos.
+    if(
+      incomingGeneratedMs > 0 &&
+      lastAcceptedGeneratedMs > 0 &&
+      incomingGeneratedMs + 80 < lastAcceptedGeneratedMs &&
+      incomingBidId <= acceptedBidId &&
+      incomingCount <= acceptedCount &&
+      incomingPriceCents <= acceptedPriceCents
+    ){
+      return false;
+    }
 
     // Fontes locais do próprio clique podem atualizar a tela imediatamente.
     // Mesmo assim, não podem voltar abaixo do maior lance já confirmado.
-    const ownImmediateSources = new Set(["initial", "bid", "bid-error", "local-start", "local-finish"]);
+    const ownImmediateSources = new Set(["initial", "bid", "local-start"]);
     const isOwnImmediate = ownImmediateSources.has(source);
 
     // Piso absoluto: preço e taxas de um mesmo leilão nunca diminuem.
@@ -803,7 +823,7 @@ window.__AUCTION__ = {{ item | tojson }};
     const key = bidKey(btn.dataset.bid);
     const cd = Math.max(Number(cooldowns[key] || 0));
     const busy = Boolean(pendingBids[key]);
-    const canBid = isLive(status());
+    const canBid = isLive(status()) && !finishConfirming;
     const turboLocked = isTurboLockedForUser();
     const insufficientBalance = Number(key) > (Number(localWalletBalance || 0) - Number(walletPendingReserve || 0) + 0.000001);
 
@@ -872,7 +892,7 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   function renderControls(s){
-    const live = isLive(s);
+    const live = isLive(s) && !finishConfirming;
     const scheduled = isScheduled(s);
 
     show(els.bidForm, live, "grid");
@@ -881,7 +901,8 @@ window.__AUCTION__ = {{ item | tojson }};
     if(els.stateAlert){
       show(els.stateAlert, !live);
       els.stateAlert.classList.toggle("scheduled-alert", scheduled);
-      if(scheduled) els.stateAlert.textContent = "Este leilão ainda não começou. A contagem regressiva está acima.";
+      if(finishConfirming) els.stateAlert.textContent = "Tempo esgotado. Conferindo encerramento oficial no servidor...";
+      else if(scheduled) els.stateAlert.textContent = "Este leilão ainda não começou. A contagem regressiva está acima.";
       else if(s === "pending_payment") els.stateAlert.textContent = `Este leilão foi encerrado.${auction.winner_name || auction.last_bidder ? " Vencedor: " + (auction.winner_name || auction.last_bidder) + "." : ""}`;
       else if(s === "ended") els.stateAlert.textContent = "Este leilão foi encerrado.";
       else els.stateAlert.textContent = "Este leilão não está em andamento neste momento.";
@@ -967,7 +988,7 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   function applyAuctionState(data, source="unknown"){
-    if(!data) return;
+    if(!data) return false;
     if(data.user_turbo_eligible === null || typeof data.user_turbo_eligible === "undefined"){
       const incomingLevel = Number(data.turbo_level || 0);
       if(incomingLevel >= 2){
@@ -982,7 +1003,7 @@ window.__AUCTION__ = {{ item | tojson }};
       }
     }
     syncServerClock(data);
-    if(!shouldAcceptIncomingState(data, source)) return;
+    if(!shouldAcceptIncomingState(data, source)) return false;
 
     const incomingIdForSelf = Number(data.last_bid_id || data.state_bid_id || data.state_version || 0);
     if(source === "bid" && incomingIdForSelf > 0 && data.client_bid_id){
@@ -1004,11 +1025,13 @@ window.__AUCTION__ = {{ item | tojson }};
     lastAcceptedBidCount = Math.max(lastAcceptedBidCount, stateBidCount(auction));
     lastAcceptedPriceCents = Math.max(lastAcceptedPriceCents, statePriceCents(auction));
     lastAcceptedFeeCents = Math.max(lastAcceptedFeeCents, stateFeeCents(auction));
+    lastAcceptedGeneratedMs = Math.max(lastAcceptedGeneratedMs, Number(auction.state_generated_ms || auction.server_time_ms || 0));
     if(source === "bid" || incomingAcceptedId > previousAcceptedId){
       optimisticHoldUntil = 0;
     }
     const s = status();
     localFinishTriggered = isClosed(s);
+    finishConfirming = false;
 
     remaining = currentClockSeconds();
     lastZeroSyncAt = 0;
@@ -1042,6 +1065,7 @@ window.__AUCTION__ = {{ item | tojson }};
     renderChat();
     if(auction.cashback) renderCashback(auction.cashback, isClosed(s));
     renderButtons();
+    return true;
   }
 
   async function fetchJson(url, options={}, timeoutMs=8000){
@@ -1069,17 +1093,49 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }
 
+  const criticalStateReasons = new Set([
+    "confirm-local-finish",
+    "slow-bid-confirm",
+    "bid-error",
+    "turbo-eligibility",
+    "ws-open-sync-fallback"
+  ]);
+
+  function isCriticalStateReason(reason){
+    return criticalStateReasons.has(String(reason || ""));
+  }
+
   async function fetchState(reason="fallback", timeoutMs=8000){
-    if(!auctionId || stateFetchInFlight) return;
-    stateFetchInFlight = true;
+    if(!auctionId) return false;
+    const critical = isCriticalStateReason(reason);
+
+    // Polling de rotina nunca deve empilhar. Já uma confirmação crítica
+    // (fim de leilão/lance pendente) pode passar por cima da rotina para não
+    // deixar a tela presa em estado atrasado.
+    if(!critical && stateFetchInFlight) return false;
+    if(critical && criticalStateFetchInFlight) return false;
+
+    const seq = ++stateFetchSeq;
+    if(critical) criticalStateFetchInFlight = true;
+    else stateFetchInFlight = true;
+
     try{
       const {res, json} = await fetchJson(`/api/auction/${auctionId}/state`, {}, timeoutMs);
-      if(res.ok && json.ok && json.auction) applyAuctionState(json.auction, reason);
+      if(res.ok && json.ok && json.auction){
+        json.auction.__state_fetch_seq = seq;
+        json.auction.__state_fetch_reason = reason;
+        if(!critical && seq < lastStateResponseSeqApplied) return false;
+        const accepted = applyAuctionState(json.auction, reason);
+        if(accepted) lastStateResponseSeqApplied = Math.max(lastStateResponseSeqApplied, seq);
+        return accepted;
+      }
     } catch(e){
       // O relógio local continua; a próxima tentativa confirma o estado no servidor.
     } finally {
-      stateFetchInFlight = false;
+      if(critical) criticalStateFetchInFlight = false;
+      else stateFetchInFlight = false;
     }
+    return false;
   }
 
   function nextPaint(){
@@ -1087,20 +1143,18 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   function closeAuctionLocally(){
-    if(localFinishTriggered || !isLive(status())) return;
-    localFinishTriggered = true;
-    const hasBid = Number(auction.bids_count || 0) > 0 || Boolean(auction.last_bidder);
-    auction = {
-      ...auction,
-      status: "ended",
-      winner_name: hasBid ? (auction.winner_name || auction.last_bidder || "—") : null,
-      remaining_seconds: 0,
-      ends_at: null,
-      chat_open: false,
-      chat_paused: true
-    };
+    if(localFinishTriggered || finishConfirming || !isLive(status())) return;
+
+    // Não encerramos mais o leilão no navegador. O vídeo mostrou celular
+    // encerrando com R$ 8,19/18 e depois corrigindo para R$ 9,90/20.
+    // Agora o front só entra em modo de conferência e aguarda o estado oficial.
+    finishConfirming = true;
     remaining = 0;
-    applyAuctionState(auction, "local-finish");
+    setTextIfChanged(els.countdownLabel, "Status");
+    setTextIfChanged(els.countdown, "Conferindo...");
+    setFeedback("Tempo esgotado. Conferindo encerramento oficial no servidor...");
+    renderControls(status());
+    renderButtons();
     fetchState("confirm-local-finish", 9000);
   }
 
@@ -1156,7 +1210,7 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   setInterval(() => {
-    if(!auctionId || isClosed(status())) return;
+    if(!auctionId || (isClosed(status()) && !finishConfirming)) return;
     if(document.hidden && wsConnected && pendingBidCount() === 0) return;
     const now = Date.now();
     const interval = stateSyncIntervalMs();
@@ -1228,7 +1282,10 @@ window.__AUCTION__ = {{ item | tojson }};
         }
 
         if(bidResponse?.json?.auction){
-          applyAuctionState(bidResponse.json.auction, "bid-error");
+          // Payload de erro vindo do backend é tratado como estado de servidor,
+          // mas não tem permissão especial para derrubar uma tela otimista mais
+          // nova. Se for realmente rejeição, o /state oficial corrige depois.
+          applyAuctionState(bidResponse.json.auction, "server-reject");
           updateHeaderWalletBalance(bidResponse.json.auction?.wallet_balance);
         } else if(isTimeout){
           keepLockedForStateCheck = true;
@@ -1236,16 +1293,15 @@ window.__AUCTION__ = {{ item | tojson }};
             await fetchState("slow-bid-confirm", 9000);
             delete pendingBids[value];
             renderButtons();
-          }, 700);
+          }, 500);
         } else {
-          delete cooldowns[value];
-          auction = previousAuction;
-          remaining = previousRemaining;
-          localWalletBalance = previousWalletBalance;
+          // Não restauramos previousAuction imediatamente: isso causava a
+          // sensação de valor subindo e voltando. Mantemos a tela otimista por
+          // alguns segundos e pedimos o estado oficial prioritário.
           walletPendingReserve = previousWalletReserve;
-          applyAuctionState(auction, "bid-error");
+          localWalletBalance = previousWalletBalance;
           updateHeaderWalletBalance(localWalletBalance);
-          fetchState("bid-error");
+          fetchState("bid-error", 9000);
         }
       } finally {
         if(!keepLockedForStateCheck){
