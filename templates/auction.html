@@ -418,6 +418,7 @@ window.__AUCTION__ = {{ item | tojson }};
   let walletPendingReserve = 0;
   let localFinishTriggered = false;
   let serverClockOffsetMs = 0;
+  let serverClockSynced = false;
 
   function readServerMs(data){
     if(!data) return null;
@@ -442,7 +443,17 @@ window.__AUCTION__ = {{ item | tojson }};
       ? Math.round((sent + received) / 2)
       : Date.now();
 
-    serverClockOffsetMs = serverMs - clientReferenceMs;
+    const nextOffsetMs = serverMs - clientReferenceMs;
+
+    // Evita que pequenas variações de latência do /state façam o cronômetro
+    // “piscar” ou trocar de segundo antes/depois do natural. Correção grande
+    // entra na hora; ajuste pequeno é suavizado.
+    if(!serverClockSynced || Math.abs(nextOffsetMs - serverClockOffsetMs) > 1500){
+      serverClockOffsetMs = nextOffsetMs;
+      serverClockSynced = true;
+    } else {
+      serverClockOffsetMs = Math.round((serverClockOffsetMs * 0.85) + (nextOffsetMs * 0.15));
+    }
   }
   function estimatedServerNowMs(){
     return Date.now() + serverClockOffsetMs;
@@ -570,6 +581,12 @@ window.__AUCTION__ = {{ item | tojson }};
     return `${m}m ${String(s).padStart(2,"0")}s`;
   }
 
+  function setTextIfChanged(el, value){
+    if(!el) return;
+    const text = String(value ?? "");
+    if(el.textContent !== text) el.textContent = text;
+  }
+
   function secondsFromMs(value){
     const ms = Number(value || 0);
     if(!Number.isFinite(ms) || ms <= 0) return null;
@@ -689,8 +706,8 @@ window.__AUCTION__ = {{ item | tojson }};
 
   function renderAll(){
     const s = status();
-    if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
-    if(els.countdown) els.countdown.textContent = isClosed(s) ? "Encerrado" : timeLabel(remaining);
+    setTextIfChanged(els.countdownLabel, isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status");
+    setTextIfChanged(els.countdown, isClosed(s) ? "Encerrado" : timeLabel(remaining));
     if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
     if(els.adminTotalBidFees) els.adminTotalBidFees.textContent = moneyBR(auction.total_bid_fees);
     if(els.adminCashReserved) els.adminCashReserved.textContent = moneyBR(auction.cash_reserved_before_payment ?? auction.collected_total);
@@ -964,8 +981,8 @@ window.__AUCTION__ = {{ item | tojson }};
     remaining = currentClockSeconds();
     lastZeroSyncAt = 0;
 
-    if(els.countdownLabel) els.countdownLabel.textContent = isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status";
-    if(els.countdown) els.countdown.textContent = isClosed(s) ? "Encerrado" : timeLabel(remaining);
+    setTextIfChanged(els.countdownLabel, isScheduled(s) ? "Começa em" : isLive(s) ? "Tempo restante" : "Status");
+    setTextIfChanged(els.countdown, isClosed(s) ? "Encerrado" : timeLabel(remaining));
     if(els.currentPrice) els.currentPrice.textContent = moneyBR(auction.current_price);
     if(els.adminTotalBidFees) els.adminTotalBidFees.textContent = moneyBR(auction.total_bid_fees);
     if(els.adminCashReserved) els.adminCashReserved.textContent = moneyBR(auction.cash_reserved_before_payment ?? auction.collected_total);
@@ -1060,7 +1077,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
     if(isScheduled(s) || isLive(s)){
       remaining = currentClockSeconds();
-      if(els.countdown) els.countdown.textContent = timeLabel(remaining);
+      setTextIfChanged(els.countdown, timeLabel(remaining));
 
       if(remaining <= 0){
         if(isScheduled(s)){
@@ -1078,7 +1095,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
     if(els.cashbackCountdown){
       cashbackRemaining = Math.max(0, cashbackRemaining - 1);
-      els.cashbackCountdown.textContent = timeLabel(cashbackRemaining);
+      setTextIfChanged(els.cashbackCountdown, timeLabel(cashbackRemaining));
     }
 
     renderButtons();
