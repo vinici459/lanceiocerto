@@ -134,7 +134,7 @@
 
         <div id="auction-state-alert" class="alert {% if item.status in ['scheduled', 'relisted'] %}scheduled-alert{% endif %}" {% if item.status == 'live' %}style="display:none"{% endif %}>
           {% if item.status in ['scheduled', 'relisted'] %}
-            Este leilão ainda não começou. A contagem regressiva está acima.
+            Aguardando início do leilão.
           {% elif item.status == 'pending_payment' %}
             Este leilão foi encerrado.
           {% elif item.status == 'ended' %}
@@ -145,6 +145,35 @@
         </div>
       {% else %}
         <div class="alert">Faça login para participar do leilão.</div>
+      {% endif %}
+
+      {% if false and item.cashback.available %}
+      <div class="strategy-card cashback-card" id="cashback-card">
+        <div class="strategy-top">
+          <span class="turbo-badge">🎁 Bônus promocional</span>
+          <strong id="cashback-status">
+            {% if item.cashback.status == 'open' %}
+              Participe em até <span id="cashback-countdown" data-seconds="{{ item.cashback.join_remaining_seconds }}">--</span>
+            {% elif item.cashback.status == 'drawn' %}
+              Sorteado: {{ item.cashback.winner_name or '—' }}
+            {% else %}
+              Encerrado
+            {% endif %}
+          </strong>
+        </div>
+        {% if item.cashback.status == 'open' %}
+          {% if item.cashback.joined %}
+            <p>Você já entrou no sorteio. Se for sorteado, recebe de volta o valor usado somente neste leilão.</p>
+          {% else %}
+            <p>Quem participou deste leilão pode entrar no sorteio aleatório para receber de volta o valor usado somente neste leilão.</p>
+            <button class="btn full" type="button" id="join-cashback-btn">Cashback removido</button>
+          {% endif %}
+        {% elif item.cashback.status == 'drawn' %}
+          <p>Crédito promocional: <strong>{{ item.cashback.winner_name or '—' }}</strong>. Valor: <strong>R$ {{ '%.2f'|format(item.cashback.cashback_amount)|replace('.', ',') }}</strong>.</p>
+        {% else %}
+          <p>O prazo de participação foi encerrado.</p>
+        {% endif %}
+      </div>
       {% endif %}
 
       {% if user and user.is_admin %}
@@ -473,7 +502,7 @@ window.__AUCTION__ = {{ item | tojson }};
     if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return `bid-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
-  function moneyBR(value){ return "R$ " + Number(value || 0).toFixed(2).replace(".", ","); }
+  function moneyBR(value){ return Number(value || 0).toFixed(2).replace(".", ",") + " LC"; }
   function setHeaderWalletBalanceText(value){
     const el = document.querySelector(".user-balance");
     if(el) el.textContent = "Créditos LC: " + moneyBR(value);
@@ -719,6 +748,7 @@ window.__AUCTION__ = {{ item | tojson }};
       chat_open: true
     };
     applyAuctionState(auction, "local-start");
+    setFeedback("Leilão ao vivo. Você já pode participar.");
     fetchState("confirm-local-start", 5000);
   }
 
@@ -742,7 +772,7 @@ window.__AUCTION__ = {{ item | tojson }};
   }
 
   function applyOptimisticBid(value){
-    // Resposta instantânea segura: a tela reserva os Créditos LC localmente e mostra o novo
+    // Resposta instantânea segura: a tela reserva o Créditos LC localmente e mostra o novo
     // preço/contador no mesmo clique. O backend continua sendo a fonte oficial e
     // corrige/volta o estado se negar o lance.
     const gross = Number(value || 0);
@@ -878,7 +908,7 @@ window.__AUCTION__ = {{ item | tojson }};
       show(els.stateAlert, !live);
       els.stateAlert.classList.toggle("scheduled-alert", scheduled);
       if(finishConfirming) els.stateAlert.textContent = "Tempo esgotado. Conferindo encerramento oficial no servidor...";
-      else if(scheduled) els.stateAlert.textContent = "Este leilão ainda não começou. A contagem regressiva está acima.";
+      else if(scheduled) els.stateAlert.textContent = "Aguardando início do leilão.";
       else if(s === "pending_payment") els.stateAlert.textContent = `Este leilão foi encerrado.${auction.winner_name || auction.last_bidder ? " Vencedor: " + (auction.winner_name || auction.last_bidder) + "." : ""}`;
       else if(s === "ended") els.stateAlert.textContent = "Este leilão foi encerrado.";
       else els.stateAlert.textContent = "Este leilão não está em andamento neste momento.";
@@ -894,8 +924,76 @@ window.__AUCTION__ = {{ item | tojson }};
     show(els.chatLiveArea, open && !paused);
   }
 
-  function bindCashbackButton(){ return; }
-  function renderCashback(cashback, focus=false){ return; }
+  function bindCashbackButton(){
+    const btn = document.getElementById("join-cashback-btn");
+    if(!btn || btn.dataset.bound === "1") return;
+    btn.dataset.bound = "1";
+    els.joinCashbackBtn = btn;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Entrando no sorteio...";
+      try{
+        const {res, json} = await fetchJson(`/api/auction/${auctionId}/cashback/join`, {method:"POST"}, 5000);
+        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível entrar no cashback.");
+        if(json.cashback){ renderCashback(json.cashback, true); }
+        else btn.textContent = "Você já está participando";
+      } catch(err){
+        btn.disabled = false;
+        btn.textContent = err?.message || "Tentar novamente";
+      }
+    });
+  }
+
+  function renderCashback(cashback, focus=false){
+    // Bônus por sorteio removido do modelo operacional. Créditos promocionais serão tratados em fluxo próprio.
+    return;
+    if(!cashback || !cashback.available) return;
+    let card = document.getElementById("cashback-card");
+    const justCreated = !card;
+    if(!card){
+      card = document.createElement("div");
+      card.id = "cashback-card";
+      card.className = "strategy-card cashback-card cashback-card-live";
+      const anchor = els.stateAlert || els.bidNote || els.bidForm;
+      if(anchor && anchor.parentNode) anchor.parentNode.insertBefore(card, anchor.nextSibling);
+      else els.layout?.appendChild(card);
+    }
+
+    const statusText = cashback.status === "drawn"
+      ? `Sorteado: ${cashback.winner_name || "—"}`
+      : `Participe em até <span id="cashback-countdown" data-seconds="${Number(cashback.join_remaining_seconds || 0)}">${timeLabel(cashback.join_remaining_seconds || 0)}</span>`;
+
+    let body = "";
+    if(cashback.status === "open"){
+      body = cashback.joined
+        ? `<p class="success-text">Você já está participando deste sorteio.</p>`
+        : `<button class="btn full" type="button" id="join-cashback-btn">Cashback removido</button>`;
+    } else if(cashback.status === "drawn"){
+      body = `<p>Crédito promocional: <strong>${cashback.winner_name || "—"}</strong>. Valor: <strong>${moneyBR(cashback.cashback_amount || 0)}</strong>.</p>`;
+    } else {
+      body = `<p>Crédito promocional encerrado.</p>`;
+    }
+
+    card.innerHTML = `
+      <div class="strategy-top">
+        <span class="turbo-badge">🎁 Bônus promocional</span>
+        <strong id="cashback-status">${statusText}</strong>
+      </div>
+      <p>Entre no sorteio para tentar recuperar parte do que gastou em lances neste leilão.</p>
+      ${body}
+    `;
+
+    els.cashbackCountdown = document.getElementById("cashback-countdown");
+    cashbackRemaining = Number(els.cashbackCountdown?.dataset.seconds || 0);
+    bindCashbackButton();
+
+    if(justCreated || focus){
+      card.classList.remove("cashback-pop");
+      void card.offsetWidth;
+      card.classList.add("cashback-pop");
+      setTimeout(() => card.scrollIntoView({behavior:"smooth", block:"center"}), 80);
+    }
+  }
 
   function applyAuctionState(data, source="unknown"){
     if(!data) return false;
@@ -980,7 +1078,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
     renderControls(s);
     renderChat();
-    
+    if(auction.cashback) renderCashback(auction.cashback, isClosed(s));
     renderButtons();
     return true;
   }
@@ -1399,6 +1497,122 @@ window.__AUCTION__ = {{ item | tojson }};
   60%{transform:translateY(-3px) scale(1.01);opacity:1;}
   100%{transform:translateY(0) scale(1);opacity:1;}
 }
+
+
+/* Mobile Pro: tela de leilão mais curta, menos leitura e lance sempre à mão */
+@media (max-width: 760px){
+  .auction-layout{
+    display:block;
+    padding-left:12px;
+    padding-right:12px;
+    padding-bottom:112px;
+  }
+  .auction-main{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:12px;
+  }
+  .auction-image{
+    width:100%;
+    height:220px;
+    object-fit:cover;
+    border-radius:20px;
+  }
+  .auction-panel{
+    padding:14px !important;
+    border-radius:20px !important;
+  }
+  .auction-panel h1{
+    font-size:22px !important;
+    margin-bottom:12px !important;
+  }
+  .status-row{margin-bottom:10px}
+  .price-box{
+    grid-template-columns:1.05fr .95fr 1fr !important;
+    gap:8px !important;
+  }
+  .price-box > div,
+  .meta-grid > div{
+    padding:10px 9px !important;
+    border-radius:14px !important;
+  }
+  .price-box span,
+  .meta-grid span{
+    font-size:11px !important;
+  }
+  .price-box strong,
+  .meta-grid strong{
+    font-size:14px !important;
+  }
+  #current-price,
+  #countdown{
+    font-size:16px !important;
+  }
+  .meta-grid{
+    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+    gap:8px !important;
+    margin-top:8px !important;
+  }
+  #bid-note{display:none !important;}
+  #bid-feedback{
+    font-size:13px;
+    min-height:18px;
+    margin:8px 0;
+  }
+  #auction-state-alert{
+    margin-top:10px;
+    padding:11px 12px;
+    font-size:13px;
+  }
+  .bid-grid{
+    position:fixed !important;
+    left:0;
+    right:0;
+    bottom:0;
+    z-index:80;
+    display:flex !important;
+    gap:8px;
+    overflow-x:auto;
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg,rgba(2,6,23,.62),rgba(2,6,23,.98));
+    border-top:1px solid rgba(96,165,250,.24);
+    box-shadow:0 -14px 34px rgba(0,0,0,.38);
+    -webkit-overflow-scrolling:touch;
+  }
+  .bid-grid[style*="display:none"]{display:none !important;}
+  .bid-btn{
+    flex:0 0 auto;
+    min-width:84px;
+    min-height:46px;
+    border-radius:14px !important;
+    font-size:14px !important;
+    white-space:nowrap;
+  }
+  .admin-actions-card,
+  .admin-only-strategy{display:none !important;}
+  .chat-card{
+    margin-top:14px;
+    border-radius:20px !important;
+    padding:14px !important;
+  }
+  .chat-card h2{font-size:18px;margin-bottom:3px}
+  .chat-note{display:none}
+  .chat-messages{max-height:190px !important;}
+  .chat-form{gap:8px}
+  .product-details-section{padding-left:12px;padding-right:12px}
+  .product-details-card{padding:16px !important;border-radius:20px !important;}
+  .product-reference-grid{grid-template-columns:1fr !important;}
+}
+
+@media (max-width: 390px){
+  .price-box,
+  .meta-grid{
+    grid-template-columns:1fr !important;
+  }
+  .auction-image{height:190px;}
+  .bid-btn{min-width:78px;}
+}
+
 </style>
 {% endblock %}
   

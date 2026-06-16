@@ -389,6 +389,55 @@
       else moveCard(card, grids.ended);
     }
 
+
+    function updateCountsOptimistic(deltaLive, deltaUpcoming, deltaEnded) {
+      const selectors = [
+        [".market-live strong,.lane-count.live", deltaLive],
+        [".market-next strong,.lane-count.scheduled", deltaUpcoming],
+        [".market-ended strong,.lane-count.ended", deltaEnded],
+      ];
+      selectors.forEach(([selector, delta]) => {
+        if (!delta) return;
+        document.querySelectorAll(selector).forEach((el) => {
+          const current = Number.parseInt(String(el.textContent || "0").replace(/\D+/g, ""), 10) || 0;
+          setTextIfChanged(el, Math.max(0, current + delta));
+        });
+      });
+    }
+
+    function promoteScheduledCardLocally(card, countdownEl) {
+      if (!card || card.dataset.homeLocalStarted === "true") return;
+      card.dataset.homeLocalStarted = "true";
+      card.dataset.auctionStatus = "live";
+      card.classList.remove("home-card-syncing");
+      card.classList.add("home-card-live-now");
+      setBadge(card, "live");
+
+      const timerLine = card.querySelector(".timer-line");
+      const label = timerLine?.querySelector("span");
+      const strong = countdownEl || timerLine?.querySelector("strong");
+      if (label) setTextIfChanged(label, "Status");
+      if (strong) {
+        strong.dataset.homeSyncing = "false";
+        strong.dataset.homeInactive = "false";
+        delete strong.dataset.startAt;
+        delete strong.dataset.endAt;
+        setTextIfChanged(strong, "Ao vivo");
+      }
+
+      const id = card.dataset.auctionId || "";
+      const btn = card.querySelector("a.btn");
+      if (btn) {
+        btn.href = id ? `/auction/${id}` : btn.href;
+        btn.classList.remove("ghost");
+        setTextIfChanged(btn, "Participar agora");
+      }
+
+      moveCard(card, homeGrids().live);
+      updateCountsOptimistic(1, -1, 0);
+      window.setTimeout(() => card.classList.remove("home-card-live-now"), 1800);
+    }
+
     function updateHomeCounts(json) {
       const live = Number(json.live_count || 0);
       const upcoming = Number(json.upcoming_count || 0);
@@ -422,14 +471,19 @@
         if (seconds <= 0) {
           const status = String(card?.dataset.auctionStatus || "").toLowerCase();
           if (status === "scheduled" || status === "relisted") {
-            setTextIfChanged(el, "Iniciando...");
+            // Não deixa o usuário preso em "Iniciando...". A Home promove o card
+            // visualmente para Ao vivo no mesmo segundo e o /api/home/state confirma
+            // o estado oficial logo em seguida.
+            promoteScheduledCardLocally(card, el);
           } else if (status === "live") {
             setTextIfChanged(el, "Encerrando...");
+            el.dataset.homeSyncing = "true";
+            if (card) card.classList.add("home-card-syncing");
           } else {
             setTextIfChanged(el, "Conferindo...");
+            el.dataset.homeSyncing = "true";
+            if (card) card.classList.add("home-card-syncing");
           }
-          el.dataset.homeSyncing = "true";
-          if (card) card.classList.add("home-card-syncing");
           requestHomeStateSoon("zero", true);
           return;
         }
