@@ -179,6 +179,52 @@
   {% if error %}
     <div class="alert">{{ error }}</div>
   {% endif %}
+  {% if success %}
+    <div class="alert success">{{ success }}</div>
+  {% endif %}
+
+  <div class="invite-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:16px 0">
+    <div class="wallet-card invite-card">
+      <h3>Meu código de convite</h3>
+      <p class="muted">Crie um código fixo para indicar pessoas. Você escolhe 4 letras e o sistema completa com 6 números.</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0">
+        <input id="my-invite-code" value="{{ user.referral_code or '' }}" readonly style="max-width:220px;font-weight:950;letter-spacing:.08em;text-transform:uppercase">
+        {% if user.referral_code %}<button class="btn small ghost" type="button" data-copy-input="my-invite-code">Copiar</button>{% endif %}
+      </div>
+      {% if can_customize_invite_code %}
+        <form method="post" action="/minha-conta/convite/gerar" class="compact-form">
+          <label>Escolha 4 letras do código
+            <input name="code_prefix" maxlength="4" minlength="4" pattern="[A-Za-z]{4}" placeholder="Ex: VINI" required style="text-transform:uppercase">
+            <small>Use somente 4 letras, sem espaço e sem acento. Depois disso o código fica fixo na sua conta.</small>
+          </label>
+          <button class="btn full" type="submit">Criar código fixo</button>
+        </form>
+      {% else %}
+        <p class="muted"><strong>Código fixo:</strong> este é o código da sua conta para repassar aos convidados.</p>
+      {% endif %}
+      <p class="muted">Quando uma pessoa elegível usar seu código e fizer a primeira compra válida de Créditos LC, você recebe <strong>5 LC promocionais</strong> após validação antifraude.</p>
+    </div>
+
+    <div class="wallet-card invite-card">
+      <h3>Usar código de convite</h3>
+      {% if can_apply_invite_code %}
+        <p class="muted">Se alguém indicou você, informe o código antes da sua primeira compra aprovada de Créditos LC.</p>
+        <form method="post" action="/minha-conta/convite/aplicar" class="compact-form">
+          <label>Código de convite
+            <input name="invite_code" maxlength="24" placeholder="Ex: VINI123456" required style="text-transform:uppercase">
+            <small>O código só pode ser usado uma vez e não pode ser da própria conta.</small>
+          </label>
+          <button class="btn full ghost" type="submit">Aplicar código</button>
+        </form>
+      {% elif referrer_user %}
+        <p class="muted">Você já informou um código de convite.</p>
+        <p><strong>Indicador:</strong> {{ referrer_user.public_name or referrer_user.full_name }}</p>
+        {% if referral_reward_received %}<p class="muted"><strong>Status:</strong> {{ referral_reward_received.status }} — {{ referral_reward_received.reason or 'Aguardando validação.' }}</p>{% endif %}
+      {% else %}
+        <p class="muted">Código de convite disponível apenas antes da primeira compra aprovada de Créditos LC.</p>
+      {% endif %}
+    </div>
+  </div>
 
   <div class="wallet-action-tabs">
     <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Comprar créditos</button>
@@ -250,7 +296,24 @@
   <div class="wallet-card" style="margin-top:14px">
     <h3>Regra dos Créditos LC</h3>
     <p class="muted">Créditos LC funcionam como crédito pré-pago: depois de comprados, eles só podem ser usados dentro do Lancei o Certo. Eles não podem ser sacados, transferidos ou convertidos novamente em dinheiro.</p>
-    <p class="muted"><strong>Código de indicação:</strong> {{ user.referral_code or 'será gerado automaticamente' }} — quando um indicado fizer a primeira compra válida, o bônus é liberado em Créditos LC após validação antifraude.</p>
+    <p class="muted"><strong>Convite:</strong> o bônus de convite é liberado em Créditos LC promocionais somente após primeira compra válida do indicado e validação antifraude.</p>
+    {% if referral_rewards_given %}
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Indicação</th><th>Status</th><th>Bônus</th><th>Observação</th></tr></thead>
+          <tbody>
+          {% for rw in referral_rewards_given %}
+            <tr>
+              <td>{{ rw.referred.public_name if rw.referred else 'Usuário #' ~ rw.referred_user_id }}</td>
+              <td>{{ rw.status }}</td>
+              <td>{{ '%.2f'|format(rw.amount_credits or 0)|replace('.', ',') }} LC</td>
+              <td>{{ rw.reason or '—' }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
   </div>
 </div>
 
@@ -1374,6 +1437,22 @@
     });
   }
 
+
+  document.querySelectorAll("[data-copy-input]").forEach((button) => {
+    button.addEventListener("click", async function(){
+      const target = document.getElementById(this.getAttribute("data-copy-input"));
+      if (!target) return;
+      try {
+        await navigator.clipboard.writeText(target.value || target.textContent || "");
+        const oldText = this.textContent;
+        this.textContent = "Copiado";
+        setTimeout(() => { this.textContent = oldText; }, 1500);
+      } catch (err) {
+        target.select && target.select();
+        document.execCommand && document.execCommand("copy");
+      }
+    });
+  });
 
   document.querySelectorAll("[data-copy-pix]").forEach((button) => {
     button.addEventListener("click", async function () {

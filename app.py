@@ -144,6 +144,7 @@ class User(Base):
     # não saldo financeiro sacável. A linguagem pública foi alterada para Créditos LC.
     wallet_balance: Mapped[float] = mapped_column(Float, default=0.0)
     referral_code: Mapped[str] = mapped_column(String(40), default="", unique=True, index=True)
+    referral_code_customized_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     referred_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     first_credit_purchase_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     referral_bonus_released_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -1471,6 +1472,70 @@ def normalize_referral_code(value: str) -> str:
     value = (value or "").strip().upper()
     value = re.sub(r"[^A-Z0-9]", "", value)
     return value[:24]
+
+
+def normalize_invite_prefix(value: str) -> str:
+    value = (value or "").strip().upper()
+    return re.sub(r"[^A-Z]", "", value)[:4]
+
+
+def make_invite_code_from_prefix(db: Session, prefix: str) -> str:
+    prefix = normalize_invite_prefix(prefix)
+    if len(prefix) != 4:
+        raise ValueError("Digite exatamente 4 letras, sem acento, espaço ou símbolos.")
+    for _ in range(80):
+        suffix = f"{secrets.randbelow(1_000_000):06d}"
+        candidate = f"{prefix}{suffix}"
+        exists = db.query(User.id).filter(func.lower(User.referral_code) == candidate.lower()).first()
+        if not exists:
+            return candidate
+    raise ValueError("Não foi possível gerar um código único agora. Tente novamente em instantes.")
+
+
+def user_has_approved_credit_purchase(db: Session, user_id: int) -> bool:
+    return bool(db.query(MercadoPagoPayment.id).filter(
+        MercadoPagoPayment.user_id == user_id,
+        MercadoPagoPayment.purpose == "deposit",
+        or_(MercadoPagoPayment.status == "approved", MercadoPagoPayment.approved_at.isnot(None)),
+    ).first())
+
+
+def can_apply_invite_code(db: Session, user: Optional["User"]) -> bool:
+    if not user:
+        return False
+    if getattr(user, "referred_by_user_id", None):
+        return False
+    if getattr(user, "referral_bonus_released_at", None):
+        return False
+    if getattr(user, "first_credit_purchase_at", None):
+        return False
+    if user_has_approved_credit_purchase(db, int(user.id)):
+        return False
+    if db.query(ReferralReward.id).filter(ReferralReward.referred_user_id == user.id).first():
+        return False
+    return True
+
+
+def get_referral_wallet_context(db: Session, user: "User") -> dict:
+    ensure_user_referral_code(db, user)
+    rewards_given = db.query(ReferralReward).options(selectinload(ReferralReward.referred)).filter(ReferralReward.referrer_user_id == user.id).order_by(desc(ReferralReward.created_at)).limit(10).all()
+    reward_received = db.query(ReferralReward).filter(ReferralReward.referred_user_id == user.id).order_by(desc(ReferralReward.created_at)).first()
+    referrer = db.get(User, int(user.referred_by_user_id or 0)) if getattr(user, "referred_by_user_id", None) else None
+    can_customize = not bool(getattr(user, "referral_code_customized_at", None)) and not bool(rewards_given)
+    return {
+        "can_apply_invite_code": can_apply_invite_code(db, user),
+        "can_customize_invite_code": can_customize,
+        "referral_rewards_given": rewards_given,
+        "referral_reward_received": reward_received,
+        "referrer_user": referrer,
+    }
+
+
+def wallet_context(db: Session, request: Request, user: "User", **extra) -> dict:
+    ctx = {"request": request, "user": user, "section": "wallet"}
+    ctx.update(get_referral_wallet_context(db, user))
+    ctx.update(extra)
+    return ctx
 
 
 def request_device_hash(request: Request) -> str:
@@ -3758,6 +3823,7 @@ def ensure_columns() -> None:
                 "banned_until": "TIMESTAMP NULL",
                 "ban_reason": "TEXT DEFAULT ''",
                 "referral_code": "VARCHAR(40) DEFAULT ''",
+                "referral_code_customized_at": "TIMESTAMP NULL",
                 "referred_by_user_id": "INTEGER NULL",
                 "first_credit_purchase_at": "TIMESTAMP NULL",
                 "referral_bonus_released_at": "TIMESTAMP NULL",
@@ -5684,7 +5750,124 @@ def my_wallet(request: Request):
         user = require_user(request, db)
         ensure_user_referral_code(db, user)
         db.commit()
-        return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wallet"})
+        return templates.TemplateResponse("account_pages.html", wallet_context(db, request, user))
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/convite/gerar")
+def account_generate_invite_code(request: Request, code_prefix: str = Form(...)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        ensure_user_referral_code(db, user)
+        if getattr(user, "referral_code_customized_at", None):
+            return templates.TemplateResponse(
+                "account_pages.html",
+                wallet_context(db, request, user, error="Seu código de convite já foi definido e é fixo da sua conta."),
+                status_code=400,
+            )
+        if db.query(ReferralReward.id).filter(ReferralReward.referrer_user_id == user.id).first():
+            return templates.TemplateResponse(
+                "account_pages.html",
+                wallet_context(db, request, user, error="Seu código já foi usado em indicações e não pode mais ser alterado."),
+                status_code=400,
+            )
+        try:
+            new_code = make_invite_code_from_prefix(db, code_prefix)
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                wallet_context(db, request, user, error=str(exc)),
+                status_code=400,
+            )
+        old_code = user.referral_code or ""
+        user.referral_code = new_code
+        user.referral_code_customized_at = datetime.utcnow()
+        db.add(user)
+        audit_event(db, request, "referral.code_customized", user, "user", user.id, f"Código anterior: {old_code or '—'} | Novo código: {new_code}")
+        db.commit()
+        db.refresh(user)
+        return templates.TemplateResponse(
+            "account_pages.html",
+            wallet_context(db, request, user, success=f"Código de convite criado: {new_code}. Ele agora é o código fixo da sua conta."),
+        )
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/convite/aplicar")
+def account_apply_invite_code(request: Request, invite_code: str = Form(...)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        ensure_user_referral_code(db, user)
+        if not can_apply_invite_code(db, user):
+            return templates.TemplateResponse(
+                "account_pages.html",
+                wallet_context(db, request, user, error="O código de convite só pode ser informado antes da primeira compra aprovada de Créditos LC."),
+                status_code=400,
+            )
+        code = normalize_referral_code(invite_code)
+        if not code:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                wallet_context(db, request, user, error="Informe um código de convite válido."),
+                status_code=400,
+            )
+        referrer = db.query(User).filter(func.lower(User.referral_code) == code.lower()).first()
+        if not referrer:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                wallet_context(db, request, user, error="Código de convite não encontrado."),
+                status_code=400,
+            )
+        if referrer.id == user.id:
+            return templates.TemplateResponse(
+                "account_pages.html",
+                wallet_context(db, request, user, error="Você não pode usar o próprio código de convite."),
+                status_code=400,
+            )
+
+        reasons = []
+        if (referrer.email or "").strip().lower() and (referrer.email or "").strip().lower() == (user.email or "").strip().lower():
+            reasons.append("mesmo e-mail")
+        if (referrer.cpf or "").strip() and (referrer.cpf or "").strip() == (user.cpf or "").strip():
+            reasons.append("mesmo CPF")
+        if (referrer.phone or "").strip() and (referrer.phone or "").strip() == (user.phone or "").strip():
+            reasons.append("mesmo telefone")
+        if (referrer.document_number or "").strip() and (referrer.document_number or "").strip() == (user.document_number or "").strip():
+            reasons.append("mesmo documento")
+        if (referrer.signup_ip or "").strip() and (user.signup_ip or "").strip() and referrer.signup_ip == user.signup_ip:
+            reasons.append("IP de cadastro igual/suspeito")
+        if (referrer.signup_device_hash or "").strip() and (user.signup_device_hash or "").strip() and referrer.signup_device_hash == user.signup_device_hash:
+            reasons.append("dispositivo igual/suspeito")
+
+        reward_status = "pending"
+        reward_reason = "Aguardando primeira compra válida de Créditos LC e validação antifraude."
+        if reasons:
+            reward_status = "blocked"
+            reward_reason = "; ".join(reasons)
+            user.fraud_risk_score = max(int(user.fraud_risk_score or 0), 70)
+
+        user.referred_by_user_id = referrer.id
+        reward = ReferralReward(
+            referrer_user_id=referrer.id,
+            referred_user_id=user.id,
+            amount_credits=REFERRAL_BONUS_CREDITS,
+            status=reward_status,
+            reason=reward_reason,
+        )
+        db.add(user)
+        db.add(reward)
+        audit_event(db, request, "referral.code_applied", user, "referral_reward", None, f"Código {code} | Indicador #{referrer.id} | Status {reward_status} | {reward_reason}")
+        db.commit()
+        db.refresh(user)
+        if reward_status == "blocked":
+            msg = "Código recebido, mas a indicação ficou bloqueada para análise de segurança."
+        else:
+            msg = f"Código aplicado com sucesso. Após sua primeira compra aprovada de Créditos LC, o indicador receberá {REFERRAL_BONUS_CREDITS:.0f} LC promocionais, se tudo estiver regular."
+        return templates.TemplateResponse("account_pages.html", wallet_context(db, request, user, success=msg))
     finally:
         db.close()
 
@@ -5699,7 +5882,7 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
         if amount < LC_MIN_CREDIT_PURCHASE_AMOUNT:
             return templates.TemplateResponse(
                 "account_pages.html",
-                {"request": request, "user": user, "section": "wallet", "error": f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."},
+                wallet_context(db, request, user, error=f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."),
                 status_code=400,
             )
 
@@ -5712,12 +5895,7 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
         except Exception as exc:
             return templates.TemplateResponse(
                 "account_pages.html",
-                {
-                    "request": request,
-                    "user": user,
-                    "section": "wallet",
-                    "error": str(exc),
-                },
+                wallet_context(db, request, user, error=str(exc)),
                 status_code=400,
             )
 
@@ -5745,12 +5923,7 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
 
         return templates.TemplateResponse(
             "account_pages.html",
-            {
-                "request": request,
-                "user": user,
-                "section": "wallet",
-                "pix_payment": build_pix_payment_view(payment),
-            },
+            wallet_context(db, request, user, pix_payment=build_pix_payment_view(payment)),
         )
     finally:
         db.close()
@@ -5765,7 +5938,7 @@ def account_add_balance_card(request: Request, amount: float = Form(...)):
         if amount < LC_MIN_CREDIT_PURCHASE_AMOUNT:
             return templates.TemplateResponse(
                 "account_pages.html",
-                {"request": request, "user": user, "section": "wallet", "error": f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."},
+                wallet_context(db, request, user, error=f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."),
                 status_code=400,
             )
         try:
@@ -5780,7 +5953,7 @@ def account_add_balance_card(request: Request, amount: float = Form(...)):
         except Exception as exc:
             return templates.TemplateResponse(
                 "account_pages.html",
-                {"request": request, "user": user, "section": "wallet", "error": str(exc)},
+                wallet_context(db, request, user, error=str(exc)),
                 status_code=400,
             )
 
