@@ -119,6 +119,8 @@
 
       <div id="turbo-announcement" class="turbo-announcement" aria-live="polite"></div>
 
+      <span id="bid-controls-desktop-anchor" aria-hidden="true"></span>
+      <div id="bid-controls" class="bid-controls">
       {% if user %}
         <form id="bid-form" class="bid-grid" {% if item.status != 'live' %}style="display:none"{% endif %}>
           {% for v in allowed_bids %}
@@ -146,6 +148,7 @@
       {% else %}
         <div class="alert">Faça login para participar do leilão.</div>
       {% endif %}
+      </div>
 
       {% if false and item.cashback.available %}
       <div class="strategy-card cashback-card" id="cashback-card">
@@ -377,6 +380,8 @@ window.__AUCTION__ = {{ item | tojson }};
     strategyCard: $("strategy-card"),
     turboAnnouncement: $("turbo-announcement"),
     feedback: $("bid-feedback"),
+    bidControls: $("bid-controls"),
+    bidDesktopAnchor: $("bid-controls-desktop-anchor"),
     bidForm: $("bid-form"),
     bidNote: $("bid-note"),
     stateAlert: $("auction-state-alert"),
@@ -923,6 +928,31 @@ window.__AUCTION__ = {{ item | tojson }};
     show(els.chatPausedAlert, open && paused);
     show(els.chatLiveArea, open && !paused);
   }
+
+  let bidPlacementTimer = 0;
+  function syncBidControlsPlacement(){
+    const controls = els.bidControls;
+    if(!controls) return;
+    const mobile = window.matchMedia && window.matchMedia("(max-width: 760px)").matches;
+    if(mobile && els.chatCard){
+      if(els.chatCard.nextElementSibling !== controls){
+        els.chatCard.insertAdjacentElement("afterend", controls);
+      }
+    } else if(els.bidDesktopAnchor){
+      if(els.bidDesktopAnchor.nextElementSibling !== controls){
+        els.bidDesktopAnchor.insertAdjacentElement("afterend", controls);
+      }
+    }
+  }
+
+  function queueBidControlsPlacement(){
+    if(bidPlacementTimer) window.clearTimeout(bidPlacementTimer);
+    bidPlacementTimer = window.setTimeout(syncBidControlsPlacement, 80);
+  }
+
+  window.addEventListener("resize", queueBidControlsPlacement, {passive:true});
+  window.addEventListener("orientationchange", queueBidControlsPlacement, {passive:true});
+  syncBidControlsPlacement();
 
   function bindCashbackButton(){
     const btn = document.getElementById("join-cashback-btn");
@@ -1504,13 +1534,13 @@ window.__AUCTION__ = {{ item | tojson }};
 }
 
 
-/* Mobile Pro: tela de leilão mais curta, menos leitura e lance sempre à mão */
+/* Mobile Pro: tela de leilão mais curta, menos leitura e lances no fluxo correto */
 @media (max-width: 760px){
   .auction-layout{
     display:block;
     padding-left:12px;
     padding-right:12px;
-    padding-bottom:112px;
+    padding-bottom:16px;
   }
   .auction-main{
     display:grid;
@@ -1569,28 +1599,40 @@ window.__AUCTION__ = {{ item | tojson }};
     padding:11px 12px;
     font-size:13px;
   }
+  .bid-controls{
+    margin-top:14px;
+    padding:14px;
+    border:1px solid rgba(96,165,250,.22);
+    border-radius:20px;
+    background:linear-gradient(135deg,rgba(15,23,42,.92),rgba(30,41,59,.72));
+    box-shadow:0 14px 34px rgba(0,0,0,.18);
+  }
+  .bid-controls::before{
+    content:"Dar lance";
+    display:block;
+    margin:0 0 10px;
+    color:#ffffff;
+    font-size:16px;
+    font-weight:950;
+  }
   .bid-grid{
-    position:fixed !important;
-    left:0;
-    right:0;
-    bottom:0;
-    z-index:80;
-    display:flex !important;
-    gap:8px;
-    overflow-x:auto;
-    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
-    background:linear-gradient(180deg,rgba(2,6,23,.62),rgba(2,6,23,.98));
-    border-top:1px solid rgba(96,165,250,.24);
-    box-shadow:0 -14px 34px rgba(0,0,0,.38);
-    -webkit-overflow-scrolling:touch;
+    position:static !important;
+    display:grid !important;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+    overflow:visible;
+    padding:0;
+    background:transparent;
+    border:0;
+    box-shadow:none;
   }
   .bid-grid[style*="display:none"]{display:none !important;}
   .bid-btn{
-    flex:0 0 auto;
-    min-width:84px;
-    min-height:46px;
+    width:100%;
+    min-width:0;
+    min-height:48px;
     border-radius:14px !important;
-    font-size:14px !important;
+    font-size:15px !important;
     white-space:nowrap;
   }
   .admin-actions-card,
@@ -1615,7 +1657,7 @@ window.__AUCTION__ = {{ item | tojson }};
     grid-template-columns:1fr !important;
   }
   .auction-image{height:190px;}
-  .bid-btn{min-width:78px;}
+  .bid-btn{min-height:46px;}
 }
 
 </style>
