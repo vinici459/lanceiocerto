@@ -133,7 +133,16 @@ class User(Base):
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     privacy_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Compatibilidade: wallet_balance passa a representar Créditos LC comprados/promocionais,
+    # não saldo financeiro sacável. A linguagem pública foi alterada para Créditos LC.
     wallet_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    referral_code: Mapped[str] = mapped_column(String(40), default="", unique=True, index=True)
+    referred_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    first_credit_purchase_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    referral_bonus_released_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    signup_ip: Mapped[str] = mapped_column(String(80), default="")
+    signup_device_hash: Mapped[str] = mapped_column(String(120), default="")
+    fraud_risk_score: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     bids: Mapped[list["Bid"]] = relationship(back_populates="user")
@@ -319,6 +328,22 @@ class WithdrawalRequest(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
+class ReferralReward(Base):
+    __tablename__ = "referral_rewards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    referrer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    amount_credits: Mapped[float] = mapped_column(Float, default=5.0)
+    status: Mapped[str] = mapped_column(String(30), default="pending")  # pending/approved/blocked/canceled
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    released_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    referrer: Mapped[User] = relationship(foreign_keys=[referrer_user_id])
+    referred: Mapped[User] = relationship(foreign_keys=[referred_user_id])
 
 
 class SupportTicket(Base):
@@ -756,9 +781,14 @@ BID_BUTTON_COOLDOWN_SECONDS = NORMAL_BID_BUTTON_COOLDOWN_SECONDS
 MAX_INITIAL_DURATION_SECONDS = 60 * 60
 DEFAULT_INITIAL_DURATION_SECONDS = 30 * 60
 PAYMENT_DEADLINE_MINUTES = 10
-ENABLE_CASHBACK_DRAW = os.getenv("ENABLE_CASHBACK_DRAW", "1").strip().lower() not in {"0", "false", "no", "off"}
+# Sorteio/cashback removido do produto. Mantemos as tabelas antigas apenas para compatibilidade,
+# mas a funcionalidade fica desligada por padrão.
+ENABLE_CASHBACK_DRAW = os.getenv("ENABLE_CASHBACK_DRAW", "0").strip().lower() in {"1", "true", "yes", "on"}
 DEFAULT_BID_FEE_PERCENT = 10.0
 PLATFORM_PROFIT_PERCENT = 10.0
+LC_MIN_CREDIT_PURCHASE_AMOUNT = float(os.getenv("LC_MIN_CREDIT_PURCHASE_AMOUNT", "5"))
+REFERRAL_BONUS_CREDITS = float(os.getenv("REFERRAL_BONUS_CREDITS", "5"))
+REFERRAL_MIN_FIRST_PURCHASE_AMOUNT = float(os.getenv("REFERRAL_MIN_FIRST_PURCHASE_AMOUNT", "5"))
 
 
 SUGGESTION_WEEK_LIMIT = 20
@@ -1083,6 +1113,70 @@ def build_pix_payment_view(payment: MercadoPagoPayment) -> dict:
     }
 
 
+def release_referral_bonus_if_eligible(db: Session, request: Request, user: User, payment_amount: float) -> None:
+    """Libera bônus de indicação em Créditos LC após a primeira compra válida."""
+    if not user:
+        return
+    amount = BR(payment_amount or 0.0)
+    if amount >= REFERRAL_MIN_FIRST_PURCHASE_AMOUNT and not user.first_credit_purchase_at:
+        user.first_credit_purchase_at = datetime.utcnow()
+        db.add(user)
+    if amount < REFERRAL_MIN_FIRST_PURCHASE_AMOUNT or getattr(user, "referral_bonus_released_at", None):
+        return
+    referrer_id = int(getattr(user, "referred_by_user_id", 0) or 0)
+    if not referrer_id:
+        return
+
+    reward = db.query(ReferralReward).filter(ReferralReward.referred_user_id == user.id).first()
+    if not reward:
+        reward = ReferralReward(referrer_user_id=referrer_id, referred_user_id=user.id, amount_credits=REFERRAL_BONUS_CREDITS, status="pending", reason="Aguardando validação antifraude.")
+        db.add(reward)
+        db.flush()
+
+    referrer = db.get(User, referrer_id)
+    reasons = []
+    if not referrer:
+        reasons.append("indicador inexistente")
+    elif referrer.id == user.id:
+        reasons.append("autoindicação")
+    else:
+        if (referrer.email or "").strip().lower() and (referrer.email or "").strip().lower() == (user.email or "").strip().lower():
+            reasons.append("mesmo e-mail")
+        if (referrer.cpf or "").strip() and (referrer.cpf or "").strip() == (user.cpf or "").strip():
+            reasons.append("mesmo CPF")
+        if (referrer.phone or "").strip() and (referrer.phone or "").strip() == (user.phone or "").strip():
+            reasons.append("mesmo telefone")
+        if (referrer.document_number or "").strip() and (referrer.document_number or "").strip() == (user.document_number or "").strip():
+            reasons.append("mesmo documento")
+        if (referrer.signup_ip or "").strip() and (user.signup_ip or "").strip() and referrer.signup_ip == user.signup_ip:
+            reasons.append("IP de cadastro igual/suspeito")
+        if (referrer.signup_device_hash or "").strip() and (user.signup_device_hash or "").strip() and referrer.signup_device_hash == user.signup_device_hash:
+            reasons.append("dispositivo igual/suspeito")
+
+    if reasons:
+        reward.status = "blocked"
+        reward.reason = "; ".join(reasons)
+        user.fraud_risk_score = max(int(user.fraud_risk_score or 0), 70)
+        db.add(reward)
+        db.add(user)
+        audit_event(db, request, "referral.bonus_blocked", user, "referral_reward", reward.id, reward.reason)
+        return
+    if reward.status == "approved":
+        return
+
+    referrer.wallet_balance = BR(float(referrer.wallet_balance or 0.0) + REFERRAL_BONUS_CREDITS)
+    user.referral_bonus_released_at = datetime.utcnow()
+    reward.status = "approved"
+    reward.reason = "Bônus liberado após primeira compra mínima de Créditos LC do indicado."
+    reward.amount_credits = REFERRAL_BONUS_CREDITS
+    reward.released_at = datetime.utcnow()
+    db.add(WalletTransaction(user_id=referrer.id, amount=REFERRAL_BONUS_CREDITS, kind="referral_bonus_lc", note=f"Bônus de indicação: {REFERRAL_BONUS_CREDITS:.0f} Créditos LC pelo usuário #{user.id}."))
+    db.add(referrer)
+    db.add(user)
+    db.add(reward)
+    audit_event(db, request, "referral.bonus_released", referrer, "referral_reward", reward.id, f"Indicado #{user.id} | Bônus {REFERRAL_BONUS_CREDITS:.0f} LC")
+
+
 def apply_approved_mp_payment(db: Session, request: Request, payment_row: MercadoPagoPayment) -> bool:
     """Aplica aprovação do Mercado Pago uma única vez."""
     if not payment_row or (payment_row.status == "approved" and payment_row.approved_at):
@@ -1106,10 +1200,11 @@ def apply_approved_mp_payment(db: Session, request: Request, payment_row: Mercad
         db.add(WalletTransaction(
             user_id=user.id,
             amount=payment_row.amount,
-            kind="deposit_pix" if is_pix_payment else "deposit_card",
-            note=f"Depósito {payment_label} aprovado pelo Mercado Pago. Referência MP #{payment_row.mp_payment_id}",
+            kind="credit_purchase_pix" if is_pix_payment else "credit_purchase_card",
+            note=f"Compra de Créditos LC via {payment_label} aprovada pelo Mercado Pago. Referência MP #{payment_row.mp_payment_id}",
         ))
-        audit_event(db, request, "wallet.deposit_approved", user, "mercadopago_payment", payment_row.mp_payment_id, f"Método: {payment_label} | Valor R$ {fmt_money(payment_row.amount)}")
+        release_referral_bonus_if_eligible(db, request, user, float(payment_row.amount or 0.0))
+        audit_event(db, request, "wallet.credit_purchase_approved", user, "mercadopago_payment", payment_row.mp_payment_id, f"Método: {payment_label} | Créditos LC: {fmt_money(payment_row.amount)}")
 
     elif payment_row.purpose == "order_payment" and payment_row.order_id:
         order = db.get(WinnerOrder, payment_row.order_id)
@@ -1282,9 +1377,66 @@ def auction_last_bid_meta(db: Session, auction_id: int, viewer_user_id: Optional
 
 
 def normalize_public_name(value: str) -> str:
-    value = (value or "").strip().lower()
-    value = re.sub(r"[^a-z0-9._-]", "", value)
+    # Mantém maiúsculas/minúsculas para exibição pública, mas remove espaços extras.
+    # A validação de cadastro exige apenas letras sem acento, números, ponto, underline e hífen.
+    value = (value or "").strip()
+    value = re.sub(r"\s+", "", value)
+    value = re.sub(r"[^A-Za-z0-9._-]", "", value)
     return value[:24]
+
+
+def public_name_key(value: str) -> str:
+    return normalize_public_name(value).lower()
+
+
+def normalize_referral_code(value: str) -> str:
+    value = (value or "").strip().upper()
+    value = re.sub(r"[^A-Z0-9]", "", value)
+    return value[:24]
+
+
+def request_device_hash(request: Request) -> str:
+    raw = "|".join([
+        request.headers.get("user-agent", ""),
+        request.headers.get("accept-language", ""),
+        request.headers.get("sec-ch-ua", ""),
+        request.headers.get("sec-ch-ua-platform", ""),
+    ]).strip()
+    if not raw:
+        return ""
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:64]
+
+
+def make_unique_referral_code(db: Session, user: Optional["User"] = None, seed: str = "") -> str:
+    base = normalize_referral_code(seed or getattr(user, "public_name", "") or getattr(user, "full_name", "") or "LC")
+    if len(base) < 4:
+        base = f"LC{getattr(user, 'id', '') or secrets.token_hex(2).upper()}"
+    base = base[:14]
+    for attempt in range(20):
+        if attempt == 0 and getattr(user, "id", None):
+            candidate = normalize_referral_code(f"{base}{user.id}")
+        else:
+            candidate = normalize_referral_code(f"{base}{secrets.token_hex(2).upper()}")
+        if len(candidate) < 4:
+            candidate = f"LC{secrets.token_hex(3).upper()}"
+        exists = db.query(User.id).filter(func.lower(User.referral_code) == candidate.lower()).first()
+        if not exists:
+            return candidate[:24]
+    return f"LC{secrets.token_hex(6).upper()}"[:24]
+
+
+def ensure_user_referral_code(db: Session, user: Optional["User"]) -> str:
+    if not user:
+        return ""
+    code = normalize_referral_code(getattr(user, "referral_code", ""))
+    if code:
+        if code != getattr(user, "referral_code", ""):
+            user.referral_code = code
+            db.add(user)
+        return code
+    user.referral_code = make_unique_referral_code(db, user, getattr(user, "public_name", "") or getattr(user, "email", ""))
+    db.add(user)
+    return user.referral_code
 
 
 def user_is_verified(user: Optional["User"]) -> bool:
@@ -1328,7 +1480,7 @@ def audit_event(db: Session, request: Request, action: str, user: Optional[User]
 
 AUDIT_FOLDERS = {
     "geral": {"label": "Tudo", "description": "Todos os registros arquivados na central."},
-    "financeiro": {"label": "Financeiro", "description": "Entradas, saídas, taxas, saques, estornos, cashback e ajustes de saldo."},
+    "financeiro": {"label": "Financeiro", "description": "Entradas, saídas, taxas, estornos e ajustes de Créditos LC."},
     "leiloes": {"label": "Leilões", "description": "Criação, início, encerramento, relançamento, vencedor e mudanças críticas."},
     "pedidos": {"label": "Pedidos", "description": "Pagamento do vencedor, compra do produto, envio, entrega, disputa e finalização."},
     "usuarios": {"label": "Usuários", "description": "Cadastro, dados, KYC, banimentos, moderação e conta."},
@@ -3318,6 +3470,8 @@ def build_order_card(order: WinnerOrder) -> dict:
 
 
 def cashback_payload(item: AuctionItem, db: Session, user: Optional[User] = None) -> dict:
+    # Cashback/sorteio removido. Retorno fixo evita renderizar o card antigo.
+    return {"available": False}
     if not getattr(item, "cashback_enabled", False):
         return {"available": False}
     event = db.query(CashbackEvent).filter(CashbackEvent.auction_id == item.id).first()
@@ -3519,6 +3673,13 @@ def ensure_columns() -> None:
                 "ban_count": "INTEGER DEFAULT 0",
                 "banned_until": "TIMESTAMP NULL",
                 "ban_reason": "TEXT DEFAULT ''",
+                "referral_code": "VARCHAR(40) DEFAULT ''",
+                "referred_by_user_id": "INTEGER NULL",
+                "first_credit_purchase_at": "TIMESTAMP NULL",
+                "referral_bonus_released_at": "TIMESTAMP NULL",
+                "signup_ip": "VARCHAR(80) DEFAULT ''",
+                "signup_device_hash": "VARCHAR(120) DEFAULT ''",
+                "fraud_risk_score": "INTEGER DEFAULT 0",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {ddl}"))
@@ -3625,6 +3786,13 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_mp_payments_order_created ON mercadopago_payments (order_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_withdrawals_status_created ON withdrawal_requests (status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_users_identity_created ON users (identity_status, created_at)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower ON users (LOWER(email)) WHERE email <> ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_cpf_nonempty ON users (cpf) WHERE cpf <> ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_phone_nonempty ON users (phone) WHERE phone <> ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_public_name_lower ON users (LOWER(public_name)) WHERE public_name <> ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_referral_code_lower ON users (LOWER(referral_code)) WHERE referral_code <> ''",
+            "CREATE INDEX IF NOT EXISTS ix_users_referred_by ON users (referred_by_user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_referral_rewards_status_created ON referral_rewards (status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_withdrawals_user_created ON withdrawal_requests (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_support_tickets_user_created ON support_tickets (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
@@ -4314,13 +4482,17 @@ async def register(
     district: str = Form(""),
     city: str = Form(""),
     state: str = Form(""),
+    referral_code: str = Form(""),
     accept_terms: str = Form(""),
     accept_privacy: str = Form(""),
     accept_truth: str = Form(""),
 ):
     db = SessionLocal()
     try:
-        clean_public_name = normalize_public_name(public_name)
+        raw_public_name = (public_name or "").strip()
+        clean_public_name = normalize_public_name(raw_public_name)
+        clean_public_name_key = public_name_key(clean_public_name)
+        clean_referral_code = normalize_referral_code(referral_code)
         clean_email = normalize_email(email)
         clean_cpf = only_digits(cpf)
         clean_phone = only_digits(phone)
@@ -4343,6 +4515,7 @@ async def register(
                 "district": (district or "").strip(),
                 "city": (city or "").strip(),
                 "state": (state or "").strip().upper()[:2],
+                "referral_code": (referral_code or "").strip(),
                 "accept_terms": accept_terms == "on",
                 "accept_privacy": accept_privacy == "on",
                 "accept_truth": accept_truth == "on",
@@ -4363,8 +4536,8 @@ async def register(
             return fail("Para criar a conta, aceite os Termos de Uso, a Política de Privacidade e confirme que os dados são verdadeiros.", "accept_terms")
         if len((full_name or "").strip().split()) < 2:
             return fail("Informe seu nome completo.", "full_name")
-        if len(clean_public_name) < 3:
-            return fail("Escolha um apelido público com pelo menos 3 caracteres.", "public_name")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{3,24}", raw_public_name or ""):
+            return fail("Escolha um apelido público com 3 a 24 caracteres, sem espaço, sem acento e sem símbolos fora de ponto, underline ou hífen.", "public_name")
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", clean_email):
             return fail("Informe um e-mail válido.", "email")
         if not validate_cpf_digits(clean_cpf):
@@ -4382,14 +4555,20 @@ async def register(
         if password != password_confirm:
             return fail("A confirmação de senha não confere.", "password_confirm")
 
-        if db.query(User).filter(User.email == clean_email).first():
+        if db.query(User).filter(func.lower(User.email) == clean_email.lower()).first():
             return fail("Este e-mail já está cadastrado.", "email")
         if db.query(User).filter(User.cpf == clean_cpf).first():
             return fail("Este CPF já está cadastrado.", "cpf")
         if db.query(User).filter(User.phone == clean_phone).first():
             return fail("Este telefone já está cadastrado.", "phone")
-        if db.query(User).filter(User.public_name == clean_public_name).first():
+        if db.query(User).filter(func.lower(User.public_name) == clean_public_name_key).first():
             return fail("Este apelido público já está em uso.", "public_name")
+
+        referrer = None
+        if clean_referral_code:
+            referrer = db.query(User).filter(func.lower(User.referral_code) == clean_referral_code.lower()).first()
+            if not referrer:
+                return fail("Código de indicação inválido.", "referral_code")
 
         verification_code = make_email_verification_code()
         user = User(
@@ -4422,11 +4601,20 @@ async def register(
             terms_accepted_at=datetime.utcnow(),
             privacy_accepted_at=datetime.utcnow(),
             wallet_balance=0.0,
+            referred_by_user_id=referrer.id if referrer else None,
+            signup_ip=client_ip(request),
+            signup_device_hash=request_device_hash(request),
+            fraud_risk_score=0,
         )
         db.add(user)
         db.flush()
+        user.referral_code = make_unique_referral_code(db, user, clean_public_name)
+        db.add(user)
+        if referrer:
+            db.add(ReferralReward(referrer_user_id=referrer.id, referred_user_id=user.id, amount_credits=REFERRAL_BONUS_CREDITS, status="pending", reason="Aguardando primeira compra válida de Créditos LC e validação antifraude."))
         sent = send_verification_code_email(user, request)
-        audit_event(db, request, "user.register", user, "user", user.id, "Cadastro criado. Código de confirmação de e-mail enviado e KYC pendente.")
+        referral_detail = f" | Indicação: {referrer.id}" if referrer else ""
+        audit_event(db, request, "user.register", user, "user", user.id, f"Cadastro criado. Código de confirmação de e-mail enviado e KYC pendente.{referral_detail}")
         db.commit()
         suffix = "&email_sent=1" if sent else "&email_dev=1"
         return RedirectResponse(f"/cadastro/confirmar-email?email={clean_email}{suffix}", status_code=303)
@@ -5018,7 +5206,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                 private_payload["wallet_balance"] = BR(getattr(fresh_user, "wallet_balance", 0.0) or 0.0)
                 raise AuctionStateHTTPException(
                     status_code=402,
-                    detail="Saldo insuficiente para dar este lance.",
+                    detail="Créditos LC insuficientes para dar este lance.",
                     auction_payload=private_payload,
                 )
 
@@ -5243,6 +5431,7 @@ async def auction_state(request: Request, auction_id: int):
 
 @app.post("/api/auction/{auction_id}/cashback/join")
 def join_cashback(request: Request, auction_id: int):
+    raise HTTPException(status_code=410, detail="Cashback/sorteio foi removido. Créditos promocionais serão tratados como Bônus LC em regras próprias da plataforma.")
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -5353,6 +5542,8 @@ def my_account(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
+        ensure_user_referral_code(db, user)
+        db.commit()
         account_summary = cached_account_dashboard_context(db, user)
         return templates.TemplateResponse(
             "account_pages.html",
@@ -5380,6 +5571,8 @@ def my_wallet(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
+        ensure_user_referral_code(db, user)
+        db.commit()
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "wallet"})
     finally:
         db.close()
@@ -5392,17 +5585,17 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
     try:
         user = require_user(request, db)
         amount = BR(amount)
-        if amount < 1:
+        if amount < LC_MIN_CREDIT_PURCHASE_AMOUNT:
             return templates.TemplateResponse(
                 "account_pages.html",
-                {"request": request, "user": user, "section": "wallet", "error": "O depósito mínimo é de R$ 1,00."},
+                {"request": request, "user": user, "section": "wallet", "error": f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."},
                 status_code=400,
             )
 
         try:
             mp = create_mp_pix_payment(
                 amount=amount,
-                description=f"Depósito de saldo - LanceioCerto - usuário #{user.id}",
+                description=f"Compra de Créditos LC - LanceioCerto - usuário #{user.id}",
                 payer_email=user.email,
             )
         except Exception as exc:
@@ -5426,16 +5619,16 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
             status=mp["status"],
             qr_code=mp["qr_code"],
             qr_code_base64=mp["qr_code_base64"],
-            description=f"Depósito de saldo - usuário #{user.id}",
+            description=f"Compra de Créditos LC - usuário #{user.id}",
         )
         db.add(payment)
         db.add(WalletTransaction(
             user_id=user.id,
             amount=0.0,
             kind="deposit_pix_pending",
-            note=f"Pix de depósito gerado: R$ {fmt_money(amount)} | MP #{mp['payment_id']}",
+            note=f"Pix de compra de Créditos LC gerado: R$ {fmt_money(amount)} | MP #{mp['payment_id']}",
         ))
-        audit_event(db, request, "wallet.deposit_pix_created", user, "mercadopago_payment", mp["payment_id"], f"Valor R$ {fmt_money(amount)}")
+        audit_event(db, request, "wallet.credit_purchase_pix_created", user, "mercadopago_payment", mp["payment_id"], f"Valor R$ {fmt_money(amount)}")
         db.commit()
         db.refresh(payment)
 
@@ -5458,17 +5651,17 @@ def account_add_balance_card(request: Request, amount: float = Form(...)):
     try:
         user = require_user(request, db)
         amount = BR(amount)
-        if amount < 1:
+        if amount < LC_MIN_CREDIT_PURCHASE_AMOUNT:
             return templates.TemplateResponse(
                 "account_pages.html",
-                {"request": request, "user": user, "section": "wallet", "error": "O depósito mínimo é de R$ 1,00."},
+                {"request": request, "user": user, "section": "wallet", "error": f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."},
                 status_code=400,
             )
         try:
             checkout = create_mp_card_checkout(
                 request=request,
                 amount=amount,
-                description=f"Depósito de saldo - LanceioCerto - usuário #{user.id}",
+                description=f"Compra de Créditos LC - LanceioCerto - usuário #{user.id}",
                 payer_email=user.email,
                 purpose="deposit",
                 user_id=user.id,
@@ -5496,9 +5689,9 @@ def account_add_balance_card(request: Request, amount: float = Form(...)):
             user_id=user.id,
             amount=0.0,
             kind="deposit_card_pending",
-            note=f"Checkout de cartão gerado: R$ {fmt_money(amount)} | Preferência MP {checkout['preference_id']}",
+            note=f"Checkout de cartão para Créditos LC gerado: R$ {fmt_money(amount)} | Preferência MP {checkout['preference_id']}",
         ))
-        audit_event(db, request, "wallet.deposit_card_created", user, "mercadopago_payment", checkout["external_reference"], f"Valor R$ {fmt_money(amount)}")
+        audit_event(db, request, "wallet.credit_purchase_card_created", user, "mercadopago_payment", checkout["external_reference"], f"Valor R$ {fmt_money(amount)}")
         db.commit()
         return RedirectResponse(checkout["init_point"], status_code=303)
     finally:
@@ -5524,6 +5717,7 @@ def account_pix_deposit_status(request: Request, payment_id: str):
             "approved": row.status == "approved",
             "status": row.status,
             "wallet_balance": BR(user.wallet_balance or 0),
+            "lc_credits": BR(user.wallet_balance or 0),
         }
     finally:
         db.close()
@@ -5553,6 +5747,8 @@ def my_profile(request: Request):
     db = SessionLocal()
     try:
         user = require_user(request, db)
+        ensure_user_referral_code(db, user)
+        db.commit()
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "profile"})
     finally:
         db.close()
@@ -5608,7 +5804,7 @@ def account_delete_submit(
             "nao_uso": "Não uso mais a plataforma",
             "privacidade": "Privacidade/dados pessoais",
             "dificuldade": "Dificuldade para usar o site",
-            "problema_pagamento": "Problema com pagamento, saque ou saldo",
+            "problema_pagamento": "Problema com pagamento ou Créditos LC",
             "problema_leilao": "Problema com leilão ou pedido",
             "teste": "Conta criada apenas para teste",
             "outro": "Outro motivo",
@@ -5639,7 +5835,7 @@ def account_delete_submit(
             (
                 f"Conta excluída pelo próprio usuário. "
                 f"Nome: {original['full_name']} | E-mail: {original['email']} | CPF: {original['cpf']} | "
-                f"Saldo no momento: R$ {fmt_money(original['wallet_balance'])} | "
+                f"Créditos LC no momento: {fmt_money(original['wallet_balance'])} LC | "
                 f"Motivo: {reason_label} | Detalhes: {details or 'sem detalhes'}"
             ),
         )
@@ -5990,10 +6186,10 @@ def confirm_payment_flow(
         order.delivery_city = delivery_city.strip()
         order.delivery_state = delivery_state.strip()
 
-        # 💰 PAGAMENTO COM SALDO
+        # 💰 PAGAMENTO COM CRÉDITOS LC
         if payment_method == "wallet":
             if user.wallet_balance < order.final_price:
-                raise HTTPException(status_code=400, detail="Saldo insuficiente.")
+                raise HTTPException(status_code=400, detail="Créditos LC insuficientes.")
 
             user.wallet_balance = BR(user.wallet_balance - order.final_price)
 
@@ -6866,7 +7062,7 @@ async def admin_create_item(
             winner_min_percent=BR(winner_min_percent),
             target_profit_percent=BR(turbo_fee_target_percent),
             turbo_base_value=BR(source_price * (turbo_start / 100.0)),
-            cashback_enabled=bool(int(cashback_enabled)),
+            cashback_enabled=False,
         )
         db.add(item)
         db.commit()
@@ -6932,7 +7128,7 @@ async def admin_returned_update_relist(
         item.turbo_level_4_percent = min(99.0, turbo_trigger_percent + 10.0)
         item.turbo_level = 0
         item.turbo_enabled = True
-        item.cashback_enabled = bool(int(cashback_enabled or 0))
+        item.cashback_enabled = False
 
         # Ao relançar, remove sorteio antigo para evitar cashback preso de leilão anterior.
         db.query(CashbackEntry).filter(CashbackEntry.auction_id == item.id).delete(synchronize_session=False)
@@ -7359,121 +7555,25 @@ def admin_relist(request: Request, item_id: int, start_in_minutes: int = Form(..
 
 
 @app.post("/minha-conta/saque")
-def account_request_withdrawal(request: Request, amount: float = Form(...), pix_key: str = Form(...)):
+def account_request_withdrawal(request: Request, amount: float = Form(...), pix_key: str = Form("")):
+    # Créditos LC são pré-pagos internos, como crédito de telefone: depois de comprados,
+    # não podem ser sacados nem convertidos novamente em dinheiro. Mantemos a rota
+    # para não quebrar formulários antigos, mas ela apenas informa a regra.
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        if not user_is_verified(user):
-            raise HTTPException(status_code=403, detail="Para solicitar saque, envie seus documentos e aguarde a confirmação da conta.")
-
-        amount = BR(amount)
-        if amount < 1:
-            return templates.TemplateResponse(
-                "account_pages.html",
-                {"request": request, "user": user, "section": "wallet", "error": "O saque mínimo é de R$ 1,00."},
-                status_code=400,
-            )
-
-        pix_key_clean = (pix_key or "").strip()
-        if not pix_key_clean:
-            raise HTTPException(status_code=400, detail="Informe uma chave Pix válida.")
-
-        # Desconto atômico: o banco só reduz o saldo se ainda houver saldo suficiente
-        # no exato momento do UPDATE. Isso blinda duas abas/duplo envio simultâneo.
-        with WITHDRAWAL_USER_LOCKS[user.id]:
-            result = db.execute(
-                text("""
-                    UPDATE users
-                    SET wallet_balance = wallet_balance - :amount
-                    WHERE id = :user_id AND wallet_balance >= :amount
-                """),
-                {"amount": amount, "user_id": user.id},
-            )
-            if result.rowcount != 1:
-                db.rollback()
-                raise HTTPException(status_code=400, detail="Saldo insuficiente para solicitar saque.")
-
-            fee_amount = BR(amount * 0.01)
-            net_amount = BR(amount - fee_amount)
-            req = WithdrawalRequest(user_id=user.id, amount=amount, fee_amount=fee_amount, net_amount=net_amount, pix_key=pix_key_clean, status="pending")
-            db.add(req)
-            db.add(WalletTransaction(
-                user_id=user.id,
-                amount=-amount,
-                kind="withdrawal_reserved",
-                note=f"Saque solicitado: bruto R$ {fmt_money(amount)} | taxa 1% R$ {fmt_money(fee_amount)} | pagar ao cliente R$ {fmt_money(net_amount)} via Pix: {pix_key_clean}",
-            ))
-            db.add(WalletTransaction(
-                user_id=user.id,
-                amount=fee_amount,
-                kind="withdrawal_fee",
-                note=f"Taxa de saque 1% referente ao saque solicitado: R$ {fmt_money(amount)}",
-            ))
-            audit_event(db, request, "wallet.withdrawal_requested", user, "withdrawal", "pending", f"Bruto R$ {fmt_money(amount)} | taxa R$ {fmt_money(fee_amount)} | líquido R$ {fmt_money(net_amount)}")
-            db.commit()
-
-        return RedirectResponse("/minha-conta#account-balance-panel", status_code=303)
-    finally:
-        db.close()
-
-def _account_open_ticket_sync(request: Request, subject: str, message: str, order_id: int, proof_file: UploadFile | None) -> None:
-    db = SessionLocal()
-    try:
-        user = require_user(request, db)
-        proof_url = save_uploaded_image(proof_file)
-        linked_order_id = order_id if int(order_id or 0) > 0 else None
-        if linked_order_id:
-            order = db.get(WinnerOrder, linked_order_id)
-            if not order or order.user_id != user.id:
-                raise HTTPException(status_code=403, detail="Pedido inválido.")
-            if proof_url:
-                db.add(OrderProof(order_id=order.id, user_id=user.id, file_url=proof_url, kind="user_proof", note=subject.strip()))
-            order.status = "dispute"
-        db.add(SupportTicket(user_id=user.id, order_id=linked_order_id, subject=subject.strip(), message=message.strip(), proof_url=proof_url, status="open"))
+        audit_event(db, request, "wallet.withdrawal_blocked_lc", user, "wallet", user.id, "Tentativa de saque bloqueada: Créditos LC não são sacáveis.")
         db.commit()
-    finally:
-        db.close()
-
-
-@app.post("/minha-conta/chamado")
-async def account_open_ticket(request: Request, subject: str = Form(...), message: str = Form(...), order_id: int = Form(0), proof_file: UploadFile | None = File(None)):
-    await asyncio.to_thread(_account_open_ticket_sync, request, subject, message, order_id, proof_file)
-    return RedirectResponse("/minha-conta", status_code=303)
-
-
-@app.post("/admin/user/{user_id}/verify")
-def admin_verify_user(request: Request, user_id: int, note: str = Form("")):
-    db = SessionLocal()
-    try:
-        require_superadmin(request, db)
-        user = db.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-        user.identity_status = "verified"
-        user.identity_note = note.strip()
-        user.verified_at = datetime.utcnow()
-        audit_event(db, request, "kyc.verified", user, "user", user.id, note.strip())
-        db.commit()
-        return RedirectResponse("/admin#admin-identity-pending", status_code=303)
-    finally:
-        db.close()
-
-
-@app.post("/admin/user/{user_id}/reject")
-def admin_reject_user(request: Request, user_id: int, note: str = Form("")):
-    db = SessionLocal()
-    try:
-        require_superadmin(request, db)
-        user = db.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="Usuário não encontrado.")
-        user.identity_status = "rejected"
-        user.identity_note = note.strip() or "Documentação ilegível ou incompatível com os dados informados."
-        user.verified_at = None
-        send_identity_rejection_email(user, user.identity_note)
-        audit_event(db, request, "kyc.rejected", user, "user", user.id, user.identity_note)
-        db.commit()
-        return RedirectResponse("/admin#admin-identity-pending", status_code=303)
+        return templates.TemplateResponse(
+            "account_pages.html",
+            {
+                "request": request,
+                "user": user,
+                "section": "wallet",
+                "error": "Créditos LC são créditos pré-pagos de uso interno e não podem ser sacados ou convertidos em dinheiro.",
+            },
+            status_code=400,
+        )
     finally:
         db.close()
 

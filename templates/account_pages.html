@@ -44,7 +44,7 @@
 
     <a href="/minha-conta/saldo"
        class="account-side-link account-side-balance {% if section == 'wallet' %}active{% endif %}">
-      Saldo
+      Créditos LC
     </a>
 
     <a href="/minha-conta/cadastro" class="account-side-link {% if section == 'profile' %}active{% endif %}">
@@ -168,9 +168,10 @@
 <div id="account-balance-panel" class="panel-card account-wallet-panel active">
   <div class="section-head compact-head">
     <div>
-      <h1>Saldo</h1>
+      <h1>Comprar Créditos LC</h1>
+      <p class="muted">Créditos LC são pré-pagos internos, usados para participar dos leilões e recursos da plataforma.</p>
     </div>
-    <span class="wallet-badge">Saldo: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
+    <span class="wallet-badge">Créditos LC: {{ '%.2f'|format(user.wallet_balance or 0)|replace('.', ',') }}</span>
   </div>
 
   {% if error %}
@@ -178,8 +179,7 @@
   {% endif %}
 
   <div class="wallet-action-tabs">
-    <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Depositar</button>
-    <button class="wallet-action-btn" type="button" data-wallet-mode="wallet-withdraw-panel">Sacar</button>
+    <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Comprar créditos</button>
   </div>
 
   <div id="wallet-deposit-panel" class="wallet-mode-panel active">
@@ -191,24 +191,25 @@
     <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active" novalidate>
       <div id="deposit-pix-alert" class="wallet-error" aria-live="polite"></div>
 
-      <label>Valor do depósito
+      <label>Valor da compra de Créditos LC
         <input
           type="number"
           step="0.01"
-          min="1"
+          min="5"
           name="amount"
           id="deposit-pix-amount"
-          placeholder="R$ 0,00"
+          placeholder="Mínimo R$ 5,00"
           inputmode="decimal"
           required>
+        <small>Após a confirmação, o valor vira Créditos LC de uso interno. Créditos LC não são sacáveis nem conversíveis em dinheiro.</small>
       </label>
 
-      <button class="btn full" type="submit">Gerar PIX</button>
+      <button class="btn full" type="submit">Gerar PIX para Créditos LC</button>
 
       {% if pix_payment and pix_payment.qr_code_base64 %}
       <div class="pix-payment-box" data-pix-payment="deposit" data-payment-id="{{ pix_payment.payment_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
-        <h3>Pix gerado</h3>
-        <p>Valor: <strong>R$ {{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }}</strong></p>
+        <h3>Pix para Créditos LC gerado</h3>
+        <p>Valor/Créditos LC: <strong>{{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }} LC</strong></p>
         <p class="pix-expire-note">Tempo para pagar: <strong data-pix-countdown>15:00</strong></p>
         <div class="pix-qr-wrap">
           <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
@@ -227,56 +228,27 @@
     <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel" novalidate>
       <div id="deposit-card-alert" class="wallet-error" aria-live="polite"></div>
 
-      <label>Valor do depósito
+      <label>Valor da compra de Créditos LC
         <input
           type="number"
           step="0.01"
-          min="1"
+          min="5"
           name="amount"
           id="deposit-card-amount"
-          placeholder="R$ 0,00"
+          placeholder="Mínimo R$ 5,00"
           inputmode="decimal"
           required>
+        <small>Compra mínima de R$ 5,00. Os créditos comprados são de uso exclusivo dentro do site.</small>
       </label>
 
-      <small class="payment-note">Para maior segunra você será direcionado para o Mercado Pago.</small>
-      <button class="btn full" type="submit">Ir para pagamento</button>
+      <small class="payment-note">Para maior segurança você será direcionado para o Mercado Pago.</small>
+      <button class="btn full" type="submit">Comprar Créditos LC</button>
     </form>
   </div>
-
-  <div id="wallet-withdraw-panel" class="wallet-mode-panel">
-    <form id="withdraw-form" method="post" action="/minha-conta/saque" class="wallet-card withdraw-card" novalidate>
-      <div id="withdraw-alert" class="wallet-error" aria-live="polite"></div>
-
-      <label>Valor do saque
-        <input
-          type="number"
-          step="0.01"
-          min="1"
-          name="amount"
-          id="withdraw-amount"
-          data-withdraw-amount
-          placeholder="R$ 0,00"
-          inputmode="decimal"
-          required>
-        <small>Taxa de saque: 1%</small>
-        <small id="withdraw-net-preview" class="payment-note">Digite um valor para ver quanto será recebido após a taxa.</small>
-      </label>
-
-      <label>Chave PIX
-        <input
-          name="pix_key"
-          id="withdraw-pix-key"
-          placeholder="CPF, e-mail, telefone ou chave aleatória"
-          required>
-      </label>
-
-      {% if user.identity_status == 'verified' %}
-        <button class="btn full" type="submit">Solicitar saque</button>
-      {% else %}
-        <button class="btn full ghost" type="button" disabled>Conta precisa ser confirmada</button>
-      {% endif %}
-    </form>
+  <div class="wallet-card" style="margin-top:14px">
+    <h3>Regra dos Créditos LC</h3>
+    <p class="muted">Créditos LC funcionam como crédito pré-pago: depois de comprados, eles só podem ser usados dentro do Lancei o Certo. Eles não podem ser sacados, transferidos ou convertidos novamente em dinheiro.</p>
+    <p class="muted"><strong>Código de indicação:</strong> {{ user.referral_code or 'será gerado automaticamente' }} — quando um indicado fizer a primeira compra válida, o bônus é liberado em Créditos LC após validação antifraude.</p>
   </div>
 </div>
 
@@ -286,6 +258,7 @@
   <div class="section-head"><div><h1>Meu Cadastro</h1></div></div>
   <div class="profile-grid">
     <div><span>Apelido público</span><strong>@{{ user.public_name or user.nickname }}</strong></div>
+    <div><span>Código de indicação</span><strong>{{ user.referral_code or '—' }}</strong></div>
     <div><span>E-mail</span><strong>{{ user.email }}</strong></div>
     <div><span>CPF</span><strong>{{ user.cpf or '—' }}</strong></div>
     <div><span>Telefone</span><strong>{{ user.phone or '—' }}</strong></div>
@@ -344,9 +317,9 @@
 {% elif section == 'receipts' %}
 <div class="panel-card">
   <div class="section-head"><div><h1>Auditoria</h1></div></div>
-  <p class="muted">Histórico das suas movimentações, pagamentos, depósitos, saques, pedidos e alterações relevantes na conta.</p>
+  <p class="muted">Histórico das suas movimentações, compras de Créditos LC, pedidos e alterações relevantes na conta.</p>
 
-  <h2>Movimentações de saldo</h2>
+  <h2>Movimentações de Créditos LC</h2>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Observação</th></tr></thead>
@@ -355,11 +328,11 @@
         <tr>
           <td>{{ fmt_br_datetime(tx.created_at) if fmt_br_datetime is defined else tx.created_at }}</td>
           <td>{{ tx.kind }}</td>
-          <td>R$ {{ '%.2f'|format(tx.amount or 0)|replace('.', ',') }}</td>
+          <td>{{ '%.2f'|format(tx.amount or 0)|replace('.', ',') }} LC</td>
           <td>{{ tx.note or '—' }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="4">Nenhuma movimentação de saldo registrada.</td></tr>
+        <tr><td colspan="4">Nenhuma movimentação de Créditos LC registrada.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -877,8 +850,8 @@
 
         <div class="payment-options">
           <button type="button" class="payment-option" data-payment-method="wallet">
-            <strong>Saldo da conta</strong>
-            <span>Use seu saldo disponível: R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
+            <strong>Créditos LC da conta</strong>
+            <span>Use seus Créditos LC disponíveis: {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
           </button>
 
           <button type="button" class="payment-option active" data-payment-method="pix">
@@ -893,21 +866,21 @@
         </div>
 
         <div id="walletPaymentPanel" class="payment-panel">
-          <h3>Pagar com saldo da conta</h3>
+          <h3>Pagar com Créditos LC</h3>
 
           {% if user.wallet_balance >= order.final_price %}
-            <p>Seu saldo é suficiente para pagar este pedido.</p>
-            <p><strong>Saldo atual:</strong> R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
+            <p>Seus Créditos LC são suficientes para pagar este pedido.</p>
+            <p><strong>Créditos LC atuais:</strong> {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
             <p><strong>Valor do pedido:</strong> R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</p>
             <div class="security-box">
-              ⚡ Pagamento instantâneo usando saldo interno. Ao confirmar, o valor será descontado do saldo da conta.
+              ⚡ Pagamento instantâneo usando Créditos LC. Ao confirmar, o valor será descontado dos seus Créditos LC.
             </div>
           {% else %}
-            <p class="highlight-warn">Saldo insuficiente para pagar este pedido.</p>
-            <p><strong>Saldo atual:</strong> R$ {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
+            <p class="highlight-warn">Créditos LC insuficientes para pagar este pedido.</p>
+            <p><strong>Créditos LC atuais:</strong> {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
             <p><strong>Valor do pedido:</strong> R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</p>
             <p><strong>Falta:</strong> R$ {{ '%.2f'|format(order.final_price - user.wallet_balance)|replace('.', ',') }}</p>
-            <a href="/minha-conta?saldo=1" class="btn full ghost">Adicionar saldo</a>
+            <a href="/minha-conta?saldo=1" class="btn full ghost">Comprar Créditos LC</a>
           {% endif %}
         </div>
 
@@ -1016,7 +989,7 @@
         <option value="nao_uso">Não uso mais a plataforma</option>
         <option value="privacidade">Privacidade/dados pessoais</option>
         <option value="dificuldade">Dificuldade para usar o site</option>
-        <option value="problema_pagamento">Problema com pagamento, saque ou saldo</option>
+        <option value="problema_pagamento">Problema com pagamento ou Créditos LC</option>
         <option value="problema_leilao">Problema com leilão ou pedido</option>
         <option value="teste">Conta criada apenas para teste</option>
         <option value="outro">Outro motivo</option>
@@ -1222,7 +1195,7 @@
         confirmPaymentButton.disabled = true;
         confirmPaymentButton.setAttribute("aria-busy", "true");
         if (method === "wallet") {
-          confirmPaymentButton.textContent = "Confirmando saldo...";
+          confirmPaymentButton.textContent = "Confirmando Créditos LC...";
         } else if (method === "credit_card") {
           confirmPaymentButton.textContent = "Abrindo Mercado Pago...";
         } else {
@@ -1437,14 +1410,14 @@
     "deposit-pix-panel",
     "deposit-pix-amount",
     "deposit-pix-alert",
-    "O valor mínimo para depósito é R$ 1,00."
+    "O valor mínimo para comprar Créditos LC é R$ 5,00."
   );
 
   validateAmountForm(
     "deposit-card-panel",
     "deposit-card-amount",
     "deposit-card-alert",
-    "O valor mínimo para depósito é R$ 1,00."
+    "O valor mínimo para comprar Créditos LC é R$ 5,00."
   );
 
   const withdrawForm = document.getElementById("withdraw-form");
@@ -1459,14 +1432,14 @@
 
       if (!Number.isFinite(amount) || amount < 1){
         event.preventDefault();
-        showWalletError("withdraw-alert", "O valor mínimo para saque é R$ 1,00.");
+        showWalletError("withdraw-alert", "Créditos LC não podem ser sacados.");
         withdrawAmount.focus();
         return false;
       }
 
       if (!pixKey){
         event.preventDefault();
-        showWalletError("withdraw-alert", "Informe a chave PIX para solicitar o saque.");
+        showWalletError("withdraw-alert", "Créditos LC não podem ser sacados.");
         withdrawPixKey.focus();
         return false;
       }
