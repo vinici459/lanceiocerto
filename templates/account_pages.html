@@ -31,6 +31,8 @@
 
 .wallet-error{display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.30);color:#fecaca;font-weight:800;line-height:1.35}.wallet-error.show{display:block}
 
+.account-support-layout{display:grid;grid-template-columns:340px minmax(0,1fr);gap:16px;align-items:start}.support-list{display:grid;gap:10px}.support-ticket-link{display:block;text-decoration:none;color:#fff;border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.04);border-radius:16px;padding:12px}.support-ticket-link.active{border-color:rgba(96,165,250,.45);background:rgba(59,130,246,.12)}.support-ticket-link strong{display:block;margin-bottom:5px}.support-ticket-link small{display:block;color:#b7c6e6}.support-chat{display:grid;gap:10px;max-height:520px;overflow:auto;padding-right:4px}.support-msg{border:1px solid rgba(148,163,184,.16);border-radius:16px;padding:12px;background:rgba(255,255,255,.04)}.support-msg.admin{border-color:rgba(96,165,250,.30);background:rgba(37,99,235,.10)}.support-msg.internal{display:none}.support-msg-head{display:flex;justify-content:space-between;gap:10px;color:#b7c6e6;font-size:12px;font-weight:800;margin-bottom:6px}.support-msg p{margin:0;white-space:pre-wrap;line-height:1.45}.support-open-form{display:grid;gap:12px}.support-open-form textarea,.support-reply-form textarea{min-height:120px}.support-meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;margin-bottom:12px}.support-meta-grid div{border:1px solid rgba(148,163,184,.14);border-radius:14px;background:rgba(255,255,255,.035);padding:10px}.support-meta-grid span{display:block;color:#b7c6e6;font-size:12px;font-weight:800}.support-meta-grid strong{display:block;margin-top:4px}.support-empty-state{padding:18px;border:1px dashed rgba(148,163,184,.26);border-radius:16px;color:#cbd5e1}.support-attach{display:block;margin-top:7px;color:#93c5fd;font-weight:900;text-decoration:none}@media(max-width:900px){.account-support-layout{grid-template-columns:1fr}}
+
 </style>
 {% endblock %}
 {% block content %}
@@ -51,8 +53,8 @@
       Meu Cadastro
     </a>
 
-    <a href="/minha-conta/auditoria" class="account-side-link {% if section == 'receipts' %}active{% endif %}">
-      Auditoria
+    <a href="/minha-conta/suporte" class="account-side-link {% if section == 'support' %}active{% endif %}">
+      Suporte
     </a>
 
     <a href="/minha-conta/participacoes" class="account-side-link {% if section == 'participations' %}active{% endif %}">
@@ -379,6 +381,104 @@
     </table>
   </div>
 </div>
+
+{% elif section == 'support' %}
+<div class="section-head">
+  <div>
+    <h1>Suporte</h1>
+    <p>Abra um chamado, acompanhe respostas e envie comprovantes dentro do próprio site.</p>
+  </div>
+</div>
+
+{% if support_error %}<div class="alert">{{ support_error }}</div>{% endif %}
+{% if support_success %}<div class="alert success">{{ support_success }}</div>{% endif %}
+
+<div class="account-support-layout">
+  <aside class="panel-card">
+    <div class="card-title-row"><h2>Meus chamados</h2><span class="pill-soft">Atendimento</span></div>
+    <div class="support-list">
+      {% for t in support_tickets %}
+        <a class="support-ticket-link {% if support_ticket and support_ticket.id == t.id %}active{% endif %}" href="/minha-conta/suporte?ticket={{ t.id }}">
+          <strong>#LC-{{ '%06d'|format(t.id) }} · {{ t.subject or support_category_label(t.category) }}</strong>
+          <small>{{ support_category_label(t.category) }} · {{ support_status_label(t.status) }} · {{ fmt_br_datetime(t.updated_at or t.created_at) if fmt_br_datetime is defined else t.created_at }}</small>
+        </a>
+      {% else %}
+        <div class="support-empty-state">Você ainda não abriu chamados.</div>
+      {% endfor %}
+    </div>
+  </aside>
+
+  <div class="support-main-stack">
+    <div class="panel-card">
+      <div class="card-title-row"><h2>Abrir novo chamado</h2><span class="pill-soft">Protocolo</span></div>
+      <form method="post" action="/minha-conta/suporte/novo" enctype="multipart/form-data" class="support-open-form">
+        <label>Categoria
+          <select name="category" required>
+            {% for key,label in support_categories.items() %}
+              <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Pedido relacionado <small>(opcional)</small>
+          <select name="order_id">
+            <option value="0">Nenhum pedido específico</option>
+            {% for o in support_orders %}
+              <option value="{{ o.id }}">Pedido #{{ o.id }} · {{ o.auction.title if o.auction else 'Produto' }} · {{ o.status }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Assunto
+          <input name="subject" maxlength="160" placeholder="Ex: Pix aprovado mas os Créditos LC não apareceram">
+        </label>
+        <label>Descreva o problema
+          <textarea name="message" required placeholder="Explique o que aconteceu. Informe valor, data, produto, pedido ou código de indicação quando existir."></textarea>
+        </label>
+        <label>Anexo/comprovante <small>(opcional)</small>
+          <input type="file" name="proof_file" accept="image/*,.pdf">
+        </label>
+        <button class="btn" type="submit">Abrir chamado</button>
+      </form>
+    </div>
+
+    {% if support_ticket %}
+    <div class="panel-card">
+      <div class="card-title-row"><h2>Chamado #LC-{{ '%06d'|format(support_ticket.id) }}</h2><span class="pill-soft">{{ support_status_label(support_ticket.status) }}</span></div>
+      <div class="support-meta-grid">
+        <div><span>Categoria</span><strong>{{ support_category_label(support_ticket.category) }}</strong></div>
+        <div><span>Prioridade</span><strong>{{ support_priority_label(support_ticket.priority) }}</strong></div>
+        <div><span>Aberto em</span><strong>{{ fmt_br_datetime(support_ticket.created_at) if fmt_br_datetime is defined else support_ticket.created_at }}</strong></div>
+        <div><span>Pedido</span><strong>{% if support_ticket.order_id %}#{{ support_ticket.order_id }}{% else %}—{% endif %}</strong></div>
+      </div>
+      <div class="support-chat">
+        {% for m in support_messages %}
+          {% if m.message_type != 'internal' %}
+          <div class="support-msg {{ 'admin' if m.message_type == 'admin' else 'customer' }}">
+            <div class="support-msg-head"><span>{{ 'Suporte Lancei o Certo' if m.message_type == 'admin' else 'Você' }}</span><span>{{ fmt_br_datetime(m.created_at) if fmt_br_datetime is defined else m.created_at }}</span></div>
+            <p>{{ m.body }}</p>
+            {% if m.proof_url %}<a class="support-attach" href="{{ m.proof_url }}" target="_blank">Abrir anexo</a>{% endif %}
+          </div>
+          {% endif %}
+        {% else %}
+          <div class="support-empty-state">Nenhuma mensagem neste chamado.</div>
+        {% endfor %}
+      </div>
+      {% if support_ticket.status not in ['closed'] %}
+      <form method="post" action="/minha-conta/suporte/{{ support_ticket.id }}/responder" enctype="multipart/form-data" class="support-reply-form" style="margin-top:14px;display:grid;gap:10px">
+        <label>Responder chamado
+          <textarea name="message" placeholder="Escreva uma resposta ou envie mais informações."></textarea>
+        </label>
+        <label>Anexo/comprovante <small>(opcional)</small>
+          <input type="file" name="proof_file" accept="image/*,.pdf">
+        </label>
+        <button class="btn" type="submit">Enviar resposta</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+
 {% elif section == 'participations' %}
 <div class="panel-card">
   <div class="section-head"><div><h1>Leilões Participados</h1></div></div>

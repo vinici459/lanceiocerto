@@ -357,18 +357,45 @@ class SupportTicket(Base):
     __tablename__ = "support_tickets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    order_id: Mapped[Optional[int]] = mapped_column(ForeignKey("winner_orders.id"), nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    order_id: Mapped[Optional[int]] = mapped_column(ForeignKey("winner_orders.id"), nullable=True, index=True)
+    category: Mapped[str] = mapped_column(String(60), default="duvida_geral", index=True)
+    priority: Mapped[str] = mapped_column(String(20), default="media", index=True)  # baixa/media/alta/urgente
     subject: Mapped[str] = mapped_column(String(160), default="")
     message: Mapped[str] = mapped_column(Text, default="")
     proof_url: Mapped[str] = mapped_column(String(600), default="")
-    status: Mapped[str] = mapped_column(String(30), default="open")  # open/in_review/dispute/resolved/closed
+    status: Mapped[str] = mapped_column(String(30), default="open", index=True)  # open/in_review/awaiting_customer/dispute/resolved/closed
+    result: Mapped[str] = mapped_column(String(30), default="")  # client/site/agreement/manual_adjustment
+    assigned_admin_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     admin_note: Mapped[str] = mapped_column(Text, default="")
+    customer_last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_customer_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_admin_response_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    sla_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     user: Mapped[User] = relationship(foreign_keys=[user_id])
     order: Mapped[Optional[WinnerOrder]] = relationship(foreign_keys=[order_id])
+    assigned_admin: Mapped[Optional[User]] = relationship(foreign_keys=[assigned_admin_id])
+
+
+class SupportTicketMessage(Base):
+    __tablename__ = "support_ticket_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("support_tickets.id"), index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    admin_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    message_type: Mapped[str] = mapped_column(String(30), default="customer")  # customer/admin/internal/system
+    body: Mapped[str] = mapped_column(Text, default="")
+    proof_url: Mapped[str] = mapped_column(String(600), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    ticket: Mapped[SupportTicket] = relationship(foreign_keys=[ticket_id])
+    user: Mapped[Optional[User]] = relationship(foreign_keys=[user_id])
+    admin: Mapped[Optional[User]] = relationship(foreign_keys=[admin_id])
 
 
 class OrderProof(Base):
@@ -805,6 +832,24 @@ PLATFORM_PROFIT_PERCENT = 10.0
 LC_MIN_CREDIT_PURCHASE_AMOUNT = float(os.getenv("LC_MIN_CREDIT_PURCHASE_AMOUNT", "5"))
 REFERRAL_BONUS_CREDITS = float(os.getenv("REFERRAL_BONUS_CREDITS", "5"))
 REFERRAL_MIN_FIRST_PURCHASE_AMOUNT = float(os.getenv("REFERRAL_MIN_FIRST_PURCHASE_AMOUNT", "5"))
+SUPPORT_ADMIN_ADJUST_LIMIT = float(os.getenv("SUPPORT_ADMIN_ADJUST_LIMIT", "20"))
+
+SUPPORT_CATEGORIES = {
+    "pagamento_creditos": "Pagamento de Créditos LC não caiu",
+    "creditos_descontados": "Créditos LC descontados indevidamente",
+    "indicacao_bonus": "Indicação ou bônus não creditado",
+    "lance_leilao": "Problema em lance ou leilão",
+    "arremate_pagamento": "Problema no pagamento do arremate",
+    "compra_assistida": "Compra assistida / link do pedido",
+    "produto_entrega": "Entrega, atraso ou rastreio",
+    "produto_defeito": "Produto com defeito ou divergente",
+    "documentos_conta": "Documentos, cadastro ou conta",
+    "antifraude_bloqueio": "Conta em análise ou bloqueada",
+    "cancelamento": "Cancelamento, estorno ou encerramento",
+    "duvida_geral": "Dúvida geral",
+}
+SUPPORT_PRIORITIES = {"baixa": "Baixa", "media": "Média", "alta": "Alta", "urgente": "Urgente"}
+SUPPORT_STATUSES = {"open": "Aberto", "in_review": "Em análise", "awaiting_customer": "Aguardando usuário", "dispute": "Em disputa", "resolved": "Resolvido", "closed": "Fechado"}
 
 
 SUGGESTION_WEEK_LIMIT = 20
@@ -1306,6 +1351,23 @@ def register_product_outgoing_if_needed(db: Session, order: WinnerOrder, now: Op
 
 templates.env.globals["fmt_br_datetime"] = fmt_br_datetime
 templates.env.globals["br_time"] = br_time
+
+
+def support_category_label(value: str) -> str:
+    return SUPPORT_CATEGORIES.get((value or "").strip(), value or "Dúvida geral")
+
+
+def support_priority_label(value: str) -> str:
+    return SUPPORT_PRIORITIES.get((value or "").strip(), value or "Média")
+
+
+def support_status_label(value: str) -> str:
+    return SUPPORT_STATUSES.get((value or "").strip(), value or "Aberto")
+
+
+templates.env.globals["support_category_label"] = support_category_label
+templates.env.globals["support_priority_label"] = support_priority_label
+templates.env.globals["support_status_label"] = support_status_label
 def public_display_status(status: str) -> str:
     """Status público do leilão.
 
@@ -3784,6 +3846,26 @@ def ensure_columns() -> None:
             conn.execute(text("UPDATE withdrawal_requests SET net_amount = COALESCE(amount,0) - COALESCE(fee_amount,0) WHERE COALESCE(net_amount, 0) = 0 AND COALESCE(amount,0) > 0"))
 
 
+        if inspector.has_table("support_tickets"):
+            cols = {c["name"] for c in inspector.get_columns("support_tickets")}
+            for name, ddl in {
+                "category": "VARCHAR(60) DEFAULT 'duvida_geral'",
+                "priority": "VARCHAR(20) DEFAULT 'media'",
+                "result": "VARCHAR(30) DEFAULT ''",
+                "assigned_admin_id": "INTEGER NULL",
+                "customer_last_seen_at": "TIMESTAMP NULL",
+                "last_customer_message_at": "TIMESTAMP NULL",
+                "last_admin_response_at": "TIMESTAMP NULL",
+                "sla_due_at": "TIMESTAMP NULL",
+                "closed_at": "TIMESTAMP NULL",
+            }.items():
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE support_tickets ADD COLUMN {name} {ddl}"))
+            conn.execute(text("UPDATE support_tickets SET category = COALESCE(NULLIF(category, ''), 'duvida_geral') WHERE category IS NULL OR category = ''"))
+            conn.execute(text("UPDATE support_tickets SET priority = COALESCE(NULLIF(priority, ''), 'media') WHERE priority IS NULL OR priority = ''"))
+            conn.execute(text("UPDATE support_tickets SET last_customer_message_at = created_at WHERE last_customer_message_at IS NULL"))
+
+
         # Índices leves para as consultas mais repetidas da home, conta, admin e leilão.
         # CREATE INDEX IF NOT EXISTS funciona em SQLite e PostgreSQL.
         for ddl in [
@@ -3817,6 +3899,9 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_referral_rewards_status_created ON referral_rewards (status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_withdrawals_user_created ON withdrawal_requests (user_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_support_tickets_user_created ON support_tickets (user_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_support_tickets_category_status ON support_tickets (category, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_support_tickets_assigned_status ON support_tickets (assigned_admin_id, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_support_ticket_messages_ticket_created ON support_ticket_messages (ticket_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
             "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_key ON product_suggestion_votes (product_key)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_suggestion_vote_user_day ON product_suggestion_votes (user_id, date(created_at))",
@@ -5751,6 +5836,10 @@ def account_pix_deposit_status(request: Request, payment_id: str):
 
 
 @app.get("/minha-conta/auditoria", response_class=HTMLResponse)
+def my_audit_redirect(request: Request):
+    return RedirectResponse("/minha-conta/suporte", status_code=303)
+
+
 @app.get("/minha-conta/comprovantes", response_class=HTMLResponse)
 def my_receipts(request: Request):
     db = SessionLocal()
@@ -5767,6 +5856,73 @@ def my_receipts(request: Request):
         return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, "section": "receipts", **data})
     finally:
         db.close()
+
+
+@app.get("/minha-conta/suporte", response_class=HTMLResponse)
+def my_support(request: Request):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        ticket_raw = (request.query_params.get("ticket") or "").strip()
+        ticket_id = int(ticket_raw) if ticket_raw.isdigit() else None
+        ctx = support_context_for_user(db, user, ticket_id=ticket_id)
+        db.commit()
+        return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx})
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/suporte/novo")
+async def my_support_create(request: Request, category: str = Form("duvida_geral"), subject: str = Form(""), message: str = Form(""), order_id: int = Form(0), proof_file: UploadFile | None = File(None)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        category = category if category in SUPPORT_CATEGORIES else "duvida_geral"
+        subject = (subject or "").strip()[:160]
+        message = (message or "").strip()
+        if len(message) < 10:
+            ctx = support_context_for_user(db, user, error="Descreva o problema com pelo menos 10 caracteres.")
+            return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
+        proof_url = save_uploaded_image(proof_file) if proof_file and proof_file.filename else ""
+        valid_order_id = None
+        if order_id:
+            order = db.query(WinnerOrder).filter(WinnerOrder.id == order_id, WinnerOrder.user_id == user.id).first()
+            if order:
+                valid_order_id = order.id
+        priority = support_category_priority(category)
+        ticket = SupportTicket(user_id=user.id, order_id=valid_order_id, category=category, priority=priority, subject=subject or support_category_label(category), message=message, proof_url=proof_url, status="open", last_customer_message_at=datetime.utcnow(), sla_due_at=support_sla_due(category, priority))
+        db.add(ticket)
+        db.flush()
+        support_add_message(db, ticket, message, user_id=user.id, message_type="customer", proof_url=proof_url)
+        audit_event(db, request, "support.ticket_created", user, "support_ticket", ticket.id, f"Categoria: {category} | Prioridade: {priority}")
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/minha-conta/suporte?ticket={ticket.id}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/minha-conta/suporte/{ticket_id}/responder")
+async def my_support_reply(request: Request, ticket_id: int, message: str = Form(""), proof_file: UploadFile | None = File(None)):
+    db = SessionLocal()
+    try:
+        user = require_user(request, db)
+        ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id, SupportTicket.user_id == user.id).first()
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Chamado não encontrado.")
+        body = (message or "").strip()
+        if len(body) < 2 and not (proof_file and proof_file.filename):
+            ctx = support_context_for_user(db, user, ticket_id=ticket.id, error="Digite uma resposta ou envie um anexo.")
+            return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
+        proof_url = save_uploaded_image(proof_file) if proof_file and proof_file.filename else ""
+        support_add_message(db, ticket, body or "Anexo enviado pelo usuário.", user_id=user.id, message_type="customer", proof_url=proof_url)
+        audit_event(db, request, "support.customer_replied", user, "support_ticket", ticket.id, "Usuário respondeu ao chamado.")
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/minha-conta/suporte?ticket={ticket.id}", status_code=303)
+    finally:
+        db.close()
+
 
 @app.get("/minha-conta/cadastro", response_class=HTMLResponse)
 def my_profile(request: Request):
@@ -6579,6 +6735,135 @@ def user_audit_map(db: Session, users: list) -> dict[int, dict]:
             bucket["transactions"].append(tx)
     return data
 
+
+
+def support_sla_due(category: str, priority: str) -> datetime:
+    category = (category or "duvida_geral").strip()
+    priority = (priority or "media").strip()
+    if priority == "urgente" or category in {"pagamento_creditos", "creditos_descontados", "produto_defeito", "antifraude_bloqueio"}:
+        hours = 2
+    elif priority == "alta" or category in {"lance_leilao", "arremate_pagamento", "compra_assistida"}:
+        hours = 4
+    elif priority == "baixa":
+        hours = 24
+    else:
+        hours = 8
+    return datetime.utcnow() + timedelta(hours=hours)
+
+
+def support_ticket_code(ticket_id: int) -> str:
+    return f"LC-{int(ticket_id or 0):06d}"
+
+
+def support_ticket_can_adjust(admin: User, amount: float) -> bool:
+    if bool(getattr(admin, "is_superadmin", False)):
+        return True
+    return abs(BR(amount)) <= SUPPORT_ADMIN_ADJUST_LIMIT
+
+
+def support_add_message(db: Session, ticket: SupportTicket, body: str, *, user_id: Optional[int] = None, admin_id: Optional[int] = None, message_type: str = "customer", proof_url: str = "") -> SupportTicketMessage:
+    msg = SupportTicketMessage(ticket_id=ticket.id, user_id=user_id, admin_id=admin_id, message_type=message_type, body=(body or "").strip()[:5000], proof_url=proof_url or "")
+    db.add(msg)
+    ticket.updated_at = datetime.utcnow()
+    if message_type == "customer":
+        ticket.last_customer_message_at = datetime.utcnow()
+        if ticket.status in {"resolved", "closed", "awaiting_customer"}:
+            ticket.status = "open"
+            ticket.closed_at = None
+    elif message_type == "admin":
+        ticket.last_admin_response_at = datetime.utcnow()
+    return msg
+
+
+def support_category_priority(category: str) -> str:
+    category = (category or "duvida_geral").strip()
+    if category in {"pagamento_creditos", "creditos_descontados", "produto_defeito", "antifraude_bloqueio", "lance_leilao", "arremate_pagamento", "compra_assistida"}:
+        return "alta"
+    if category in {"indicacao_bonus", "documentos_conta", "duvida_geral"}:
+        return "baixa"
+    return "media"
+
+
+def support_recent_activity_for_user(db: Session, user: User) -> dict:
+    user_id = int(user.id)
+    return {
+        "transactions": db.query(WalletTransaction).filter(WalletTransaction.user_id == user_id).order_by(desc(WalletTransaction.created_at)).limit(30).all(),
+        "payments": db.query(MercadoPagoPayment).filter(MercadoPagoPayment.user_id == user_id).order_by(desc(MercadoPagoPayment.created_at)).limit(30).all(),
+        "orders": db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user_id).order_by(desc(WinnerOrder.created_at)).limit(20).all(),
+        "bids": db.query(Bid).options(selectinload(Bid.auction)).filter(Bid.user_id == user_id).order_by(desc(Bid.created_at)).limit(30).all(),
+        "referrals_as_referrer": db.query(ReferralReward).options(selectinload(ReferralReward.referred)).filter(ReferralReward.referrer_user_id == user_id).order_by(desc(ReferralReward.created_at)).limit(20).all(),
+        "referrals_as_referred": db.query(ReferralReward).options(selectinload(ReferralReward.referrer)).filter(ReferralReward.referred_user_id == user_id).order_by(desc(ReferralReward.created_at)).limit(5).all(),
+        "tickets": db.query(SupportTicket).filter(SupportTicket.user_id == user_id).order_by(desc(SupportTicket.created_at)).limit(12).all(),
+        "audits": db.query(AuditLog).filter(AuditLog.user_id == user_id).order_by(desc(AuditLog.created_at)).limit(30).all(),
+    }
+
+
+def support_user_search(db: Session, search: str, limit: int = 10) -> list[User]:
+    search = (search or "").strip()
+    if not search:
+        return []
+    like = f"%{search}%"
+    digits = only_digits(search)
+    return db.query(User).filter(or_(
+        User.full_name.ilike(like), User.public_name.ilike(like), User.nickname.ilike(like), User.email.ilike(like),
+        User.cpf.ilike(f"%{digits}%") if digits else User.cpf.ilike(like),
+        User.phone.ilike(f"%{digits}%") if digits else User.phone.ilike(like),
+        User.referral_code.ilike(like),
+    )).order_by(desc(User.created_at)).limit(limit).all()
+
+
+def support_context_for_user(db: Session, user: User, ticket_id: Optional[int] = None, error: str = "", success: str = "") -> dict:
+    tickets = db.query(SupportTicket).filter(SupportTicket.user_id == user.id).order_by(desc(SupportTicket.created_at)).limit(30).all()
+    orders = db.query(WinnerOrder).options(selectinload(WinnerOrder.auction)).filter(WinnerOrder.user_id == user.id).order_by(desc(WinnerOrder.created_at)).limit(20).all()
+    active_ticket = None
+    messages: list[SupportTicketMessage] = []
+    if ticket_id:
+        active_ticket = db.query(SupportTicket).filter(SupportTicket.id == ticket_id, SupportTicket.user_id == user.id).first()
+    if not active_ticket and tickets:
+        active_ticket = tickets[0]
+    if active_ticket:
+        active_ticket.customer_last_seen_at = datetime.utcnow()
+        messages = db.query(SupportTicketMessage).filter(SupportTicketMessage.ticket_id == active_ticket.id).order_by(SupportTicketMessage.created_at.asc()).limit(200).all()
+    return {"section": "support", "support_tickets": tickets, "support_orders": orders, "support_ticket": active_ticket, "support_messages": messages, "support_categories": SUPPORT_CATEGORIES, "support_priorities": SUPPORT_PRIORITIES, "support_statuses": SUPPORT_STATUSES, "support_error": error, "support_success": success}
+
+
+def admin_support_context(db: Session, request: Request, search: str, is_super_admin: bool) -> dict:
+    status_filter = (request.query_params.get("status") or "open").strip()
+    category_filter = (request.query_params.get("category") or "").strip()
+    ticket_id_raw = (request.query_params.get("ticket") or "").strip()
+    ticket_id = int(ticket_id_raw) if ticket_id_raw.isdigit() else None
+    query = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order))
+    if status_filter and status_filter != "todos":
+        if status_filter == "ativos":
+            query = query.filter(SupportTicket.status.in_(["open", "in_review", "awaiting_customer", "dispute"]))
+        else:
+            query = query.filter(SupportTicket.status == status_filter)
+    if category_filter:
+        query = query.filter(SupportTicket.category == category_filter)
+    if search:
+        like = f"%{search}%"
+        query = query.outerjoin(User, User.id == SupportTicket.user_id).filter(or_(SupportTicket.subject.ilike(like), SupportTicket.message.ilike(like), SupportTicket.admin_note.ilike(like), User.full_name.ilike(like), User.public_name.ilike(like), User.email.ilike(like), User.cpf.ilike(like), User.phone.ilike(like)))
+    tickets = query.order_by(desc(SupportTicket.updated_at), desc(SupportTicket.created_at)).limit(80).all()
+    detail = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).filter(SupportTicket.id == ticket_id).first() if ticket_id else None
+    if not detail and tickets:
+        detail = tickets[0]
+    messages: list[SupportTicketMessage] = []
+    dossier = {}
+    if detail:
+        messages = db.query(SupportTicketMessage).options(selectinload(SupportTicketMessage.user), selectinload(SupportTicketMessage.admin)).filter(SupportTicketMessage.ticket_id == detail.id).order_by(SupportTicketMessage.created_at.asc()).limit(250).all()
+        if detail.user:
+            dossier = support_recent_activity_for_user(db, detail.user)
+    counters_row = db.execute(text("""
+        SELECT
+          (SELECT COUNT(*) FROM support_tickets WHERE status IN ('open','in_review','awaiting_customer','dispute')) AS active_count,
+          (SELECT COUNT(*) FROM support_tickets WHERE status = 'open') AS open_count,
+          (SELECT COUNT(*) FROM support_tickets WHERE status = 'awaiting_customer') AS awaiting_count,
+          (SELECT COUNT(*) FROM support_tickets WHERE status = 'dispute') AS dispute_count,
+          (SELECT COUNT(*) FROM support_tickets WHERE sla_due_at IS NOT NULL AND sla_due_at < CURRENT_TIMESTAMP AND status IN ('open','in_review','awaiting_customer','dispute')) AS late_count
+    """)).mappings().first()
+    return {"support_tickets": tickets, "support_ticket_detail": detail, "support_messages": messages, "support_dossier": dossier, "support_categories": SUPPORT_CATEGORIES, "support_priorities": SUPPORT_PRIORITIES, "support_statuses": SUPPORT_STATUSES, "support_status_filter": status_filter, "support_category_filter": category_filter, "support_user_results": support_user_search(db, search, limit=8), "support_counters": dict(counters_row or {}), "support_admin_adjust_limit": SUPPORT_ADMIN_ADJUST_LIMIT}
+
+
 def blank_admin_context() -> dict:
     return {
         "stats": {
@@ -6598,6 +6883,17 @@ def blank_admin_context() -> dict:
         "consultation_orders": [],
         "withdrawal_requests": [],
         "support_tickets": [],
+        "support_ticket_detail": None,
+        "support_messages": [],
+        "support_dossier": {},
+        "support_categories": SUPPORT_CATEGORIES,
+        "support_priorities": SUPPORT_PRIORITIES,
+        "support_statuses": SUPPORT_STATUSES,
+        "support_status_filter": "open",
+        "support_category_filter": "",
+        "support_user_results": [],
+        "support_counters": {},
+        "support_admin_adjust_limit": SUPPORT_ADMIN_ADJUST_LIMIT,
         "user_audit": {},
         "audit_logs": [],
         "audit_folders": [],
@@ -7016,7 +7312,7 @@ def admin_dashboard(request: Request):
         elif active_panel == "admin-withdrawals" and is_super_admin:
             ctx["withdrawal_requests"] = db.query(WithdrawalRequest).options(selectinload(WithdrawalRequest.user)).order_by(desc(WithdrawalRequest.created_at)).limit(25).all()
         elif active_panel == "admin-tickets":
-            ctx["support_tickets"] = db.query(SupportTicket).options(selectinload(SupportTicket.user), selectinload(SupportTicket.order)).order_by(desc(SupportTicket.created_at)).limit(25).all()
+            ctx.update(admin_support_context(db, request, search=search, is_super_admin=is_super_admin))
         elif active_panel == "admin-suggestions":
             ctx["suggestion_vote_stats"] = cached_suggestion_vote_stats(db)
         elif active_panel == "admin-audit" and is_super_admin:
@@ -7707,30 +8003,151 @@ def admin_refund_order(request: Request, order_id: int, amount: float = Form(...
 
 
 @app.post("/admin/ticket/{ticket_id}/set-status")
-def admin_set_ticket_status(request: Request, ticket_id: int, status: str = Form(...), admin_note: str = Form(""), result: str = Form("")):
+def admin_set_ticket_status(request: Request, ticket_id: int, status: str = Form(...), admin_note: str = Form(""), result: str = Form(""), priority: str = Form(""), category: str = Form("")):
     db = SessionLocal()
     try:
         admin_user = require_admin(request, db)
         ticket = db.get(SupportTicket, ticket_id)
         if not ticket:
             raise HTTPException(status_code=404, detail="Chamado não encontrado.")
-        if status not in {"open", "in_review", "awaiting_customer", "dispute", "resolved", "closed"}:
+        if status not in SUPPORT_STATUSES:
             raise HTTPException(status_code=400, detail="Status inválido.")
-        if result and result not in {"client", "site", "agreement"}:
+        if result and result not in {"client", "site", "agreement", "manual_adjustment"}:
             raise HTTPException(status_code=400, detail="Resultado inválido.")
         previous_status = ticket.status
+        if priority in SUPPORT_PRIORITIES:
+            ticket.priority = priority
+        if category in SUPPORT_CATEGORIES:
+            ticket.category = category
         ticket.status = status
-        result_label = {"client": "Favorável ao cliente", "site": "Favorável ao site", "agreement": "Acordo"}.get(result, "")
-        ticket.admin_note = (admin_note.strip() + (("\nResultado: " + result_label) if result_label else "")).strip()
+        ticket.result = result or ticket.result or ""
+        note = (admin_note or "").strip()
+        if note:
+            ticket.admin_note = note
         ticket.updated_at = datetime.utcnow()
+        ticket.closed_at = datetime.utcnow() if status in {"resolved", "closed"} else None
         if ticket.order_id:
             order = db.get(WinnerOrder, ticket.order_id)
             if order and status in {"dispute", "resolved", "closed"}:
                 order.status = "resolved" if status in {"resolved", "closed"} else "dispute"
+        support_add_message(db, ticket, f"Status alterado: {support_status_label(previous_status)} → {support_status_label(status)}. {note}", admin_id=admin_user.id, message_type="internal")
         audit_event(db, request, "ticket.status_changed", admin_user, "ticket", ticket.id, f"{previous_status} -> {status}. {ticket.admin_note}")
         nav_cache_clear()
         db.commit()
-        return RedirectResponse("/admin?tab=admin-tickets", status_code=303)
+        return RedirectResponse(f"/admin?tab=admin-tickets&ticket={ticket.id}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/admin/ticket/{ticket_id}/reply")
+def admin_reply_ticket(request: Request, ticket_id: int, message: str = Form(""), next_status: str = Form("awaiting_customer")):
+    db = SessionLocal()
+    try:
+        admin_user = require_admin(request, db)
+        ticket = db.get(SupportTicket, ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Chamado não encontrado.")
+        body = (message or "").strip()
+        if len(body) < 2:
+            raise HTTPException(status_code=400, detail="Digite uma resposta para o usuário.")
+        if next_status not in SUPPORT_STATUSES:
+            next_status = "awaiting_customer"
+        ticket.assigned_admin_id = ticket.assigned_admin_id or admin_user.id
+        ticket.status = next_status
+        if next_status in {"resolved", "closed"}:
+            ticket.closed_at = datetime.utcnow()
+        support_add_message(db, ticket, body, admin_id=admin_user.id, message_type="admin")
+        audit_event(db, request, "ticket.admin_replied", admin_user, "ticket", ticket.id, body[:300])
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/admin?tab=admin-tickets&ticket={ticket.id}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/admin/ticket/{ticket_id}/internal-note")
+def admin_ticket_internal_note(request: Request, ticket_id: int, note: str = Form("")):
+    db = SessionLocal()
+    try:
+        admin_user = require_admin(request, db)
+        ticket = db.get(SupportTicket, ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Chamado não encontrado.")
+        body = (note or "").strip()
+        if len(body) < 2:
+            raise HTTPException(status_code=400, detail="Digite uma nota interna.")
+        ticket.assigned_admin_id = ticket.assigned_admin_id or admin_user.id
+        ticket.admin_note = ((ticket.admin_note or "") + "\n" + body).strip()[-4000:]
+        support_add_message(db, ticket, body, admin_id=admin_user.id, message_type="internal")
+        audit_event(db, request, "ticket.internal_note", admin_user, "ticket", ticket.id, body[:300])
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/admin?tab=admin-tickets&ticket={ticket.id}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/admin/ticket/{ticket_id}/request-master-review")
+def admin_ticket_master_review(request: Request, ticket_id: int, reason: str = Form("")):
+    db = SessionLocal()
+    try:
+        admin_user = require_admin(request, db)
+        ticket = db.get(SupportTicket, ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Chamado não encontrado.")
+        body = (reason or "").strip() or "Solicitação de revisão pelo admin master."
+        ticket.priority = "urgente"
+        ticket.status = "dispute"
+        support_add_message(db, ticket, "REVISÃO MASTER SOLICITADA: " + body, admin_id=admin_user.id, message_type="internal")
+        audit_event(db, request, "ticket.master_review_requested", admin_user, "ticket", ticket.id, body[:500])
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/admin?tab=admin-tickets&ticket={ticket.id}", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/admin/ticket/{ticket_id}/adjust-lc")
+def admin_ticket_adjust_lc(request: Request, ticket_id: int, operation: str = Form("credit"), amount: float = Form(...), reason: str = Form("")):
+    db = SessionLocal()
+    try:
+        admin_user = require_admin(request, db)
+        ticket = db.get(SupportTicket, ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Chamado não encontrado.")
+        target_user = db.get(User, ticket.user_id)
+        if not target_user:
+            raise HTTPException(status_code=404, detail="Usuário do chamado não encontrado.")
+        amount = BR(amount)
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
+        if operation not in {"credit", "debit"}:
+            raise HTTPException(status_code=400, detail="Operação inválida.")
+        signed_amount = amount if operation == "credit" else -amount
+        if not support_ticket_can_adjust(admin_user, signed_amount):
+            support_add_message(db, ticket, f"Ajuste de {fmt_money(amount)} LC solicitado ao admin master. Motivo: {reason.strip()}", admin_id=admin_user.id, message_type="internal")
+            ticket.priority = "urgente"
+            ticket.status = "dispute"
+            audit_event(db, request, "ticket.adjustment_requires_master", admin_user, "ticket", ticket.id, f"Valor: {fmt_money(amount)} LC | Motivo: {reason}")
+            db.commit()
+            return RedirectResponse(f"/admin?tab=admin-tickets&ticket={ticket.id}", status_code=303)
+        reason = (reason or "").strip()
+        if len(reason) < 8:
+            raise HTTPException(status_code=400, detail="Informe um motivo claro para o ajuste manual.")
+        previous_balance = BR(target_user.wallet_balance or 0.0)
+        new_balance = BR(previous_balance + signed_amount)
+        if new_balance < 0:
+            raise HTTPException(status_code=400, detail="O ajuste deixaria a conta negativa.")
+        target_user.wallet_balance = new_balance
+        kind = "support_manual_credit" if signed_amount > 0 else "support_manual_debit"
+        db.add(WalletTransaction(user_id=target_user.id, amount=signed_amount, kind=kind, note=f"Chamado {support_ticket_code(ticket.id)}: {reason[:160]}"))
+        ticket.assigned_admin_id = ticket.assigned_admin_id or admin_user.id
+        ticket.result = "manual_adjustment"
+        support_add_message(db, ticket, f"Ajuste manual aplicado: {'+' if signed_amount > 0 else ''}{fmt_money(signed_amount)} LC. Saldo antes: {fmt_money(previous_balance)} LC. Saldo depois: {fmt_money(new_balance)} LC. Motivo: {reason}", admin_id=admin_user.id, message_type="internal")
+        audit_event(db, request, "support.wallet_adjustment", admin_user, "user", target_user.id, f"Ticket {ticket.id} | {signed_amount} LC | {previous_balance} -> {new_balance} | {reason}")
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse(f"/admin?tab=admin-tickets&ticket={ticket.id}", status_code=303)
     finally:
         db.close()
 
