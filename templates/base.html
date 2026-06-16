@@ -237,13 +237,20 @@
 </script>
 {% endif %}
 
-<footer class="site-footer-legal">
-  <div class="container">
+<footer class="site-footer-legal" aria-label="Links legais e suporte">
+  <div class="container site-footer-legal-links">
     <a href="/contrato-de-servico">Contrato de Serviço</a>
     <a href="/politica-de-privacidade">Privacidade</a>
-    <a href="/regras-de-participacao">Regras de Participação</a>    
+    <a href="/regras-de-participacao">Regras de Participação</a>
+    <a href="{% if user %}/minha-conta/suporte{% else %}/?login=1{% endif %}">Suporte</a>
   </div>
 </footer>
-<style>.site-footer-legal{border-top:1px solid rgba(255,255,255,.08);background:rgba(2,6,23,.88);padding:18px 0;color:#b7c6e6}.site-footer-legal .container{display:flex;gap:16px;flex-wrap:wrap;align-items:center}.site-footer-legal a{color:#bfdbfe;text-decoration:none;font-weight:800}</style>
+<style>
+.site-footer-legal{border-top:1px solid rgba(255,255,255,.08);background:rgba(2,6,23,.88);padding:18px 0;color:#b7c6e6}
+.site-footer-legal-links{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
+.site-footer-legal a{color:#bfdbfe;text-decoration:none;font-weight:900;letter-spacing:.01em;transition:opacity .18s ease,transform .18s ease}
+.site-footer-legal a:hover{opacity:.86;transform:translateY(-1px)}
+@media (max-width:640px){.site-footer-legal-links{justify-content:center;text-align:center;gap:14px 18px}.site-footer-legal a{font-size:14px}}
+</style>
 </body>
 </html>
