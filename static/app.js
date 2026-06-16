@@ -377,6 +377,18 @@
       const status = (item.status === "pending_payment" ? "ended" : String(item.status || "").toLowerCase()) || "scheduled";
       const grids = homeGrids();
 
+      // Se a Home promoveu localmente um leilão que acabou de chegar a zero,
+      // não deixa uma resposta levemente atrasada do servidor voltar o card para
+      // "Próximo" por alguns segundos. Assim o usuário não vê o efeito
+      // "Iniciando... / Próximo / Ao vivo".
+      if (card.dataset.homeLocalStarted === "true" && (status === "scheduled" || status === "relisted")) {
+        const remainingToStart = Number(item.start_remaining || 0);
+        if (remainingToStart <= 3) {
+          requestHomeStateSoon("local-start-confirm", true);
+          return;
+        }
+      }
+
       card.dataset.auctionStatus = status;
       card.classList.toggle("ended", status === "ended");
       setBadge(card, status);
@@ -419,9 +431,13 @@
       if (label) setTextIfChanged(label, "Status");
       if (strong) {
         strong.dataset.homeSyncing = "false";
-        strong.dataset.homeInactive = "false";
+        // Para não virar "Encerrando..." no tick seguinte enquanto o servidor
+        // ainda confirma o início, o relógio fica pausado visualmente em Ao vivo.
+        // Quando /api/home/state retornar status live, updateTimer reativa o timer.
+        strong.dataset.homeInactive = "true";
         delete strong.dataset.startAt;
         delete strong.dataset.endAt;
+        delete strong.dataset.seconds;
         setTextIfChanged(strong, "Ao vivo");
       }
 
@@ -456,10 +472,13 @@
 
     function requestHomeStateSoon(reason, critical) {
       const now = Date.now();
-      if (critical) homeFastSyncUntil = Math.max(homeFastSyncUntil, now + 7000);
-      const minGap = critical ? 350 : 1500;
-      if (now - homeLastStateAt < minGap) return;
-      window.setTimeout(() => refreshHomeState(reason || "timer", Boolean(critical)), critical ? 40 : 120);
+      if (critical) homeFastSyncUntil = Math.max(homeFastSyncUntil, now + 6000);
+      const minGap = critical ? 450 : 3500;
+      if (now - homeLastStateAt < minGap) {
+        if (critical) homeStateQueued = true;
+        return;
+      }
+      window.setTimeout(() => refreshHomeState(reason || "timer", Boolean(critical)), critical ? 120 : 350);
     }
 
     function tickCountdowns() {
@@ -468,8 +487,12 @@
         if (seconds === null) return;
         const card = el.closest("[data-auction-card]");
 
+        const status = String(card?.dataset.auctionStatus || "").toLowerCase();
+        if ((status === "scheduled" || status === "relisted") && seconds <= 2) {
+          requestHomeStateSoon("pre-start", true);
+        }
+
         if (seconds <= 0) {
-          const status = String(card?.dataset.auctionStatus || "").toLowerCase();
           if (status === "scheduled" || status === "relisted") {
             // Não deixa o usuário preso em "Iniciando...". A Home promove o card
             // visualmente para Ao vivo no mesmo segundo e o /api/home/state confirma
@@ -521,15 +544,15 @@
         homeStateInFlight = false;
         if (homeStateQueued) {
           homeStateQueued = false;
-          window.setTimeout(() => refreshHomeState("queued-critical", true), 80);
+          window.setTimeout(() => refreshHomeState("queued-critical", true), 250);
         }
       }
     }
 
     tickCountdowns();
     setInterval(tickCountdowns, 1000);
-    window.setTimeout(() => refreshHomeState("initial", true), 700);
-    setInterval(() => refreshHomeState("poll", false), 12000);
+    window.setTimeout(() => refreshHomeState("initial", true), 180);
+    setInterval(() => refreshHomeState("poll", false), 15000);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) window.setTimeout(() => refreshHomeState("visible", true), 250);
     });

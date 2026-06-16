@@ -601,6 +601,25 @@ RATE_LIMIT_BID_PER_MINUTE = int(os.getenv("RATE_LIMIT_BID_PER_MINUTE", "40"))
 RATE_LIMIT_PAYMENT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PAYMENT_PER_MINUTE", "12"))
 SLOW_REQUEST_WARN_MS = float(os.getenv("SLOW_REQUEST_WARN_MS", "1500"))
 
+# Cache ultracurto para endpoints de estado.
+# Os logs de produção mostraram /api/home/state (~1.7s) e /api/auction/{id}/state
+# (~1.3s) competindo com POST /bid. Em leilão ao vivo o WebSocket é a fonte
+# principal; o /state deve ser apenas guarda/sincronização, não uma consulta pesada
+# para cada navegador a cada poucos segundos.
+STATE_API_CACHE_ENABLED = os.getenv("STATE_API_CACHE_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+HOME_STATE_CACHE_TTL_MS = int(os.getenv("HOME_STATE_CACHE_TTL_MS", "900"))
+HOME_STATE_CRITICAL_TTL_MS = int(os.getenv("HOME_STATE_CRITICAL_TTL_MS", "350"))
+AUCTION_STATE_CACHE_TTL_MS = int(os.getenv("AUCTION_STATE_CACHE_TTL_MS", "650"))
+AUCTION_STATE_CRITICAL_TTL_MS = int(os.getenv("AUCTION_STATE_CRITICAL_TTL_MS", "250"))
+BID_SLOW_WARN_MS = float(os.getenv("BID_SLOW_WARN_MS", "900"))
+
+HOME_STATE_API_CACHE: dict[str, tuple[float, dict]] = {}
+AUCTION_STATE_API_CACHE: dict[str, tuple[float, dict]] = {}
+HOME_STATE_API_LOCK = threading.Lock()
+AUCTION_STATE_API_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
+HOME_STATE_SYNC_LAST_MONO = 0.0
+AUCTION_STATE_CACHE_MAX = int(os.getenv("AUCTION_STATE_CACHE_MAX", "1000"))
+
 RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
 
 
@@ -4693,66 +4712,164 @@ def home(request: Request):
         db.close()
 
 
+
+
+def _api_cache_get(cache: dict[str, tuple[float, dict]], key: str, ttl_ms: int) -> Optional[dict]:
+    if not STATE_API_CACHE_ENABLED:
+        return None
+    row = cache.get(key)
+    if not row:
+        return None
+    created, payload = row
+    if (time.monotonic() - created) * 1000 <= max(1, ttl_ms):
+        # Copia rasa para permitir ajustar server_time sem alterar o cache original.
+        return dict(payload)
+    return None
+
+
+def _api_cache_set(cache: dict[str, tuple[float, dict]], key: str, payload: dict, max_items: int = 0) -> dict:
+    if not STATE_API_CACHE_ENABLED:
+        return payload
+    if max_items and len(cache) > max_items:
+        # Limpeza simples e barata: remove os mais antigos quando houver muitos usuários/leilões.
+        for old_key, _ in sorted(cache.items(), key=lambda item: item[1][0])[: max(1, len(cache) // 4)]:
+            cache.pop(old_key, None)
+    cache[key] = (time.monotonic(), dict(payload))
+    return payload
+
+
+def _clear_home_state_cache() -> None:
+    HOME_STATE_API_CACHE.clear()
+
+
+def _clear_auction_state_cache(auction_id: int | str) -> None:
+    prefix = f"auction:{auction_id}:"
+    for key in list(AUCTION_STATE_API_CACHE.keys()):
+        if key.startswith(prefix):
+            AUCTION_STATE_API_CACHE.pop(key, None)
+
+
+def _is_home_state_critical(reason: str) -> bool:
+    return (reason or "").strip().lower() in {
+        "zero", "pre-start", "fast-sync", "queued-critical", "local-start-confirm", "local-start-confirm-ended"
+    }
+
+
+def _is_auction_state_critical(reason: str) -> bool:
+    return (reason or "").strip().lower() in {
+        "confirm-local-finish", "slow-bid-confirm", "bid-error", "turbo-eligibility",
+        "ws-open-sync-fallback", "initial-sync-fallback", "confirm-local-start", "confirm-local-start-ended"
+    }
+
+
+def _home_sync_allowed(critical: bool) -> bool:
+    global HOME_STATE_SYNC_LAST_MONO
+    now = time.monotonic()
+    min_gap = 0.35 if critical else 1.25
+    if now - HOME_STATE_SYNC_LAST_MONO < min_gap:
+        return False
+    HOME_STATE_SYNC_LAST_MONO = now
+    return True
+
+
+def _request_user_id(request: Request) -> Optional[int]:
+    return _session_user_id(request.cookies.get("session_token"))
+
 @app.get("/api/home/state")
 def home_state(request: Request):
-    """Estado leve da Home, mas suficiente para atualizar cards sem reload.
+    """Estado leve da Home com cache ultracurto e anti-herd.
 
-    A Home não deve recarregar a página inteira quando um leilão sai de
-    PRÓXIMO para AO VIVO ou de AO VIVO para ENCERRADO. Esta rota sincroniza
-    apenas os leilões vencidos/iniciados e devolve os dados mínimos dos cards
-    já visíveis, permitindo que o app.js atualize o DOM suavemente.
+    Em produção vários navegadores chamavam esta rota ao mesmo tempo quando o
+    cronômetro chegava a zero. Cada chamada fazia as mesmas consultas e concorria
+    com POST /bid. Agora apenas uma requisição monta o estado; as demais recebem
+    cache de poucos milissegundos, suficiente para aliviar o banco sem deixar a
+    vitrine atrasada.
     """
-    db = SessionLocal()
+    reason = (request.query_params.get("reason") or "poll").strip().lower()
+    critical = _is_home_state_critical(reason)
+    ttl_ms = HOME_STATE_CRITICAL_TTL_MS if critical else HOME_STATE_CACHE_TTL_MS
+    cache_key = "home:state"
+
+    cached = _api_cache_get(HOME_STATE_API_CACHE, cache_key, ttl_ms)
+    if cached is not None:
+        cached["cache"] = "hit"
+        cached.update(server_time_payload())
+        return JSONResponse(cached)
+
+    # Se outra requisição já está montando a mesma Home, devolve o último estado
+    # conhecido em vez de empilhar consultas no banco.
+    acquired = HOME_STATE_API_LOCK.acquire(blocking=False)
+    if not acquired:
+        stale = _api_cache_get(HOME_STATE_API_CACHE, cache_key, max(HOME_STATE_CACHE_TTL_MS * 4, 1200))
+        if stale is not None:
+            stale["cache"] = "stale"
+            stale.update(server_time_payload())
+            return JSONResponse(stale)
+        HOME_STATE_API_LOCK.acquire()
+        acquired = True
+
     try:
-        # Sincronização sob demanda para evitar a Home ficar vários segundos em
-        # "Conferindo/Iniciando" esperando o watcher. A consulta é limitada e
-        # só pega itens realmente vencidos/iniciados.
-        if sync_due_auction_states(db, limit=30):
-            db.commit()
-            nav_cache_clear("home:")
+        cached = _api_cache_get(HOME_STATE_API_CACHE, cache_key, ttl_ms)
+        if cached is not None:
+            cached["cache"] = "hit-after-lock"
+            cached.update(server_time_payload())
+            return JSONResponse(cached)
 
-        live_items = (
-            db.query(AuctionItem)
-            .filter(AuctionItem.status == "live")
-            .order_by(AuctionItem.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        upcoming_items = (
-            db.query(AuctionItem)
-            .filter(AuctionItem.status.in_(["scheduled", "relisted"]))
-            .order_by(AuctionItem.scheduled_start.asc())
-            .limit(8)
-            .all()
-        )
-        ended_items = (
-            db.query(AuctionItem)
-            .options(selectinload(AuctionItem.winner))
-            .filter(AuctionItem.status.in_(["pending_payment", "ended"]))
-            .order_by(desc(AuctionItem.created_at))
-            .limit(8)
-            .all()
-        )
+        db = SessionLocal()
+        try:
+            if _home_sync_allowed(critical) and sync_due_auction_states(db, limit=20):
+                db.commit()
+                nav_cache_clear("home:")
 
-        live_payloads = [public_auction_card_payload(x) for x in live_items]
-        upcoming_payloads = [public_auction_card_payload(x) for x in upcoming_items]
-        ended_payloads = [public_auction_card_payload(x) for x in ended_items]
+            live_items = (
+                db.query(AuctionItem)
+                .filter(AuctionItem.status == "live")
+                .order_by(AuctionItem.created_at.desc())
+                .limit(8)
+                .all()
+            )
+            upcoming_items = (
+                db.query(AuctionItem)
+                .filter(AuctionItem.status.in_(["scheduled", "relisted"]))
+                .order_by(AuctionItem.scheduled_start.asc())
+                .limit(8)
+                .all()
+            )
+            ended_items = (
+                db.query(AuctionItem)
+                .options(selectinload(AuctionItem.winner))
+                .filter(AuctionItem.status.in_(["pending_payment", "ended"]))
+                .order_by(desc(AuctionItem.created_at))
+                .limit(8)
+                .all()
+            )
 
-        return JSONResponse({
-            "ok": True,
-            "live_count": len(live_payloads),
-            "upcoming_count": len(upcoming_payloads),
-            "ended_count": len(ended_payloads),
-            "live_ids": [x["id"] for x in live_payloads],
-            "upcoming_ids": [x["id"] for x in upcoming_payloads],
-            "ended_ids": [x["id"] for x in ended_payloads],
-            "live_items": live_payloads,
-            "upcoming_items": upcoming_payloads,
-            "ended_items": ended_payloads,
-            **server_time_payload(),
-        })
+            live_payloads = [public_auction_card_payload(x) for x in live_items]
+            upcoming_payloads = [public_auction_card_payload(x) for x in upcoming_items]
+            ended_payloads = [public_auction_card_payload(x) for x in ended_items]
+
+            body = {
+                "ok": True,
+                "cache": "miss",
+                "live_count": len(live_payloads),
+                "upcoming_count": len(upcoming_payloads),
+                "ended_count": len(ended_payloads),
+                "live_ids": [x["id"] for x in live_payloads],
+                "upcoming_ids": [x["id"] for x in upcoming_payloads],
+                "ended_ids": [x["id"] for x in ended_payloads],
+                "live_items": live_payloads,
+                "upcoming_items": upcoming_payloads,
+                "ended_items": ended_payloads,
+                **server_time_payload(),
+            }
+            _api_cache_set(HOME_STATE_API_CACHE, cache_key, body)
+            return JSONResponse(body)
+        finally:
+            db.close()
     finally:
-        db.close()
+        if acquired:
+            HOME_STATE_API_LOCK.release()
+
 
 @app.post("/indicacao/indicar")
 def nominate_product_suggestion(request: Request, product_key: str = Form(...)):
@@ -5767,11 +5884,15 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
 @app.post("/api/auction/{auction_id}/bid")
 async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...), client_bid_id: str = Form("")):
     public_payload = None
+    perf_start = time.perf_counter()
+    lock_entered = perf_start
+    process_done = perf_start
     try:
         # Uma fila assíncrona por leilão evita ocupar várias threads com lances
         # parados esperando o mesmo lock. O processamento continua serializado,
         # mas o servidor fica mais estável em pico.
         async with AUCTION_BID_ASYNC_LOCKS[auction_id]:
+            lock_entered = time.perf_counter()
             private_payload, public_payload, button_cooldown = await asyncio.to_thread(
                 _place_bid_sync,
                 request,
@@ -5779,6 +5900,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
                 bid_value,
                 client_bid_id,
             )
+            process_done = time.perf_counter()
     except AuctionStateHTTPException as exc:
         body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
         if exc.retry_after:
@@ -5797,48 +5919,115 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             body["retry_after"] = retry_after
         return JSONResponse(body, status_code=exc.status_code)
 
-    # Nunca espera WebSocket para responder o clique. O JSON do POST já atualiza a tela.
+    # O lance confirmado invalida caches curtos de estado. O próprio JSON do POST
+    # atualiza quem clicou; o WebSocket atualiza os demais sem bloquear a resposta.
+    _clear_home_state_cache()
+    _clear_auction_state_cache(auction_id)
     if public_payload:
-        # Agora o broadcast só enfileira a atualização por conexão; não espera rede.
-        # Isso faz outro computador receber o lance praticamente junto da resposta do POST.
-        await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload})
+        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
+
+    total_ms = (time.perf_counter() - perf_start) * 1000
+    if total_ms >= BID_SLOW_WARN_MS:
+        queue_ms = max(0.0, (lock_entered - perf_start) * 1000)
+        process_ms = max(0.0, (process_done - lock_entered) * 1000)
+        print(f"[BID-PERF] auction={auction_id} total={total_ms:.1f}ms queue={queue_ms:.1f}ms process={process_ms:.1f}ms")
+
     return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
-def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Optional[dict], bool]:
-    """Monta /state fora do event loop para não travar WebSocket.
+def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Optional[dict], bool, str]:
+    """Monta /state com cache curto por leilão+usuário.
 
-    SQLAlchemy usado aqui é síncrono. Em uma rota async direta ele bloqueava o
-    mesmo loop que mantém WebSocket vivo. A rota abaixo chama esta função via
-    asyncio.to_thread().
+    O WebSocket mantém a tela em tempo real. Esta rota é guarda de correção e não
+    pode disputar banco/threadpool com POST /bid em cada polling de cada cliente.
     """
-    db = SessionLocal()
-    try:
-        user = current_user(request, db)
-        item = db.get(AuctionItem, auction_id)
-        if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
-        now = datetime.utcnow()
-        changed = start_auction_if_due(item, now)
-        finished_now = finish_auction_if_due(item, db, now, create_side_effects=False)
-        changed = finished_now or changed
-        if changed:
-            db.commit()
-            db.refresh(item)
+    reason = (request.query_params.get("reason") or "fallback").strip().lower()
+    critical = _is_auction_state_critical(reason)
+    user_id = _request_user_id(request)
+    cache_key = f"auction:{auction_id}:{user_id or 0}"
+    ttl_ms = AUCTION_STATE_CRITICAL_TTL_MS if critical else AUCTION_STATE_CACHE_TTL_MS
 
-        private_payload = public_auction_live_payload(item, db, user=user)
-        public_payload = None
-        if changed:
-            public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
-        return {"ok": True, "auction": private_payload}, public_payload, bool(finished_now)
+    cached = _api_cache_get(AUCTION_STATE_API_CACHE, cache_key, ttl_ms)
+    if cached is not None:
+        cached["cache"] = "hit"
+        cached.update(server_time_payload())
+        return cached, None, False, "hit"
+
+    lock = AUCTION_STATE_API_LOCKS[cache_key]
+    acquired = lock.acquire(blocking=False)
+    if not acquired:
+        stale = _api_cache_get(AUCTION_STATE_API_CACHE, cache_key, max(AUCTION_STATE_CACHE_TTL_MS * 3, 1200))
+        if stale is not None:
+            stale["cache"] = "stale"
+            stale.update(server_time_payload())
+            return stale, None, False, "stale"
+        lock.acquire()
+        acquired = True
+
+    try:
+        cached = _api_cache_get(AUCTION_STATE_API_CACHE, cache_key, ttl_ms)
+        if cached is not None:
+            cached["cache"] = "hit-after-lock"
+            cached.update(server_time_payload())
+            return cached, None, False, "hit-after-lock"
+
+        db = SessionLocal()
+        try:
+            user = None
+            if user_id:
+                row = (
+                    db.query(
+                        User.id, User.full_name, User.public_name, User.nickname, User.email,
+                        User.is_banned, User.account_deleted, User.identity_status, User.wallet_balance
+                    )
+                    .filter(User.id == user_id)
+                    .first()
+                )
+                if row and not bool(getattr(row, "account_deleted", False)):
+                    user = SimpleNamespace(**{
+                        "id": row.id,
+                        "full_name": row.full_name or "",
+                        "public_name": row.public_name or "",
+                        "nickname": row.nickname or "",
+                        "email": row.email or "",
+                        "is_banned": bool(row.is_banned),
+                        "account_deleted": bool(getattr(row, "account_deleted", False)),
+                        "identity_status": row.identity_status or "pending",
+                        "wallet_balance": float(row.wallet_balance or 0.0),
+                    })
+
+            item = db.get(AuctionItem, auction_id)
+            if not item:
+                raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            now = datetime.utcnow()
+            changed = start_auction_if_due(item, now)
+            finished_now = finish_auction_if_due(item, db, now, create_side_effects=False)
+            changed = finished_now or changed
+            if changed:
+                db.commit()
+                db.refresh(item)
+                _clear_home_state_cache()
+
+            private_payload = public_auction_live_payload(item, db, user=user)
+            body = {"ok": True, "cache": "miss", "auction": private_payload}
+            public_payload = None
+            if changed:
+                public_payload = public_auction_live_payload(item, db, user_turbo_eligible_override=None)
+                _clear_auction_state_cache(auction_id)
+            else:
+                _api_cache_set(AUCTION_STATE_API_CACHE, cache_key, body, AUCTION_STATE_CACHE_MAX)
+            return body, public_payload, bool(finished_now), "miss"
+        finally:
+            db.close()
     finally:
-        db.close()
+        if acquired:
+            lock.release()
 
 
 @app.get("/api/auction/{auction_id}/state")
 async def auction_state(request: Request, auction_id: int):
-    body, public_payload, finished_now = await asyncio.to_thread(_auction_state_sync, request, auction_id)
+    body, public_payload, finished_now, cache_status = await asyncio.to_thread(_auction_state_sync, request, auction_id)
     if public_payload:
-        await manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload})
+        asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
     if finished_now:
         asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
     return JSONResponse(body)
