@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
+{% set fd = form_data if form_data is defined and form_data else {} %}
+{% set focus = focus_field if focus_field is defined else "" %}
 <section class="register-pro-shell lc-register-clean">
   <div class="register-pro-card register-professional-grid">
     <aside class="register-pro-left register-info-panel">
@@ -24,7 +26,7 @@
       </div>
     </aside>
 
-    <form class="register-pro-form register-main-form" method="post" action="/register" autocomplete="on" id="register-form">
+    <form class="register-pro-form register-main-form" method="post" action="/register" autocomplete="on" id="register-form" data-focus-field="{{ focus }}">
       <div class="form-title-row">
         <div>
           <h2>Dados de acesso</h2>
@@ -36,83 +38,110 @@
 
       <div class="grid-2">
         <label>Nome completo
-          <input name="full_name" placeholder="Nome e sobrenome" autocomplete="name" required>
+          <input name="full_name" placeholder="Nome e sobrenome" autocomplete="name" value="{{ fd.full_name or '' }}" required>
         </label>
 
         <label>CPF
-          <input name="cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" data-mask="cpf" autocomplete="off" required>
+          <input name="cpf" inputmode="numeric" placeholder="000.000.000-00" maxlength="14" data-mask="cpf" autocomplete="off" value="{{ fd.cpf or '' }}" required>
         </label>
 
         <label>E-mail
-          <input type="email" name="email" placeholder="voce@email.com" autocomplete="email" required>
+          <input type="email" name="email" placeholder="voce@email.com" autocomplete="email" value="{{ fd.email or '' }}" required>
         </label>
 
         <label>Telefone com DDD
-          <input name="phone" inputmode="tel" placeholder="(00) 00000-0000" maxlength="15" data-mask="phone" autocomplete="tel" required>
+          <input name="phone" inputmode="tel" placeholder="(00) 00000-0000" maxlength="15" data-mask="phone" autocomplete="tel" value="{{ fd.phone or '' }}" required>
         </label>
 
         <label>Apelido público
-          <input name="public_name" placeholder="ex: usuario" minlength="3" maxlength="24" autocomplete="nickname" required>
+          <input name="public_name" placeholder="ex: usuario" minlength="3" maxlength="24" autocomplete="nickname" value="{{ fd.public_name or '' }}" required>
           <small>Será exibido como @apelido nos lances e resultados públicos.</small>
         </label>
 
         <label>Gênero
           <select name="gender" required>
             <option value="">Selecione</option>
-            <option value="feminino">Feminino</option>
-            <option value="masculino">Masculino</option>
-            <option value="outro">Outro</option>
-            <option value="nao_informar">Prefiro não informar</option>
+            <option value="feminino" {% if fd.gender == 'feminino' %}selected{% endif %}>Feminino</option>
+            <option value="masculino" {% if fd.gender == 'masculino' %}selected{% endif %}>Masculino</option>
+            <option value="outro" {% if fd.gender == 'outro' %}selected{% endif %}>Outro</option>
+            <option value="nao_informar" {% if fd.gender == 'nao_informar' %}selected{% endif %}>Prefiro não informar</option>
           </select>
         </label>
 
         <label>Data de nascimento
-          <input type="date" name="birth_date" autocomplete="bday" required>
+          <input type="date" name="birth_date" autocomplete="bday" value="{{ fd.birth_date or '' }}" required>
         </label>
       </div>
 
       <h2>Senha</h2>
+      <div class="password-guidance" id="register-password-help">
+        A senha precisa ter pelo menos <strong>8 caracteres</strong>.
+      </div>
       <div class="grid-2">
         <label>Senha
-          <input type="password" name="password" minlength="8" placeholder="Mínimo 8 caracteres" autocomplete="new-password" required>
+          <input
+            type="password"
+            name="password"
+            id="register-password"
+            minlength="8"
+            placeholder="Mínimo 8 caracteres"
+            autocomplete="new-password"
+            aria-describedby="register-password-help register-password-error"
+            data-password-field
+            required
+          >
+          <small class="password-live-hint" data-password-live-hint>Digite no mínimo 8 caracteres.</small>
         </label>
         <label>Confirmar senha
-          <input type="password" name="password_confirm" minlength="8" placeholder="Digite a senha novamente" autocomplete="new-password" required>
+          <input
+            type="password"
+            name="password_confirm"
+            id="register-password-confirm"
+            minlength="8"
+            placeholder="Digite a senha novamente"
+            autocomplete="new-password"
+            aria-describedby="register-password-error"
+            data-password-confirm-field
+            required
+          >
         </label>
+      </div>
+      <div class="field-error password-field-error {% if password_error is defined and password_error %}show{% endif %}" id="register-password-error" aria-live="polite">
+        {{ password_error if password_error is defined and password_error else '' }}
       </div>
 
       <h2>Endereço</h2>
       <div class="grid-2">
         <label>CEP
-          <input name="cep" inputmode="numeric" placeholder="00000-000" maxlength="9" data-mask="cep" autocomplete="postal-code">
+          <input name="cep" inputmode="numeric" placeholder="00000-000" maxlength="9" data-mask="cep" autocomplete="postal-code" value="{{ fd.cep or '' }}">
         </label>
         <label>Rua
-          <input name="street" placeholder="Nome da rua" autocomplete="address-line1">
+          <input name="street" placeholder="Nome da rua" autocomplete="address-line1" value="{{ fd.street or '' }}">
         </label>
         <label>Número
-          <input name="number" placeholder="Nº" autocomplete="address-line2">
+          <input name="number" placeholder="Nº" autocomplete="address-line2" value="{{ fd.number or '' }}">
         </label>
         <label>Complemento
-          <input name="complement" placeholder="Apartamento, bloco, referência">
+          <input name="complement" placeholder="Apartamento, bloco, referência" value="{{ fd.complement or '' }}">
         </label>
         <label>Bairro
-          <input name="district" placeholder="Bairro">
+          <input name="district" placeholder="Bairro" value="{{ fd.district or '' }}">
         </label>
         <label>Estado
-          <select name="state" id="state-select" autocomplete="address-level1">
+          <select name="state" id="state-select" autocomplete="address-level1" data-current-state="{{ fd.state or '' }}">
             <option value="">Selecione o estado</option>
           </select>
         </label>
         <label>Cidade
-          <input name="city" id="city-input" list="city-list" placeholder="Digite para pesquisar" autocomplete="address-level2">
+          <input name="city" id="city-input" list="city-list" placeholder="Digite para pesquisar" autocomplete="address-level2" value="{{ fd.city or '' }}">
           <datalist id="city-list"></datalist>
         </label>
       </div>
 
       <div class="legal-accept-box">
-        <label class="check-line"><input type="checkbox" name="accept_terms" required> Li e aceito os <a href="/termos-de-uso" target="_blank" rel="noopener">Termos de Uso</a> e as <a href="/regras-do-leilao" target="_blank" rel="noopener">Regras do Leilão</a>.</label>
-        <label class="check-line"><input type="checkbox" name="accept_privacy" required> Li e aceito a <a href="/politica-de-privacidade" target="_blank" rel="noopener">Política de Privacidade</a>.</label>
-        <label class="check-line"><input type="checkbox" name="accept_truth" required> Declaro que os dados informados são verdadeiros e pertencem a mim.</label>
+        <label class="check-line"><input type="checkbox" name="accept_terms" {% if fd.accept_terms %}checked{% endif %} required> Li e aceito os <a href="/termos-de-uso" target="_blank" rel="noopener">Termos de Uso</a> e as <a href="/regras-do-leilao" target="_blank" rel="noopener">Regras do Leilão</a>.</label>
+        <label class="check-line"><input type="checkbox" name="accept_privacy" {% if fd.accept_privacy %}checked{% endif %} required> Li e aceito a <a href="/politica-de-privacidade" target="_blank" rel="noopener">Política de Privacidade</a>.</label>
+        <label class="check-line"><input type="checkbox" name="accept_truth" {% if fd.accept_truth %}checked{% endif %} required> Declaro que os dados informados são verdadeiros e pertencem a mim.</label>
       </div>
 
       <button class="btn full" type="submit" id="register-submit" disabled>Avançar para confirmação de e-mail</button>
@@ -121,7 +150,7 @@
 </section>
 
 <style>
-.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
+.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.password-guidance{margin:8px 0 12px;padding:11px 13px;border:1px solid rgba(96,165,250,.20);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;font-weight:800}.password-guidance strong{color:#bfdbfe}.password-live-hint{display:block;margin-top:7px}.field-error{display:none;margin:8px 0 12px;padding:10px 12px;border:1px solid rgba(248,113,113,.35);border-radius:13px;background:rgba(239,68,68,.12);color:#fecaca;font-weight:850}.field-error.show{display:block}.input-error{border-color:rgba(248,113,113,.70)!important;box-shadow:0 0 0 3px rgba(239,68,68,.13)}.input-ok{border-color:rgba(74,222,128,.62)!important}.password-live-hint.ok{color:#bbf7d0}.password-live-hint.bad{color:#fecaca}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
 </style>
 
 <script>
@@ -134,8 +163,62 @@
   const stateSelect = document.getElementById("state-select");
   const cityInput = document.getElementById("city-input");
   const cityList = document.getElementById("city-list");
+  const passwordInput = document.getElementById("register-password");
+  const passwordConfirmInput = document.getElementById("register-password-confirm");
+  const passwordError = document.getElementById("register-password-error");
+  const passwordHint = document.querySelector("[data-password-live-hint]");
 
   function digits(v){ return String(v || "").replace(/\D/g, ""); }
+
+  function setPasswordMessage(message, show){
+    if(passwordError){
+      passwordError.textContent = show ? message : "";
+      passwordError.classList.toggle("show", Boolean(show && message));
+    }
+  }
+
+  function validatePassword(showMessage){
+    if(!passwordInput || !passwordConfirmInput) return true;
+
+    const passwordValue = passwordInput.value || "";
+    const confirmValue = passwordConfirmInput.value || "";
+    let message = "";
+
+    passwordInput.classList.remove("input-error", "input-ok");
+    passwordConfirmInput.classList.remove("input-error", "input-ok");
+    passwordInput.setCustomValidity("");
+    passwordConfirmInput.setCustomValidity("");
+
+    if(passwordValue && passwordValue.length < 8){
+      message = "A senha precisa ter pelo menos 8 caracteres.";
+      passwordInput.setCustomValidity(message);
+      passwordInput.classList.add("input-error");
+    }else if(passwordValue.length >= 8){
+      passwordInput.classList.add("input-ok");
+    }
+
+    if(!message && confirmValue && passwordValue !== confirmValue){
+      message = "A confirmação de senha não confere.";
+      passwordConfirmInput.setCustomValidity(message);
+      passwordConfirmInput.classList.add("input-error");
+    }else if(confirmValue && passwordValue === confirmValue && passwordValue.length >= 8){
+      passwordConfirmInput.classList.add("input-ok");
+    }
+
+    if(passwordHint){
+      passwordHint.classList.toggle("ok", passwordValue.length >= 8);
+      passwordHint.classList.toggle("bad", Boolean(passwordValue && passwordValue.length < 8));
+      passwordHint.textContent = passwordValue.length >= 8 ? "Senha atende ao mínimo de 8 caracteres." : "Digite no mínimo 8 caracteres.";
+    }
+
+    setPasswordMessage(message, Boolean(showMessage && message));
+    return !message;
+  }
+
+  passwordInput?.addEventListener("input", () => validatePassword(Boolean(passwordInput.value)));
+  passwordInput?.addEventListener("blur", () => validatePassword(true));
+  passwordConfirmInput?.addEventListener("input", () => validatePassword(Boolean(passwordConfirmInput.value)));
+  passwordConfirmInput?.addEventListener("blur", () => validatePassword(true));
 
   cpf?.addEventListener("input", function(){
     let v = digits(this.value).slice(0,11);
@@ -163,14 +246,15 @@
     const opt = document.createElement("option");
     opt.value = uf;
     opt.textContent = `${uf} — ${name}`;
+    if(stateSelect?.dataset.currentState === uf){ opt.selected = true; }
     stateSelect?.appendChild(opt);
   });
+  if(stateSelect?.value){ loadCities(stateSelect.value); }
 
   async function loadCities(uf){
     if(!cityList) return;
     cityList.innerHTML = "";
-    cityInput.value = "";
-    if(!uf) return;
+    if(!uf){ cityInput.value = ""; return; }
     try{
       const res = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`);
       const cities = await res.json();
@@ -183,7 +267,32 @@
       console.warn("Não foi possível carregar cidades automaticamente", e);
     }
   }
-  stateSelect?.addEventListener("change", () => loadCities(stateSelect.value));
+  stateSelect?.addEventListener("change", () => {
+    if(cityInput) cityInput.value = "";
+    loadCities(stateSelect.value);
+  });
+
+  form?.addEventListener("submit", function(event){
+    if(!validatePassword(true)){
+      event.preventDefault();
+      const target = passwordInput?.validity.valid ? passwordConfirmInput : passwordInput;
+      target?.focus({ preventScroll: true });
+      document.querySelector("h2 + .password-guidance")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => target?.reportValidity(), 120);
+    }
+  });
+
+  function focusReturnedField(){
+    const fieldName = form?.dataset.focusField || "";
+    if(!fieldName) return;
+    const target = form.querySelector(`[name="${fieldName}"]`) || (fieldName === "accept_terms" ? form.querySelector('.legal-accept-box input[type="checkbox"]') : null);
+    if(target){
+      setTimeout(() => {
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 120);
+    }
+  }
 
   function updateSubmit(){
     if(!form || !submit) return;
@@ -192,7 +301,11 @@
   }
   form?.addEventListener("input", updateSubmit);
   form?.addEventListener("change", updateSubmit);
+  if(!passwordError?.classList.contains("show")){
+    validatePassword(false);
+  }
   updateSubmit();
+  focusReturnedField();
 })();
 </script>
 {% endblock %}

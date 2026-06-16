@@ -529,7 +529,6 @@ AUCTION_BID_ASYNC_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 SUGGESTION_USER_VOTE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 WITHDRAWAL_USER_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
-ORDER_PAYMENT_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
 BID_COOLDOWN_MEMORY: dict[str, datetime] = {}
 
 
@@ -1082,39 +1081,6 @@ def build_pix_payment_view(payment: MercadoPagoPayment) -> dict:
         "expires_iso": expires_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "expires_label": fmt_br_datetime(expires_at),
     }
-
-
-ORDER_PIX_REUSABLE_STATUSES = {"pending", "in_process", "authorized"}
-ORDER_PIX_TTL_MINUTES = int(os.getenv("ORDER_PIX_TTL_MINUTES", "15"))
-
-
-def get_active_order_pix_payment(db: Session, *, user_id: int, order_id: int) -> Optional[MercadoPagoPayment]:
-    """Retorna o Pix de pedido ainda reutilizável.
-
-    Evita criar múltiplos QR Codes para o mesmo pedido quando o usuário
-    clica duas vezes, recarrega a página ou volta ao checkout.
-    """
-    payment = (
-        db.query(MercadoPagoPayment)
-        .filter(
-            MercadoPagoPayment.user_id == user_id,
-            MercadoPagoPayment.order_id == order_id,
-            MercadoPagoPayment.purpose == "order_payment",
-            MercadoPagoPayment.qr_code != "",
-            MercadoPagoPayment.qr_code_base64 != "",
-            MercadoPagoPayment.status.in_(list(ORDER_PIX_REUSABLE_STATUSES)),
-        )
-        .order_by(desc(MercadoPagoPayment.created_at))
-        .first()
-    )
-    if not payment:
-        return None
-
-    created_at = payment.created_at or datetime.utcnow()
-    if created_at + timedelta(minutes=ORDER_PIX_TTL_MINUTES) <= datetime.utcnow():
-        return None
-
-    return payment
 
 
 def apply_approved_mp_payment(db: Session, request: Request, payment_row: MercadoPagoPayment) -> bool:
@@ -4326,7 +4292,7 @@ def auction_rules_page(request: Request):
 
 @app.get("/register", response_class=HTMLResponse)
 def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request, "error": None})
+    return templates.TemplateResponse("register.html", {"request": request, "error": None, "form_data": {}})
 
 
 @app.post("/register")
@@ -4359,40 +4325,71 @@ async def register(
         clean_cpf = only_digits(cpf)
         clean_phone = only_digits(phone)
 
-        def fail(message: str):
-            return templates.TemplateResponse("register.html", {"request": request, "error": message}, status_code=400)
+        def current_register_form_data() -> dict:
+            # Reenvia os campos não sensíveis para o template quando houver erro de validação.
+            # A senha nunca volta preenchida por segurança, mas o usuário recebe o aviso exato no campo.
+            return {
+                "full_name": (full_name or "").strip(),
+                "public_name": (public_name or "").strip(),
+                "email": (email or "").strip(),
+                "cpf": (cpf or "").strip(),
+                "phone": (phone or "").strip(),
+                "gender": (gender or "").strip(),
+                "birth_date": (birth_date or "").strip(),
+                "cep": (cep or "").strip(),
+                "street": (street or "").strip(),
+                "number": (number or "").strip(),
+                "complement": (complement or "").strip(),
+                "district": (district or "").strip(),
+                "city": (city or "").strip(),
+                "state": (state or "").strip().upper()[:2],
+                "accept_terms": accept_terms == "on",
+                "accept_privacy": accept_privacy == "on",
+                "accept_truth": accept_truth == "on",
+            }
+
+        def fail(message: str, focus_field: str = ""):
+            context = {
+                "request": request,
+                "error": message,
+                "form_data": current_register_form_data(),
+                "focus_field": focus_field,
+            }
+            if focus_field in {"password", "password_confirm"}:
+                context["password_error"] = message
+            return templates.TemplateResponse("register.html", context, status_code=400)
 
         if accept_terms != "on" or accept_privacy != "on" or accept_truth != "on":
-            return fail("Para criar a conta, aceite os Termos de Uso, a Política de Privacidade e confirme que os dados são verdadeiros.")
+            return fail("Para criar a conta, aceite os Termos de Uso, a Política de Privacidade e confirme que os dados são verdadeiros.", "accept_terms")
         if len((full_name or "").strip().split()) < 2:
-            return fail("Informe seu nome completo.")
+            return fail("Informe seu nome completo.", "full_name")
         if len(clean_public_name) < 3:
-            return fail("Escolha um apelido público com pelo menos 3 caracteres.")
+            return fail("Escolha um apelido público com pelo menos 3 caracteres.", "public_name")
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", clean_email):
-            return fail("Informe um e-mail válido.")
+            return fail("Informe um e-mail válido.", "email")
         if not validate_cpf_digits(clean_cpf):
-            return fail("Informe um CPF válido.")
+            return fail("Informe um CPF válido.", "cpf")
         if not validate_phone_digits(clean_phone):
-            return fail("Informe um telefone válido com DDD.")
+            return fail("Informe um telefone válido com DDD.", "phone")
         clean_gender = (gender or "").strip()[:30]
         clean_birth_date = (birth_date or "").strip()[:20]
         if not clean_gender:
-            return fail("Informe o gênero.")
+            return fail("Informe o gênero.", "gender")
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", clean_birth_date):
-            return fail("Informe a data de nascimento.")
+            return fail("Informe a data de nascimento.", "birth_date")
         if len(password or "") < 8:
-            return fail("A senha precisa ter pelo menos 8 caracteres.")
+            return fail("A senha precisa ter pelo menos 8 caracteres.", "password")
         if password != password_confirm:
-            return fail("A confirmação de senha não confere.")
+            return fail("A confirmação de senha não confere.", "password_confirm")
 
         if db.query(User).filter(User.email == clean_email).first():
-            return fail("Este e-mail já está cadastrado.")
+            return fail("Este e-mail já está cadastrado.", "email")
         if db.query(User).filter(User.cpf == clean_cpf).first():
-            return fail("Este CPF já está cadastrado.")
+            return fail("Este CPF já está cadastrado.", "cpf")
         if db.query(User).filter(User.phone == clean_phone).first():
-            return fail("Este telefone já está cadastrado.")
+            return fail("Este telefone já está cadastrado.", "phone")
         if db.query(User).filter(User.public_name == clean_public_name).first():
-            return fail("Este apelido público já está em uso.")
+            return fail("Este apelido público já está em uso.", "public_name")
 
         verification_code = make_email_verification_code()
         user = User(
@@ -5947,19 +5944,9 @@ def my_payment_checkout(request: Request, auction_id: int):
         )
         if not order:
             raise HTTPException(status_code=404, detail="Pedido não encontrado.")
-
-        active_pix_payment = get_active_order_pix_payment(db, user_id=user.id, order_id=order.id)
-
         return templates.TemplateResponse(
             "account_pages.html",
-            {
-                "request": request,
-                "user": user,
-                "section": "checkout",
-                "order": build_order_card(order),
-                "entity": order,
-                "pix_payment": build_pix_payment_view(active_pix_payment) if active_pix_payment else None,
-            },
+            {"request": request, "user": user, "section": "checkout", "order": build_order_card(order), "entity": order},
         )
     finally:
         db.close()
@@ -6019,69 +6006,13 @@ def confirm_payment_flow(
 
         # PIX Mercado Pago: gera QR Code e só marca como pago depois da confirmação oficial.
         elif payment_method == "pix":
-            payment_lock = ORDER_PAYMENT_LOCKS[order.id]
-            with payment_lock:
-                active_pix_payment = get_active_order_pix_payment(db, user_id=user.id, order_id=order.id)
-
-                if active_pix_payment:
-                    order.status = "pending_gateway"
-                    if not order.admin_note:
-                        order.admin_note = "Pix Mercado Pago ativo. Aguardando confirmação oficial do pagamento."
-                    db.add(order)
-                    db.commit()
-                    db.refresh(active_pix_payment)
-                    db.refresh(order)
-                    return templates.TemplateResponse(
-                        "account_pages.html",
-                        {
-                            "request": request,
-                            "user": user,
-                            "section": "checkout",
-                            "order": build_order_card(order),
-                            "entity": order,
-                            "pix_payment": build_pix_payment_view(active_pix_payment),
-                        },
-                    )
-
-                try:
-                    mp = create_mp_pix_payment(
-                        amount=order.final_price,
-                        description=f"Pagamento do pedido #{order.id} - LanceioCerto",
-                        payer_email=user.email,
-                    )
-                except Exception as exc:
-                    return templates.TemplateResponse(
-                        "account_pages.html",
-                        {
-                            "request": request,
-                            "user": user,
-                            "section": "checkout",
-                            "order": build_order_card(order),
-                            "entity": order,
-                            "error": str(exc),
-                            "checkout_force_payment": True,
-                        },
-                        status_code=400,
-                    )
-
-                order.status = "pending_gateway"
-                order.admin_note = "Pix Mercado Pago gerado. Aguardando confirmação oficial do pagamento."
-                payment = MercadoPagoPayment(
-                    user_id=user.id,
-                    order_id=order.id,
-                    purpose="order_payment",
-                    mp_payment_id=mp["payment_id"],
+            try:
+                mp = create_mp_pix_payment(
                     amount=order.final_price,
-                    status=mp["status"],
-                    qr_code=mp["qr_code"],
-                    qr_code_base64=mp["qr_code_base64"],
-                    description=f"Pagamento do pedido #{order.id}",
+                    description=f"Pagamento do pedido #{order.id} - LanceioCerto",
+                    payer_email=user.email,
                 )
-                db.add(payment)
-                audit_event(db, request, "order.payment_pix_created", user, "order", order.id, f"Pagamento MP #{mp['payment_id']} | Valor R$ {fmt_money(order.final_price)}")
-                db.commit()
-                db.refresh(payment)
-                db.refresh(order)
+            except Exception as exc:
                 return templates.TemplateResponse(
                     "account_pages.html",
                     {
@@ -6090,9 +6021,40 @@ def confirm_payment_flow(
                         "section": "checkout",
                         "order": build_order_card(order),
                         "entity": order,
-                        "pix_payment": build_pix_payment_view(payment),
+                        "error": str(exc),
                     },
+                    status_code=400,
                 )
+
+            order.status = "pending_gateway"
+            order.admin_note = "Pix Mercado Pago gerado. Aguardando confirmação oficial do pagamento."
+            payment = MercadoPagoPayment(
+                user_id=user.id,
+                order_id=order.id,
+                purpose="order_payment",
+                mp_payment_id=mp["payment_id"],
+                amount=order.final_price,
+                status=mp["status"],
+                qr_code=mp["qr_code"],
+                qr_code_base64=mp["qr_code_base64"],
+                description=f"Pagamento do pedido #{order.id}",
+            )
+            db.add(payment)
+            audit_event(db, request, "order.payment_pix_created", user, "order", order.id, f"Pagamento MP #{mp['payment_id']} | Valor R$ {fmt_money(order.final_price)}")
+            db.commit()
+            db.refresh(payment)
+            db.refresh(order)
+            return templates.TemplateResponse(
+                "account_pages.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "section": "checkout",
+                    "order": build_order_card(order),
+                    "entity": order,
+                    "pix_payment": build_pix_payment_view(payment),
+                },
+            )
 
         elif payment_method in ["card", "credit_card"]:
             try:
@@ -6115,7 +6077,6 @@ def confirm_payment_flow(
                         "order": build_order_card(order),
                         "entity": order,
                         "error": str(exc),
-                        "checkout_force_payment": True,
                     },
                     status_code=400,
                 )
