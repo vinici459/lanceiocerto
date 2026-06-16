@@ -8,6 +8,7 @@ import re
 import secrets
 import shutil
 import threading
+import time
 import base64
 import hashlib
 import hmac
@@ -19,7 +20,7 @@ import urllib.request
 import urllib.error
 from email.message import EmailMessage
 from email.utils import parseaddr
-from collections import defaultdict
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -53,7 +54,16 @@ from sqlalchemy.exc import IntegrityError
 
 
 APP_NAME = "Lanceio Certo"
+APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
+IS_PRODUCTION = APP_ENV in {"prod", "production", "real"}
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./lanceiocerto.db")
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+if IS_PRODUCTION and IS_SQLITE:
+    raise RuntimeError(
+        "Produção não pode iniciar com SQLite. Configure DATABASE_URL com PostgreSQL antes do deploy."
+    )
+
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -71,10 +81,17 @@ ALLOWED_UPLOAD_MIME_TYPES = {
 ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"}
 
 
-if DATABASE_URL.startswith("sqlite"):
+if IS_SQLITE:
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
+        max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "10")),
+        pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "1800")),
+        pool_timeout=int(os.getenv("DB_POOL_TIMEOUT", "30")),
+    )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
@@ -573,6 +590,64 @@ class ConnectionManager:
                 asyncio.create_task(self._safe_close(ws))
 
 
+# Configurações de produção/escala.
+# Comece conservador; aumente somente após teste de carga.
+SECURITY_HEADERS_ENABLED = os.getenv("SECURITY_HEADERS_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+RATE_LIMIT_GENERAL_PER_MINUTE = int(os.getenv("RATE_LIMIT_GENERAL_PER_MINUTE", "180"))
+RATE_LIMIT_AUTH_PER_MINUTE = int(os.getenv("RATE_LIMIT_AUTH_PER_MINUTE", "20"))
+RATE_LIMIT_BID_PER_MINUTE = int(os.getenv("RATE_LIMIT_BID_PER_MINUTE", "40"))
+RATE_LIMIT_PAYMENT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PAYMENT_PER_MINUTE", "12"))
+SLOW_REQUEST_WARN_MS = float(os.getenv("SLOW_REQUEST_WARN_MS", "1500"))
+
+RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _rate_limit_key(request: Request) -> tuple[str, int]:
+    path = request.url.path
+    ip = client_ip(request) if "client_ip" in globals() else ((request.client.host if request.client else "")[:80])
+    if path.startswith("/static/") or path in {"/healthz", "/readyz"}:
+        return "", 0
+    if "/bid" in path:
+        return f"bid:{ip}", RATE_LIMIT_BID_PER_MINUTE
+    if path.startswith("/login") or path.startswith("/register") or path.startswith("/forgot-password") or path.startswith("/reset-password"):
+        return f"auth:{ip}", RATE_LIMIT_AUTH_PER_MINUTE
+    if path.startswith("/minha-conta/saldo") or path.startswith("/webhook/mercadopago"):
+        return f"payment:{ip}", RATE_LIMIT_PAYMENT_PER_MINUTE
+    return f"general:{ip}", RATE_LIMIT_GENERAL_PER_MINUTE
+
+
+def _rate_limit_allowed(request: Request) -> tuple[bool, int]:
+    if not RATE_LIMIT_ENABLED:
+        return True, 0
+    key, limit = _rate_limit_key(request)
+    if not key or limit <= 0:
+        return True, 0
+    now = time.time()
+    bucket = RATE_LIMIT_BUCKETS[key]
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    while bucket and bucket[0] < cutoff:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        retry_after = max(1, int(RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])))
+        return False, retry_after
+    bucket.append(now)
+    return True, 0
+
+
+def _apply_security_headers(response: Response) -> Response:
+    if not SECURITY_HEADERS_ENABLED:
+        return response
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if IS_PRODUCTION:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
+
 app = FastAPI(title=APP_NAME)
 # HTML grande no Railway estava custando ~1,5s só em compressão.
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
@@ -650,7 +725,16 @@ def is_speculative_navigation_request(request: Request) -> bool:
 
 
 @app.middleware("http")
-async def navigation_guard_and_static_cache(request: Request, call_next):
+async def production_guard_navigation_and_cache(request: Request, call_next):
+    request_id = secrets.token_hex(8)
+    allowed, retry_after = _rate_limit_allowed(request)
+    if not allowed:
+        return _apply_security_headers(JSONResponse(
+            {"ok": False, "detail": "Muitas requisições em pouco tempo. Aguarde alguns segundos e tente novamente."},
+            status_code=429,
+            headers={"Retry-After": str(retry_after), "X-Request-ID": request_id},
+        ))
+
     if is_speculative_navigation_request(request):
         now = datetime.utcnow()
         skip_key = (
@@ -674,12 +758,17 @@ async def navigation_guard_and_static_cache(request: Request, call_next):
                 "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
                 "Pragma": "no-cache",
                 "X-Nav-Skip": "1",
+                "X-Request-ID": request_id,
             },
         )
 
-    import time
     started = time.perf_counter()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        elapsed = (time.perf_counter() - started) * 1000
+        print(f"[REQ-ERROR] id={request_id} {request.method} {request.url.path} total={elapsed:.1f}ms error={type(exc).__name__}")
+        raise
 
     if request.url.path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
@@ -689,17 +778,20 @@ async def navigation_guard_and_static_cache(request: Request, call_next):
         if request.url.path in {"/", "/admin", "/minha-conta"} or request.url.path.startswith("/minha-conta/"):
             response.headers.setdefault("Cache-Control", "private, max-age=3")
 
+    response.headers.setdefault("X-Request-ID", request_id)
     if request.method.upper() in {"GET", "POST"} and not request.url.path.startswith("/static/"):
         elapsed = (time.perf_counter() - started) * 1000
+        level = "NAV-SLOW" if elapsed >= SLOW_REQUEST_WARN_MS else "NAV-REQ"
         print(
-            f"[NAV-REQ] {request.method} {request.url.path} status={response.status_code} total={elapsed:.1f}ms "
+            f"[{level}] id={request_id} {request.method} {request.url.path} status={response.status_code} total={elapsed:.1f}ms "
             f"purpose={request.headers.get('purpose') or request.headers.get('sec-purpose') or '-'} "
             f"mode={request.headers.get('sec-fetch-mode') or '-'} "
             f"dest={request.headers.get('sec-fetch-dest') or '-'}"
         )
-    return response
+    return _apply_security_headers(response)
 SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(60 * 60 * 24 * 7)))
-SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "auto").lower() in {"1", "true", "yes"}
+_session_secure_env = os.getenv("SESSION_COOKIE_SECURE", "auto").strip().lower()
+SESSION_COOKIE_SECURE = IS_PRODUCTION if _session_secure_env == "auto" else _session_secure_env in {"1", "true", "yes", "on"}
 SESSIONS: dict[str, tuple[int, datetime]] = {}
 
 
@@ -1305,6 +1397,48 @@ def refresh_mp_payment(db: Session, request: Request, payment_id: str) -> Mercad
     db.commit()
     db.refresh(row)
     return row
+
+
+
+def reconcile_recent_pending_payments(request: Request, *, minutes: int = 60, limit: int = 20) -> dict:
+    """Consulta pagamentos pendentes recentes no gateway e aplica aprovações faltantes.
+
+    Isso é uma rede de segurança para quando o webhook falha, atrasa ou chega duplicado.
+    Pode ser chamado pelo admin master ou por um job externo protegido.
+    """
+    checked = 0
+    approved = 0
+    errors: list[str] = []
+    db = SessionLocal()
+    try:
+        since = datetime.utcnow() - timedelta(minutes=max(1, int(minutes)))
+        rows = (
+            db.query(MercadoPagoPayment)
+            .filter(MercadoPagoPayment.status.in_(["pending", "in_process", "authorized"]))
+            .filter(MercadoPagoPayment.created_at >= since)
+            .order_by(MercadoPagoPayment.created_at.asc())
+            .limit(max(1, min(int(limit), 100)))
+            .all()
+        )
+        for row in rows:
+            checked += 1
+            try:
+                mp_status = get_mp_payment_status(row.mp_payment_id)
+                status = mp_status["status"] or row.status
+                if status == "approved":
+                    if apply_approved_mp_payment(db, request, row):
+                        approved += 1
+                else:
+                    row.status = status
+                    db.add(row)
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                errors.append(f"{row.mp_payment_id}: {type(exc).__name__}")
+        return {"checked": checked, "approved": approved, "errors": errors[:10]}
+    finally:
+        db.close()
+
 
 
 def br_time(dt: Optional[datetime]) -> Optional[datetime]:
@@ -4049,11 +4183,56 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_auction_items_status_created_desc ON auction_items (status, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS ix_users_created_desc ON users (created_at DESC)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created_desc ON audit_logs (created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_mp_payments_status_created ON mercadopago_payments (status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_mp_payments_purpose_status_created ON mercadopago_payments (purpose, status, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)",
+            "CREATE INDEX IF NOT EXISTS ix_users_cpf ON users (cpf)",
+            "CREATE INDEX IF NOT EXISTS ix_users_phone ON users (phone)",
+            "CREATE INDEX IF NOT EXISTS ix_users_referral_code ON users (referral_code)",
+            "CREATE INDEX IF NOT EXISTS ix_referral_rewards_referred_status ON referral_rewards (referred_user_id, status)",
+            "CREATE INDEX IF NOT EXISTS ix_referral_rewards_referrer_status ON referral_rewards (referrer_user_id, status)",
         ]:
             try:
                 conn.execute(text(ddl))
             except Exception:
                 pass
+
+
+
+def _db_ping() -> bool:
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception as exc:
+        print(f"[DB-HEALTH] erro={type(exc).__name__}: {exc}")
+        return False
+
+
+@app.get("/healthz")
+def healthz():
+    return {
+        "ok": True,
+        "app": APP_NAME,
+        "env": APP_ENV,
+        "database": engine.dialect.name,
+        "production": IS_PRODUCTION,
+    }
+
+
+@app.get("/readyz")
+def readyz():
+    ready = _db_ping()
+    return JSONResponse(
+        {
+            "ok": ready,
+            "database": engine.dialect.name,
+            "database_ready": ready,
+            "production": IS_PRODUCTION,
+        },
+        status_code=200 if ready else 503,
+    )
+
 
 
 def save_uploaded_image(file: Optional[UploadFile]) -> str:
@@ -5314,7 +5493,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             # Trava a linha do leilão no PostgreSQL durante o processamento do lance.
             # O lock em memória protege dentro de uma réplica; o FOR UPDATE protege
             # caso Railway rode mais de um processo/réplica.
-            if DATABASE_URL.startswith("sqlite"):
+            if IS_SQLITE:
                 item = db.get(AuctionItem, auction_id)
             else:
                 item = (
@@ -5409,7 +5588,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             # Desconto atômico e rápido do saldo.
             # Em PostgreSQL usamos RETURNING para já obter o saldo final sem db.refresh().
             wallet_after_bid = None
-            if not DATABASE_URL.startswith("sqlite"):
+            if not IS_SQLITE:
                 row = db.execute(
                     text("""
                         UPDATE users
@@ -7371,6 +7550,21 @@ def admin_html_response(ctx: dict, timings: list[tuple[str, float]] | None = Non
     return response
 
 
+
+
+@app.post("/admin/sistema/reconciliar-pagamentos")
+def admin_reconcile_payments(request: Request, minutes: int = Form(60), limit: int = Form(20)):
+    db = SessionLocal()
+    try:
+        admin_user = require_admin(request, db)
+        if not getattr(admin_user, "is_superadmin", False):
+            raise HTTPException(status_code=403, detail="Apenas admin master pode executar reconciliação manual de pagamentos.")
+        result = reconcile_recent_pending_payments(request, minutes=minutes, limit=limit)
+        audit_event(db, request, "system.payments_reconciled", admin_user, "system", "mercadopago", json.dumps(result, ensure_ascii=False))
+        db.commit()
+        return RedirectResponse(f"/admin?tab=support&success=Reconciliação concluída: {result['checked']} verificados, {result['approved']} aprovados", status_code=303)
+    finally:
+        db.close()
 
 
 @app.get("/admin", response_class=HTMLResponse)
