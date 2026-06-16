@@ -672,7 +672,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v14-single-home-clock")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260616-lance-real-fast-v3")
 templates.env.globals["asset_version"] = ASSET_VERSION
 
 # Versões dos documentos legais aceitos no cadastro.
@@ -4775,6 +4775,123 @@ def _home_sync_allowed(critical: bool) -> bool:
 def _request_user_id(request: Request) -> Optional[int]:
     return _session_user_id(request.cookies.get("session_token"))
 
+
+# Estado público em memória por leilão: usado para /api/auction/{id}/state
+# responder instantâneo durante leilão ao vivo. O saldo do usuário continua vindo
+# somente na resposta privada do POST /bid ou no estado personalizado quando necessário.
+AUCTION_PUBLIC_STATE_MEMORY: dict[int, tuple[float, dict]] = {}
+AUCTION_PUBLIC_STATE_MEMORY_TTL_MS = int(os.getenv("AUCTION_PUBLIC_STATE_MEMORY_TTL_MS", "8000"))
+
+
+def _clone_jsonish(value):
+    try:
+        return json.loads(json.dumps(value, default=str))
+    except Exception:
+        return dict(value or {})
+
+
+def _refresh_payload_clock(payload: dict) -> dict:
+    """Atualiza relógio/remaining_seconds sem consultar banco."""
+    data = _clone_jsonish(payload or {})
+    now = datetime.utcnow()
+    status = (data.get("status") or "").lower()
+    ends_at = data.get("ends_at")
+    scheduled_start = data.get("scheduled_start")
+
+    def _parse_utc(value):
+        if not value:
+            return None
+        try:
+            normalized = str(value).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            return dt
+        except Exception:
+            return None
+
+    if status == "live":
+        end_dt = _parse_utc(ends_at)
+        data["remaining_seconds"] = max(0, int((end_dt - now).total_seconds())) if end_dt else 0
+    elif status in {"scheduled", "relisted"}:
+        start_dt = _parse_utc(scheduled_start)
+        data["start_remaining"] = max(0, int((start_dt - now).total_seconds())) if start_dt else 0
+    data.update(server_time_payload(now))
+    return data
+
+
+def _auction_public_memory_get(auction_id: int | str, max_age_ms: Optional[int] = None) -> Optional[dict]:
+    row = AUCTION_PUBLIC_STATE_MEMORY.get(int(auction_id)) if str(auction_id).isdigit() else None
+    if not row:
+        return None
+    created, payload = row
+    ttl = max_age_ms if max_age_ms is not None else AUCTION_PUBLIC_STATE_MEMORY_TTL_MS
+    if (time.monotonic() - created) * 1000 > max(1, ttl):
+        return None
+    return _refresh_payload_clock(payload)
+
+
+def _auction_public_memory_set(auction_id: int | str, payload: Optional[dict]) -> None:
+    if not payload:
+        return
+    try:
+        aid = int(auction_id)
+    except Exception:
+        return
+    # Nunca guarda dados privados no cache público.
+    clean = _clone_jsonish(payload)
+    clean.pop("wallet_balance", None)
+    clean.pop("client_bid_id", None)
+    AUCTION_PUBLIC_STATE_MEMORY[aid] = (time.monotonic(), clean)
+    if len(AUCTION_PUBLIC_STATE_MEMORY) > 1000:
+        for old_key, _ in sorted(AUCTION_PUBLIC_STATE_MEMORY.items(), key=lambda item: item[1][0])[:250]:
+            AUCTION_PUBLIC_STATE_MEMORY.pop(old_key, None)
+
+
+def _home_card_from_public_payload(payload: dict) -> dict:
+    data = _refresh_payload_clock(payload or {})
+    return {
+        "id": data.get("id"),
+        "title": data.get("title") or "",
+        "status": data.get("status") or "live",
+        "current_price": BR(data.get("current_price") or 0.0),
+        "source_price": BR(data.get("source_price") or 0.0),
+        "scheduled_start": data.get("scheduled_start"),
+        "start_remaining": int(data.get("start_remaining") or 0),
+        "ends_at": data.get("ends_at"),
+        "remaining_seconds": int(data.get("remaining_seconds") or 0),
+        "winner_name": data.get("winner_name"),
+        "image_url": data.get("image_url") or STATIC_FALLBACK_IMAGE,
+    }
+
+
+def _patch_home_cache_from_public_payload(payload: Optional[dict]) -> None:
+    """Atualiza o card da Home em memória sem limpar o cache a cada lance."""
+    if not payload or not STATE_API_CACHE_ENABLED:
+        return
+    cached = _api_cache_get(HOME_STATE_API_CACHE, "home:state", max(HOME_STATE_CACHE_TTL_MS * 8, 4000))
+    if not cached:
+        return
+    card = _home_card_from_public_payload(payload)
+    aid = card.get("id")
+    if not aid:
+        return
+    status = (card.get("status") or "").lower()
+    for key in ("live_items", "upcoming_items", "ended_items"):
+        items = [x for x in cached.get(key, []) if int(x.get("id") or 0) != int(aid)]
+        cached[key] = items
+    target = "live_items" if status == "live" else "upcoming_items" if status in {"scheduled", "relisted"} else "ended_items"
+    cached.setdefault(target, []).insert(0, card)
+    cached[target] = cached[target][:8]
+    cached["live_count"] = len(cached.get("live_items", []))
+    cached["upcoming_count"] = len(cached.get("upcoming_items", []))
+    cached["ended_count"] = len(cached.get("ended_items", []))
+    cached["live_ids"] = [x.get("id") for x in cached.get("live_items", [])]
+    cached["upcoming_ids"] = [x.get("id") for x in cached.get("upcoming_items", [])]
+    cached["ended_ids"] = [x.get("id") for x in cached.get("ended_items", [])]
+    cached["cache"] = "patched"
+    _api_cache_set(HOME_STATE_API_CACHE, "home:state", cached)
+
 @app.get("/api/home/state")
 def home_state(request: Request):
     """Estado leve da Home com cache ultracurto e anti-herd.
@@ -5591,6 +5708,313 @@ def _set_fast_cooldown(auction_id: int, user_id: int, bid_value: float, seconds:
     BID_COOLDOWN_MEMORY[_bid_cooldown_key(auction_id, user_id, bid_value)] = now + timedelta(seconds=seconds)
 
 
+
+def _auction_row_to_namespace(row) -> SimpleNamespace:
+    data = dict(row._mapping if hasattr(row, "_mapping") else row)
+    data.setdefault("winner", None)
+    return SimpleNamespace(**data)
+
+
+def _light_user_for_bid(request: Request, db: Session) -> SimpleNamespace:
+    user_id = _request_user_id(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Faça login para continuar.")
+    row = db.execute(text("""
+        SELECT id, full_name, public_name, nickname, email, is_banned, account_deleted, wallet_balance
+        FROM users
+        WHERE id = :user_id
+        LIMIT 1
+    """), {"user_id": user_id}).first()
+    if not row:
+        raise HTTPException(status_code=401, detail="Faça login para continuar.")
+    user = _auction_row_to_namespace(row)
+    if bool(getattr(user, "account_deleted", False)):
+        raise HTTPException(status_code=401, detail="Faça login para continuar.")
+    if bool(getattr(user, "is_banned", False)):
+        raise HTTPException(status_code=403, detail="Conta bloqueada.")
+    return user
+
+
+def _select_auction_for_bid_fast(db: Session, auction_id: int) -> Optional[SimpleNamespace]:
+    row = db.execute(text("""
+        SELECT
+            id, title, description, image_url, source_price, start_price, current_price,
+            status, scheduled_start, ends_at, winner_user_id, winner_deadline,
+            turbo_level, initial_duration_seconds, turbo_enabled, turbo_trigger_percent,
+            turbo_level_3_percent, turbo_level_4_percent, bid_fee_percent,
+            winner_min_percent, target_profit_percent, turbo_base_value,
+            total_bid_fees, total_bid_spent, bids_count_cached, chat_paused
+        FROM auction_items
+        WHERE id = :auction_id
+        FOR UPDATE
+    """), {"auction_id": auction_id}).first()
+    return _auction_row_to_namespace(row) if row else None
+
+
+def _official_payload_for_fast_error(db: Session, item: SimpleNamespace, user: Optional[SimpleNamespace], detail: str, status_code: int = 400, retry_after: Optional[int] = None) -> None:
+    try:
+        payload = public_auction_live_payload(item, db, user=user)
+    except Exception:
+        last_bid_id, last_bidder = auction_last_bid_meta(db, item.id, getattr(user, "id", None) if user else None)
+        payload = fast_bid_auction_payload(
+            item,
+            bids_count=int(getattr(item, "bids_count_cached", 0) or 0),
+            last_bidder=last_bidder or "—",
+            last_bid_id=last_bid_id,
+            user_turbo_eligible=True,
+            button_cooldown=0,
+            mode_for_bid=compute_turbo_level(item),
+            mode_before_bid=compute_turbo_level(item),
+            bid_value=0,
+            fee_value=0,
+            price_increment=0,
+            wallet_balance=BR(getattr(user, "wallet_balance", 0.0) or 0.0) if user else None,
+        )
+    raise AuctionStateHTTPException(status_code=status_code, detail=detail, auction_payload=payload, retry_after=retry_after)
+
+
+def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float, client_bid_id: str = "") -> tuple[dict, dict, int]:
+    """Caminho quente real do lance em PostgreSQL.
+
+    Evita ORM no trecho crítico. Mantém transação, FOR UPDATE, desconto atômico,
+    idempotência por client_bid_id e payload rápido.
+    """
+    now = datetime.utcnow()
+    db = SessionLocal()
+    try:
+        user = _light_user_for_bid(request, db)
+        item = _select_auction_for_bid_fast(db, auction_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+
+        # Início exato no servidor sem depender do polling da Home.
+        if item.status in {"scheduled", "relisted"} and item.scheduled_start and item.scheduled_start <= now:
+            duration = getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS) or DEFAULT_INITIAL_DURATION_SECONDS
+            logical_start = item.scheduled_start or now
+            item.status = "live"
+            item.ends_at = logical_start + timedelta(seconds=min(MAX_INITIAL_DURATION_SECONDS, duration))
+            item.chat_paused = False
+
+        # Se acabou, fecha e devolve estado oficial sem aceitar novo lance.
+        if item.status == "live" and item.ends_at and item.ends_at <= now:
+            last = db.execute(text("""
+                SELECT id, user_id FROM bids
+                WHERE auction_id = :auction_id
+                ORDER BY id DESC
+                LIMIT 1
+            """), {"auction_id": auction_id}).first()
+            if last:
+                item.status = "pending_payment"
+                item.winner_user_id = int(last.user_id)
+                item.winner_deadline = now + timedelta(minutes=PAYMENT_DEADLINE_MINUTES)
+                item.ends_at = None
+                item.chat_paused = True
+                db.execute(text("""
+                    UPDATE auction_items
+                    SET status='pending_payment', winner_user_id=:winner_user_id,
+                        winner_deadline=:winner_deadline, ends_at=NULL, chat_paused=true
+                    WHERE id=:auction_id
+                """), {"winner_user_id": item.winner_user_id, "winner_deadline": item.winner_deadline, "auction_id": auction_id})
+            else:
+                item.status = "ended"
+                item.ends_at = None
+                item.winner_user_id = None
+                item.winner_deadline = None
+                item.chat_paused = True
+                db.execute(text("""
+                    UPDATE auction_items
+                    SET status='ended', winner_user_id=NULL, winner_deadline=NULL, ends_at=NULL, chat_paused=true
+                    WHERE id=:auction_id
+                """), {"auction_id": auction_id})
+            db.commit()
+            _official_payload_for_fast_error(db, item, user, "Este leilão foi encerrado.", 400)
+
+        if item.status != "live":
+            _official_payload_for_fast_error(db, item, user, "Leilão não está ao vivo.", 400)
+
+        bid_value = BR(bid_value)
+        if bid_value not in ALLOWED_BIDS:
+            raise HTTPException(status_code=400, detail="Valor de lance inválido.")
+
+        mode_for_bid = compute_turbo_level(item)
+        if mode_for_bid >= 2:
+            prior = db.execute(text("""
+                SELECT id FROM bids
+                WHERE auction_id=:auction_id AND user_id=:user_id
+                LIMIT 1
+            """), {"auction_id": auction_id, "user_id": user.id}).first()
+            if not prior:
+                _official_payload_for_fast_error(db, item, user, turbo_lock_message(mode_for_bid), 403)
+
+        remaining_cd = _get_fast_cooldown_remaining(item.id, user.id, bid_value, now)
+        if remaining_cd > 0:
+            last_bid_id = auction_last_bid_id(db, item.id)
+            payload = fast_bid_auction_payload(
+                item,
+                bids_count=int(getattr(item, "bids_count_cached", 0) or 0),
+                last_bidder=public_user_name(user),
+                last_bid_id=last_bid_id,
+                user_turbo_eligible=True,
+                button_cooldown=remaining_cd,
+                mode_for_bid=mode_for_bid,
+                mode_before_bid=mode_for_bid,
+                bid_value=bid_value,
+                fee_value=0,
+                price_increment=0,
+                client_bid_id=client_bid_id,
+                wallet_balance=BR(getattr(user, "wallet_balance", 0.0) or 0.0),
+            )
+            raise AuctionStateHTTPException(status_code=429, detail=f"Aguarde {remaining_cd}s para dar outro lance.", auction_payload=payload, retry_after=remaining_cd)
+
+        previous_total_bid_count = int(getattr(item, "bids_count_cached", 0) or 0)
+        fee_value, increment = split_bid_amount(bid_value, getattr(item, "bid_fee_percent", DEFAULT_BID_FEE_PERCENT))
+
+        row = db.execute(text("""
+            UPDATE users
+            SET wallet_balance = wallet_balance - :bid_value
+            WHERE id = :user_id
+              AND wallet_balance >= :min_balance
+            RETURNING wallet_balance
+        """), {"bid_value": bid_value, "min_balance": bid_value - 0.000001, "user_id": user.id}).first()
+        if not row:
+            db.rollback()
+            user.wallet_balance = float(getattr(user, "wallet_balance", 0.0) or 0.0)
+            _official_payload_for_fast_error(db, item, user, "Créditos LC insuficientes para dar este lance.", 402)
+        wallet_after_bid = BR(row[0] or 0.0)
+
+        total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
+        total_bid_spent = BR((getattr(item, "total_bid_spent", 0.0) or 0.0) + bid_value)
+        current_price = BR((getattr(item, "current_price", 0.0) or 0.0) + increment)
+        accepted_count = previous_total_bid_count + 1
+
+        # Calcula turbo depois dos novos totais.
+        item.current_price = current_price
+        item.total_bid_fees = total_bid_fees
+        item.total_bid_spent = total_bid_spent
+        item.bids_count_cached = accepted_count
+        turbo_after_bid = compute_turbo_level(item)
+        timing_mode_for_bid = turbo_after_bid if turbo_after_bid >= 2 else mode_for_bid
+        current_end = item.ends_at if item.ends_at and item.ends_at > now else now
+        if timing_mode_for_bid >= 2:
+            next_ends_at = now + timedelta(seconds=turbo_bid_seconds(bid_value, timing_mode_for_bid))
+        else:
+            next_ends_at = current_end + timedelta(seconds=normal_time_delta_seconds(item, bid_value))
+            if next_ends_at <= now:
+                next_ends_at = now + timedelta(seconds=1)
+        item.ends_at = next_ends_at
+        item.turbo_level = turbo_after_bid
+        item.status = "live"
+        item.chat_paused = False
+
+        try:
+            bid_row = db.execute(text("""
+                INSERT INTO bids (auction_id, user_id, bid_value, fee_value, price_increment, client_bid_id, created_at)
+                VALUES (:auction_id, :user_id, :bid_value, :fee_value, :price_increment, :client_bid_id, :created_at)
+                RETURNING id
+            """), {
+                "auction_id": item.id,
+                "user_id": user.id,
+                "bid_value": bid_value,
+                "fee_value": fee_value,
+                "price_increment": increment,
+                "client_bid_id": client_bid_id,
+                "created_at": now,
+            }).first()
+        except IntegrityError:
+            db.rollback()
+            confirm_db = SessionLocal()
+            try:
+                existing = confirm_db.execute(text("""
+                    SELECT id FROM bids
+                    WHERE auction_id=:auction_id AND user_id=:user_id AND client_bid_id=:client_bid_id
+                    LIMIT 1
+                """), {"auction_id": auction_id, "user_id": user.id, "client_bid_id": client_bid_id}).first()
+                item_confirmed = _select_auction_for_bid_fast(confirm_db, auction_id)
+                user_confirmed = _light_user_for_bid(request, confirm_db)
+                if existing and item_confirmed and user_confirmed:
+                    private_payload = public_auction_live_payload(item_confirmed, confirm_db, last_bid_id_override=int(existing.id), user=user_confirmed)
+                    private_payload.update({"idempotent": True, "client_bid_id": client_bid_id, "wallet_balance": BR(getattr(user_confirmed, "wallet_balance", 0.0) or 0.0), **server_time_payload()})
+                    public_payload = public_auction_live_payload(item_confirmed, confirm_db, last_bid_id_override=int(existing.id), user_turbo_eligible_override=None)
+                    public_payload["idempotent"] = True
+                    return private_payload, public_payload, 0
+            finally:
+                confirm_db.close()
+            raise
+
+        bid_id = int(bid_row.id if hasattr(bid_row, "id") else bid_row[0])
+
+        db.execute(text("""
+            INSERT INTO wallet_transactions (user_id, amount, kind, note, created_at)
+            VALUES (:user_id, :amount, :kind, :note, :created_at)
+        """), {
+            "user_id": user.id,
+            "amount": -bid_value,
+            "kind": "bid_spent",
+            "note": f"Lance no leilão #{item.id}",
+            "created_at": now,
+        })
+
+        db.execute(text("""
+            UPDATE auction_items
+            SET status='live', current_price=:current_price, total_bid_fees=:total_bid_fees,
+                total_bid_spent=:total_bid_spent, bids_count_cached=:bids_count_cached,
+                ends_at=:ends_at, turbo_level=:turbo_level, chat_paused=false
+            WHERE id=:auction_id
+        """), {
+            "auction_id": item.id,
+            "current_price": current_price,
+            "total_bid_fees": total_bid_fees,
+            "total_bid_spent": total_bid_spent,
+            "bids_count_cached": accepted_count,
+            "ends_at": next_ends_at,
+            "turbo_level": turbo_after_bid,
+        })
+
+        db.commit()
+        button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
+        _set_fast_cooldown(item.id, user.id, bid_value, button_cooldown, now)
+        accepted_bidder = public_user_name(user)
+
+        private_payload = fast_bid_auction_payload(
+            item,
+            bids_count=accepted_count,
+            last_bidder="Você",
+            last_bid_id=bid_id,
+            user_turbo_eligible=True,
+            button_cooldown=button_cooldown,
+            mode_for_bid=timing_mode_for_bid,
+            mode_before_bid=mode_for_bid,
+            bid_value=bid_value,
+            fee_value=fee_value,
+            price_increment=increment,
+            client_bid_id=client_bid_id,
+            wallet_balance=wallet_after_bid,
+        )
+        public_payload = fast_bid_auction_payload(
+            item,
+            bids_count=accepted_count,
+            last_bidder=accepted_bidder,
+            last_bid_id=bid_id,
+            user_turbo_eligible=None,
+            button_cooldown=button_cooldown,
+            mode_for_bid=timing_mode_for_bid,
+            mode_before_bid=mode_for_bid,
+            bid_value=bid_value,
+            fee_value=fee_value,
+            price_increment=increment,
+            client_bid_id="",
+            wallet_balance=None,
+        )
+        return private_payload, public_payload, button_cooldown
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
 def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_bid_id: str = "") -> tuple[dict, dict, int]:
     """Processa o lance com proteção real contra duplicidade.
 
@@ -5602,6 +6026,12 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
     """
     button_cooldown = 0
     client_bid_id = _normalize_client_bid_id(client_bid_id)
+
+    # Produção usa PostgreSQL: caminho rápido com SQL direto no trecho crítico.
+    # Se der qualquer exceção, ela sobe normalmente; não fazemos fallback silencioso
+    # para evitar cobrar lance duas vezes.
+    if not IS_SQLITE:
+        return _place_bid_postgres_fast(request, auction_id, bid_value, client_bid_id)
 
     with AUCTION_BID_LOCKS[auction_id]:
         db = SessionLocal()
@@ -5919,9 +6349,12 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             body["retry_after"] = retry_after
         return JSONResponse(body, status_code=exc.status_code)
 
-    # O lance confirmado invalida caches curtos de estado. O próprio JSON do POST
-    # atualiza quem clicou; o WebSocket atualiza os demais sem bloquear a resposta.
-    _clear_home_state_cache()
+    # O lance confirmado atualiza caches em memória em vez de apagar a Home a cada clique.
+    # Apagar a Home em todo lance causava cache miss caro e fazia o POST disputar banco
+    # com vários GET /api/home/state logo depois.
+    if public_payload:
+        _auction_public_memory_set(auction_id, public_payload)
+        _patch_home_cache_from_public_payload(public_payload)
     _clear_auction_state_cache(auction_id)
     if public_payload:
         asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
@@ -5930,7 +6363,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
     if total_ms >= BID_SLOW_WARN_MS:
         queue_ms = max(0.0, (lock_entered - perf_start) * 1000)
         process_ms = max(0.0, (process_done - lock_entered) * 1000)
-        print(f"[BID-PERF] auction={auction_id} total={total_ms:.1f}ms queue={queue_ms:.1f}ms process={process_ms:.1f}ms")
+        print(f"[BID-PERF] auction={auction_id} total={total_ms:.1f}ms queue={queue_ms:.1f}ms process={process_ms:.1f}ms fast_sql={0 if IS_SQLITE else 1}")
 
     return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
@@ -5945,6 +6378,13 @@ def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Option
     user_id = _request_user_id(request)
     cache_key = f"auction:{auction_id}:{user_id or 0}"
     ttl_ms = AUCTION_STATE_CRITICAL_TTL_MS if critical else AUCTION_STATE_CACHE_TTL_MS
+
+    # Para checagens de rotina, responde do estado público em memória. Isso evita
+    # que dezenas de GET /state concorram com POST /bid no banco/threadpool.
+    if not critical:
+        public_cached = _auction_public_memory_get(auction_id)
+        if public_cached is not None:
+            return {"ok": True, "cache": "memory", "auction": public_cached}, None, False, "memory"
 
     cached = _api_cache_get(AUCTION_STATE_API_CACHE, cache_key, ttl_ms)
     if cached is not None:
@@ -6015,6 +6455,7 @@ def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Option
                 _clear_auction_state_cache(auction_id)
             else:
                 _api_cache_set(AUCTION_STATE_API_CACHE, cache_key, body, AUCTION_STATE_CACHE_MAX)
+            _auction_public_memory_set(auction_id, public_payload or private_payload)
             return body, public_payload, bool(finished_now), "miss"
         finally:
             db.close()

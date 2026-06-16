@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const NAV_CACHE_FIX_VERSION = "20260608-nav-cache-v2";
+  const NAV_CACHE_FIX_VERSION = "20260616-lance-real-fast-v3";
 
   function onReady(callback) {
     if (document.readyState === "loading") {
@@ -552,7 +552,7 @@
     tickCountdowns();
     setInterval(tickCountdowns, 1000);
     window.setTimeout(() => refreshHomeState("initial", true), 180);
-    setInterval(() => refreshHomeState("poll", false), 15000);
+    setInterval(() => refreshHomeState("poll", false), 30000);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) window.setTimeout(() => refreshHomeState("visible", true), 250);
     });
