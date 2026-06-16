@@ -1,57 +1,129 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="container legal-page">
-  <div class="legal-card">
-    <span class="eyebrow">Regras operacionais</span>
-    <h1>Regras de Participação e Compra Assistida</h1>
-    <p class="muted">Versão {{ legal_rules_version }} — Regulamento-base para participação transparente, uso de Créditos LC, leilões digitais e fluxo de compra assistida.</p>
+  <div class="legal-card legal-rules-card">
+    <span class="eyebrow">Regulamento operacional</span>
+    <h1>Regras de Participação, Créditos LC, Suporte e Compra Assistida</h1>
+    <p class="muted">Versão {{ legal_rules_version }} — Regulamento-base para participação transparente, uso de Créditos LC, leilões digitais, suporte, disputas e fluxo de compra assistida.</p>
 
-    <h2>1. Quem pode participar</h2>
-    <p>Para participar, o usuário precisa estar logado, com cadastro preenchido, aceite legal registrado, e sem bloqueio administrativo. A plataforma poderá exigir confirmação de e-mail, documentos, selfie e validação de identidade para liberar compra assistida, entrega, suporte avançado, análise de bônus ou conclusão de pedido.</p>
+    <div class="legal-highlight">
+      <strong>Resumo importante:</strong> o Lancei o Certo é uma plataforma digital de intermediação e compra assistida, com Créditos LC pré-pagos de uso interno. Créditos LC não são dinheiro, não são saldo bancário, não são sacáveis, não são transferíveis entre contas e não podem ser convertidos novamente em moeda corrente.
+    </div>
 
-    <h2>2. Conta única e dados verdadeiros</h2>
-    <p>Cada participante pode ter apenas uma conta. Não são permitidos e-mail, CPF, telefone, documento ou apelido público repetidos. Contas relacionadas por CPF, telefone, documento, IP suspeito, dispositivo suspeito, método de pagamento, endereço ou padrão de uso poderão ser submetidas à análise antifraude.</p>
+    <h2>1. Objetivo destas regras</h2>
+    <p>Estas Regras de Participação, Créditos LC, Suporte e Compra Assistida explicam como o usuário pode participar da plataforma, comprar e utilizar Créditos LC, dar lances, acompanhar leilões, receber bônus promocionais, utilizar código de indicação, abrir chamados, resolver disputas e seguir o fluxo de compra assistida quando for vencedor.</p>
+    <p>Estas regras integram o Contrato de Serviço e Termos de Uso do Lancei o Certo. Ao criar conta, comprar Créditos LC, dar lance, usar código de indicação, pagar arremate, enviar link de compra assistida ou abrir chamado, o usuário declara estar ciente destas regras.</p>
 
-    <h2>3. Créditos LC</h2>
-    <p>Os Créditos LC são pré-pagos de uso interno. Eles servem para participar da plataforma e realizar lances. Créditos LC não são dinheiro, não são saldo bancário, não são sacáveis, não são transferíveis entre contas e não podem ser convertidos novamente em moeda corrente.</p>
+    <h2>2. Quem pode participar</h2>
+    <p>Para participar, o usuário precisa estar logado, com cadastro preenchido, aceite legal registrado e sem bloqueio administrativo. A plataforma poderá exigir confirmação de e-mail, validação de CPF, telefone, documentos, selfie, endereço e outros dados necessários para segurança, prevenção de fraude, liberação de compra assistida, atendimento de suporte, análise de bônus ou conclusão de pedido.</p>
+    <p>A plataforma é destinada a usuários com dados verdadeiros, conta individual e uso pessoal. A participação poderá ser recusada, limitada ou bloqueada quando houver inconsistência cadastral, suspeita de fraude, conta duplicada, documento divergente, tentativa de manipulação, comportamento abusivo ou violação dos documentos legais da plataforma.</p>
 
-    <h2>4. Lances</h2>
-    <p>Cada botão de lance informa o custo em Créditos LC e, quando aplicável, o tempo de bloqueio/cooldown. Ao confirmar o lance, o usuário autoriza o consumo imediato dos Créditos LC. Créditos LC consumidos em lances válidos não retornam se o usuário não vencer.</p>
-    <p>O sistema poderá registrar data, usuário, leilão, valor, IP, dispositivo, identificador de lance e demais dados técnicos para auditoria.</p>
+    <h2>3. Conta única e dados verdadeiros</h2>
+    <p>Cada participante pode ter apenas uma conta ativa. Não são permitidos e-mail, CPF, telefone, documento ou apelido público repetidos. Também não é permitido criar conta com dados de terceiros, documentos falsos, telefone de outra pessoa, e-mail de outra pessoa ou qualquer informação destinada a burlar controles internos.</p>
+    <p>Contas relacionadas por CPF, telefone, documento, e-mail, IP suspeito, dispositivo suspeito, método de pagamento, endereço, padrão de acesso, comportamento de indicação ou histórico de uso poderão ser submetidas à análise antifraude. A análise poderá resultar em bloqueio de bônus, limitação temporária, solicitação de documentos, suspensão de pedido, encerramento de conta ou outra medida proporcional.</p>
+    <p>O apelido público pode conter letras maiúsculas e minúsculas, mas não pode conter espaço, acento ou símbolo não autorizado. Apelidos repetidos, equivalentes ou visualmente confusos poderão ser recusados para evitar duplicidade, confusão entre usuários ou tentativa de se passar por outra pessoa.</p>
 
-    <h2>5. Tempo, cooldown e modo turbo</h2>
+    <h2>4. Aceite legal e registro de auditoria</h2>
+    <p>Ao concluir o cadastro, o usuário deverá aceitar o Contrato de Serviço e Termos de Uso, estas Regras de Participação e Compra Assistida e a Política de Privacidade. A plataforma poderá registrar data, horário, IP, user-agent, versão dos documentos aceitos e identificadores técnicos necessários para comprovar o aceite, manter segurança, prevenir fraude e defender direitos.</p>
+    <p>Se houver atualização relevante dos documentos legais, a plataforma poderá exigir novo aceite para continuidade do uso.</p>
+
+    <h2>5. O que são Créditos LC</h2>
+    <p>Créditos LC são créditos pré-pagos de uso interno da plataforma Lancei o Certo. Eles podem ser comprados pelo usuário ou concedidos pela plataforma em forma de bônus promocional, ajuste operacional, benefício de indicação ou outro benefício interno.</p>
+    <p>Créditos LC servem para participar da plataforma e realizar lances, conforme as regras de cada leilão. Eles não representam dinheiro depositado, saldo bancário, investimento, promessa de ganho, aplicação financeira, carteira digital ou valor disponível para saque.</p>
+    <p>Créditos LC não são sacáveis, não são transferíveis entre contas, não rendem juros, não podem ser vendidos a terceiros e não podem ser convertidos novamente em Pix, dinheiro ou moeda corrente.</p>
+
+    <h2>6. Compra de Créditos LC</h2>
+    <p>O usuário poderá comprar Créditos LC pelos meios de pagamento disponibilizados pela plataforma. A compra mínima é de R$ 5,00, salvo regra mais restritiva exibida no momento da compra.</p>
+    <p>Os Créditos LC somente serão liberados após confirmação oficial do gateway de pagamento ou meio autorizado. Comprovantes enviados manualmente pelo usuário não substituem a confirmação oficial do provedor de pagamento.</p>
+    <p>O usuário deve utilizar método de pagamento próprio e lícito. Pagamentos com dados divergentes, cartão de terceiro sem autorização, chargeback, pagamento duplicado, falha de gateway, suspeita de origem irregular ou qualquer inconsistência poderão gerar análise, bloqueio temporário, estorno, ajuste ou solicitação de documentos adicionais.</p>
+
+    <h2>7. Créditos LC promocionais, bônus e ajustes</h2>
+    <p>Bônus de indicação, bônus de participação, Créditos LC promocionais e ajustes operacionais são benefícios internos da plataforma. Eles não possuem valor em dinheiro, não são sacáveis, não são transferíveis, não são reembolsáveis em moeda corrente e podem possuir regras próprias de validade, uso e elegibilidade.</p>
+    <p>A plataforma poderá conceder, negar, bloquear, cancelar ou ajustar Créditos LC promocionais em caso de erro técnico, fraude, conta duplicada, uso de dados de terceiros, abuso de promoção, indicação irregular, comportamento artificial, chargeback, violação contratual ou decisão administrativa fundamentada.</p>
+    <p>Quando um ajuste manual de Créditos LC for necessário para correção de erro operacional, ele deverá ser registrado com motivo, responsável, data, usuário afetado e trilha de auditoria.</p>
+
+    <h2>8. Uso dos Créditos LC em lances</h2>
+    <p>Cada botão de lance informa o custo em Créditos LC e, quando aplicável, o tempo de bloqueio/cooldown. Ao confirmar o lance, o usuário autoriza o consumo imediato dos Créditos LC correspondentes.</p>
+    <p>Créditos LC consumidos em lances válidos não retornam caso o usuário não vença. O usuário reconhece que o lance é uma ação voluntária de participação e que não há garantia de vitória, obtenção do produto, economia mínima, resultado específico ou benefício financeiro.</p>
+    <p>O sistema poderá registrar data, horário, usuário, leilão, custo em Créditos LC, IP, dispositivo, identificador de lance, estado do leilão e demais dados técnicos para auditoria, suporte, transparência e prevenção de fraude.</p>
+
+    <h2>9. Tempo, cooldown, fases especiais e modo turbo</h2>
     <p>Os leilões podem possuir regras de tempo, cooldown, incremento, valor de lance, fases especiais e modo turbo. Essas regras são exibidas na página do produto e integram estas Regras de Participação.</p>
+    <p>O modo turbo, quando utilizado, poderá alterar a dinâmica de participação, restringir lances, modificar intervalos, aplicar fases especiais ou destacar condições específicas. O usuário deverá observar as informações exibidas no próprio leilão antes de participar.</p>
+    <p>Falhas de conexão do usuário, atraso de rede, navegador desatualizado, dispositivo instável, cache local, queda de energia ou erro de operação do usuário não geram automaticamente direito a devolução de Créditos LC, sem prejuízo da análise de falha comprovada da própria plataforma.</p>
 
-    <h2>6. Vencedor</h2>
+    <h2>10. Vencedor e validação do resultado</h2>
     <p>Ao encerrar o tempo, o último participante válido será considerado vencedor, salvo falha técnica, fraude, inconsistência cadastral, manipulação, intervenção administrativa fundamentada ou regra específica em sentido diferente.</p>
+    <p>Antes de liberar o fluxo de compra assistida, a plataforma poderá validar o histórico do leilão, dados do vencedor, pagamentos, lances, documentos, IP, dispositivo e sinais antifraude. Caso haja inconsistência relevante, o pedido poderá ser colocado em análise até conclusão da apuração.</p>
 
-    <h2>7. Pagamento do arremate</h2>
-    <p>O vencedor deverá pagar o valor de arremate dentro do prazo indicado. O pedido só avança após confirmação oficial do gateway de pagamento. Comprovantes enviados manualmente não substituem a confirmação oficial.</p>
+    <h2>11. Pagamento do arremate</h2>
+    <p>O vencedor deverá pagar o valor de arremate dentro do prazo indicado na página do pedido. O pedido só avança após confirmação oficial do gateway de pagamento ou meio autorizado. Comprovantes enviados manualmente não substituem a confirmação oficial.</p>
+    <p>O não pagamento dentro do prazo poderá resultar em perda do direito de compra assistida, encerramento do pedido, relançamento do produto ou aplicação da regra específica do leilão. Casos excepcionais poderão ser analisados pelo suporte, desde que haja evidência suficiente e boa-fé do usuário.</p>
 
-    <h2>8. Compra assistida</h2>
+    <h2>12. Compra assistida</h2>
     <p>Após o pagamento do arremate, o vencedor acessa o fluxo de compra assistida. O pedido poderá ser feito pelo próprio usuário em loja terceira aprovada, com envio de link, código Pix ou checkout para análise, ou pela equipe da plataforma quando necessário.</p>
-    <p>A plataforma poderá recusar links de pagamento inválidos, encurtados, suspeitos, incompatíveis com o produto, com domínio diferente do aprovado, produto divergente, preço divergente, frete abusivo, loja não confiável, produto esgotado ou carrinho com itens extras.</p>
+    <p>Quando o usuário gerar o pedido em loja terceira, ele deverá preencher corretamente seus próprios dados, CPF, endereço, frete e demais informações solicitadas pela loja. Erros de endereço, dados incompletos, frete incorreto, produto errado ou link incompatível poderão atrasar, impedir ou cancelar a compra assistida.</p>
+    <p>A plataforma poderá recusar links de pagamento inválidos, encurtados, suspeitos, incompatíveis com o produto, com domínio diferente do aprovado, produto divergente, preço divergente, frete abusivo, loja não confiável, produto usado quando o anunciado era novo, produto esgotado, carrinho com item extra ou qualquer inconsistência operacional.</p>
 
-    <h2>9. Produto, entrega e garantia</h2>
+    <h2>13. Produto, loja terceira, nota fiscal, entrega e garantia</h2>
     <p>Quando o produto for comprado em loja terceira, a venda, nota fiscal, garantia, troca, devolução, disponibilidade, prazo de entrega e rastreio seguem as regras da loja vendedora, com acompanhamento do suporte Lancei o Certo dentro dos limites da intermediação.</p>
-    <p>O usuário deve informar endereço correto, guardar comprovantes, acompanhar o pedido e comunicar qualquer problema pelos canais oficiais de suporte.</p>
+    <p>O Lancei o Certo não garante estoque permanente, preço fixo em loja terceira, frete imutável, prazo de entrega imutável ou aceitação automática de qualquer link enviado.</p>
+    <p>O usuário deve informar endereço correto, guardar comprovantes, acompanhar o pedido e comunicar qualquer problema pelos canais oficiais de suporte. A plataforma poderá solicitar nota fiscal, rastreio, prints, fotos, vídeos, protocolos, comprovantes e comunicações com a loja para ajudar na mediação.</p>
 
-    <h2>10. Produto esgotado, preço alterado ou frete divergente</h2>
-    <p>Se o produto ficar indisponível, tiver alteração relevante de preço, mudança de frete ou cancelamento pela loja, a plataforma poderá solicitar novo link, oferecer produto equivalente, aguardar reposição, cancelar a compra assistida, reembolsar o valor de arremate ou adotar solução proporcional ao caso.</p>
+    <h2>14. Produto esgotado, preço alterado, frete divergente ou pedido cancelado</h2>
+    <p>Se o produto ficar indisponível, tiver alteração relevante de preço, mudança de frete, alteração de prazo, recusa de pagamento ou cancelamento pela loja, a plataforma poderá solicitar novo link, oferecer produto equivalente, aguardar reposição, cancelar a compra assistida, reembolsar o valor de arremate ou adotar solução proporcional ao caso.</p>
+    <p>A escolha da solução dependerá do histórico do pedido, valor, disponibilidade, causa do problema, documentos enviados, regra do leilão e análise administrativa. Todas as decisões relevantes deverão ser registradas no suporte ou nos logs internos.</p>
 
-    <h2>11. Bônus LC e indicação</h2>
-    <p>Bônus de indicação, bônus de participação e Créditos LC promocionais são benefícios internos. Eles não possuem valor em dinheiro, não são sacáveis e podem depender de depósito mínimo, compra mínima, uso legítimo, validação antifraude e ausência de contas relacionadas.</p>
-    <p>O depósito mínimo para ativar indicação é de R$ 5,00, e a compra mínima elegível é de 1 Crédito LC, salvo regra promocional mais restritiva.</p>
+    <h2>15. Programa de indicação</h2>
+    <p>Cada usuário poderá possuir um código universal de indicação. O código poderá ser utilizado por novos usuários apenas no primeiro depósito ou primeira compra elegível de Créditos LC, conforme regras vigentes.</p>
+    <p>O depósito mínimo para ativar indicação é de R$ 5,00, e a compra mínima elegível é de 1 Crédito LC, salvo regra promocional mais restritiva. O bônus de indicação, quando aplicável, será concedido em Créditos LC promocionais e dependerá de validação antifraude.</p>
+    <p>O bônus poderá ser negado, bloqueado ou colocado em análise quando houver autoindicação, contas duplicadas, CPF relacionado, telefone relacionado, documento relacionado, e-mail relacionado, IP suspeito, dispositivo suspeito, método de pagamento relacionado, padrão artificial de cadastro ou qualquer indício de abuso.</p>
 
-    <h2>12. Cancelamento, disputa e suporte</h2>
-    <p>O usuário pode abrir chamado em sua conta para contestar pagamento, lance, pedido, link, entrega, defeito, documento, indicação ou qualquer problema operacional. A administração deverá registrar categoria, motivo, comprovantes, histórico e decisão para auditoria.</p>
+    <h2>16. Suporte oficial e abertura de chamados</h2>
+    <p>O usuário deve abrir chamado pelos canais oficiais da plataforma para tratar pagamentos, Créditos LC, lances, pedidos, documentos, indicação, entrega, troca, defeito, contestação, bloqueio de conta ou qualquer problema operacional.</p>
+    <p>Cada chamado poderá receber protocolo, categoria, prioridade, status, responsável, histórico de mensagens, notas internas, anexos, prazo estimado e decisão final. O suporte poderá solicitar comprovantes, prints, links, nota fiscal, rastreio, fotos, vídeos, protocolos, documentos e demais evidências necessárias.</p>
+    <p>A falta de envio das informações solicitadas poderá atrasar ou impedir a solução. Informações falsas, ofensivas, manipuladas ou incompletas poderão levar ao encerramento do chamado, bloqueio de funcionalidades ou análise antifraude.</p>
 
-    <h2>13. Transparência e auditoria</h2>
+    <h2>17. Categorias de suporte</h2>
+    <p>Os chamados poderão ser classificados, entre outras, nas seguintes categorias: pagamento de Créditos LC não identificado, Créditos LC descontados indevidamente, contestação de lance, problema no arremate, link de compra assistida recusado, produto esgotado, preço alterado, pedido atrasado, produto com defeito, documento em análise, bônus de indicação, conta bloqueada, suspeita de fraude, cancelamento, reembolso e dúvida geral.</p>
+    <p>A categoria correta ajuda a plataforma a buscar informações no servidor, consultar pagamentos, verificar movimentações de Créditos LC, analisar histórico de lances, conferir indicação, revisar pedidos e apresentar ao administrador um dossiê organizado da conta.</p>
+
+    <h2>18. Diagnóstico interno pelo suporte</h2>
+    <p>Para resolver chamados, a equipe autorizada poderá consultar dados necessários da conta do usuário, incluindo cadastro, status de documentos, pagamentos, compras de Créditos LC, movimentações, lances, pedidos, links de compra assistida, indicações, bônus, chamados anteriores e registros técnicos de auditoria.</p>
+    <p>O acesso do administrador deverá ocorrer somente para finalidade legítima de atendimento, segurança, prevenção de fraude, correção operacional, análise de disputa ou cumprimento de obrigação legal. Consultas, ajustes e decisões relevantes poderão ser registradas em logs internos.</p>
+    <p>Quando o problema exigir correção manual, como ajuste de Créditos LC, reclassificação de pagamento, revisão de bônus ou reabertura de pedido, a ação deverá conter motivo obrigatório, responsável, data e trilha de auditoria. Casos críticos poderão ser escalados ao administrador master.</p>
+
+    <h2>19. Escalonamento para administrador master</h2>
+    <p>O administrador comum poderá resolver a maior parte dos problemas operacionais dentro dos limites definidos pela plataforma. Casos de alto valor, suspeita de fraude, pedido sensível, ajuste manual acima do limite, reclamação grave, inconsistência sistêmica, chargeback, ameaça judicial, reclamação externa ou erro recorrente deverão ser escalados ao administrador master ou responsável superior.</p>
+    <p>O escalonamento não significa reconhecimento automático de erro, mas sim necessidade de análise superior, auditoria adicional ou decisão administrativa mais sensível.</p>
+
+    <h2>20. Disputas, reabertura e decisão administrativa</h2>
+    <p>Quando houver divergência entre usuário e plataforma, o caso poderá ser tratado como disputa. A disputa deverá reunir histórico, comprovantes, logs, mensagens, pagamentos, lances, pedido, documentos e demais elementos disponíveis.</p>
+    <p>A plataforma poderá decidir pela manutenção do status, correção de Créditos LC, liberação de pedido, solicitação de novo documento, novo link, reembolso de arremate, cancelamento de bônus, bloqueio de conta ou outra solução proporcional.</p>
+    <p>Chamados resolvidos poderão ser reabertos quando o usuário apresentar fato novo, documento novo ou problema relacionado ao mesmo caso. Chamados repetitivos, abusivos ou sem novos elementos poderão ser encerrados administrativamente.</p>
+
+    <h2>21. Cancelamento, estorno e reembolso</h2>
+    <p>Créditos LC utilizados em lances válidos não são reembolsáveis. Créditos LC promocionais, bônus de participação e bônus de indicação não são reembolsáveis em dinheiro.</p>
+    <p>Pagamentos de arremate poderão ser reembolsados quando a compra assistida não puder ser realizada por motivo imputável à plataforma ou por impossibilidade operacional não resolvida por alternativa proporcional.</p>
+    <p>A plataforma poderá negar reembolso em caso de fraude, má-fé, uso indevido, conta duplicada, violação contratual, consumo regular dos Créditos LC, tentativa de abuso de regras ou ausência de comprovação mínima.</p>
+
+    <h2>22. Transparência, auditoria e histórico</h2>
     <p>Resultados, vencedores por apelido público, status de pagamento, uso de Créditos LC, pedidos, solicitações, chamados e ações administrativas devem permanecer rastreáveis dentro do painel e dos registros internos.</p>
+    <p>A plataforma poderá manter histórico de transações, lances, pagamentos, pedidos, suporte, documentos, aceite legal e logs técnicos pelo prazo necessário para operação, cumprimento legal, prevenção de fraude, resolução de disputas e defesa de direitos.</p>
 
-    <h2>14. Condutas proibidas</h2>
-    <p>São proibidos múltiplas contas, documentos falsos, dados de terceiros, automação, bots, exploração de falhas, conluio, manipulação de lances, chargeback fraudulento, ofensas, tentativa de converter Créditos LC em dinheiro e qualquer ação destinada a obter vantagem indevida.</p>
+    <h2>23. Condutas proibidas</h2>
+    <p>São proibidos: múltiplas contas, documentos falsos, dados de terceiros, automação, bots, scripts, exploração de falhas, conluio, manipulação de lances, chargeback fraudulento, ofensas, ameaça ao suporte, tentativa de converter Créditos LC em dinheiro, venda de conta, uso de conta de terceiros, uso indevido de código de indicação, fraude em pagamento e qualquer ação destinada a obter vantagem indevida.</p>
+    <p>A violação destas regras poderá resultar em advertência, bloqueio de funcionalidades, cancelamento de bônus, suspensão de leilões, perda de elegibilidade, bloqueio de conta, encerramento de conta, cancelamento de pedidos, retenção para análise e adoção de medidas legais cabíveis.</p>
+
+    <h2>24. Falhas técnicas e correções</h2>
+    <p>A plataforma poderá passar por manutenção, atualização, instabilidade ou indisponibilidade temporária. Falhas técnicas serão analisadas com base em logs, horário do servidor, registros de pagamento, lances, eventos e demais evidências disponíveis.</p>
+    <p>Quando houver erro técnico comprovado, a plataforma poderá corrigir Créditos LC, status de lance, status de pedido, resultado, bônus, pagamento ou registro relacionado. Correções manuais relevantes deverão ser registradas para auditoria.</p>
+
+    <h2>25. Declaração final do participante</h2>
+    <p>Ao participar, o usuário declara compreender que Créditos LC são pré-pagos de uso interno; que Créditos LC não são dinheiro, não são sacáveis e não são conversíveis em moeda corrente; que cada lance consome Créditos LC; que Créditos LC usados em lances válidos não retornam se o usuário não vencer; que a compra assistida pode depender de loja terceira, estoque, preço, frete, link válido, pagamento aprovado e análise operacional; e que problemas devem ser tratados pelos canais oficiais de suporte com registro de protocolo e evidências.</p>
   </div>
 </section>
-<style>.legal-page{padding:34px 20px}.legal-card{max-width:980px;margin:0 auto;border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.88);border-radius:24px;padding:28px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,.25)}.legal-card h1{font-size:36px;margin:8px 0 12px}.legal-card h2{margin-top:24px;color:#bfdbfe}.legal-card p{line-height:1.65;color:#dbeafe}.muted{color:#b7c6e6!important}.eyebrow{color:#60a5fa;font-weight:900;text-transform:uppercase;letter-spacing:.08em}</style>
+<style>
+.legal-page{padding:34px 20px}.legal-card{max-width:1060px;margin:0 auto;border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.88);border-radius:24px;padding:28px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,.25)}.legal-card h1{font-size:36px;margin:8px 0 12px;line-height:1.1}.legal-card h2{margin-top:24px;color:#bfdbfe}.legal-card p{line-height:1.65;color:#dbeafe}.muted{color:#b7c6e6!important}.eyebrow{color:#60a5fa;font-weight:900;text-transform:uppercase;letter-spacing:.08em}.legal-highlight{padding:16px 18px;border:1px solid rgba(96,165,250,.28);border-radius:18px;background:rgba(37,99,235,.13);color:#dbeafe;line-height:1.6;margin:16px 0 22px}.legal-highlight strong{color:#fff}@media(max-width:720px){.legal-page{padding:22px 12px}.legal-card{padding:20px;border-radius:20px}.legal-card h1{font-size:28px}}
+</style>
 {% endblock %}
