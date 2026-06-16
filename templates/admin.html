@@ -1,1471 +1,1528 @@
 {% extends "base.html" %}
-{% block extra_head %}
-<link rel="stylesheet" href="/static/account.css" />
-<style>
-/* Correção: o CSS da área de pedidos precisa ficar dentro do bloco extra_head.
-   Antes ele estava depois do endblock de content e o template base não renderizava,
-   deixando a foto do pedido gigante na tela. */
-/* Área de pedidos estilo marketplace */
-.orders-page-marketplace,.order-detail-page{display:grid;gap:18px}.orders-head-marketplace{padding:22px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:linear-gradient(135deg,rgba(37,99,235,.15),rgba(15,23,42,.94));box-shadow:0 16px 42px rgba(0,0,0,.22)}.orders-eyebrow{display:inline-flex;margin-bottom:8px;color:#93c5fd;font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.orders-head-marketplace h1{font-size:34px;margin:0 0 6px}.orders-list-marketplace{display:grid;gap:14px}.order-summary-card{display:grid;grid-template-columns:118px minmax(0,1fr) 170px;gap:16px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.18);border-radius:22px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(15,23,42,.86));box-shadow:0 14px 36px rgba(0,0,0,.20)}.order-summary-left img{width:118px;height:118px;border-radius:18px;object-fit:cover;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04)}.order-summary-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.order-number{display:inline-flex;color:#93c5fd;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.07em}.order-summary-title-row h2{font-size:20px;line-height:1.2;margin:4px 0 0}.order-status-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 11px;border-radius:999px;font-size:12px;font-weight:950;border:1px solid rgba(96,165,250,.28);background:rgba(59,130,246,.13);color:#bfdbfe;white-space:nowrap}.order-status-chip.status-pending_payment{border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.11);color:#fde68a}.order-status-chip.status-sent,.order-status-chip.status-purchased,.order-status-chip.status-processing,.order-status-chip.status-paid{border-color:rgba(56,189,248,.34);background:rgba(14,165,233,.10);color:#bae6fd}.order-status-chip.status-delivered,.order-status-chip.status-finalized,.order-status-chip.status-completed{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.10);color:#bbf7d0}.order-status-chip.status-expired{border-color:rgba(248,113,113,.36);background:rgba(239,68,68,.12);color:#fecaca}.order-summary-progress{position:relative;display:flex;gap:8px;margin:13px 0}.order-summary-progress:before{content:"";position:absolute;left:8px;right:8px;top:50%;height:2px;background:rgba(148,163,184,.18);transform:translateY(-50%)}.order-dot{position:relative;z-index:1;width:16px;height:16px;border-radius:50%;border:2px solid rgba(148,163,184,.4);background:#0f172a}.order-dot.done{background:#22c55e;border-color:#86efac}.order-dot.active{background:#f59e0b;border-color:#fde68a}.order-dot.danger{background:#ef4444;border-color:#fecaca}.order-summary-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.order-summary-meta div{padding:10px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.13)}.order-summary-meta span,.order-detail-values span,.tracking-code-box span,.purchase-status-box span{display:block;color:#b7c6e6;font-size:12px;font-weight:800;margin-bottom:4px}.order-summary-meta strong{font-size:14px}.order-saving{color:#bbf7d0!important}.order-admin-note{margin:10px 0 0;color:#dbeafe;background:rgba(59,130,246,.08);border:1px solid rgba(96,165,250,.18);border-radius:13px;padding:9px 11px}.order-summary-actions{display:flex;flex-direction:column;align-items:stretch;gap:9px}.orders-empty-marketplace{text-align:center;padding:34px}.order-detail-topbar{display:flex;justify-content:space-between;align-items:center;gap:12px}.order-detail-hero{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;padding:18px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:linear-gradient(135deg,rgba(37,99,235,.14),rgba(15,23,42,.94));box-shadow:0 16px 42px rgba(0,0,0,.22)}.order-detail-product{display:flex;gap:16px;align-items:center}.order-detail-product img{width:126px;height:126px;border-radius:20px;object-fit:cover;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04)}.order-detail-product h1{margin:5px 0 6px;font-size:30px;line-height:1.1}.order-detail-product p{margin:0;color:#cbd5e1}.order-detail-values{display:grid;gap:9px}.order-detail-values div{border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.045);border-radius:16px;padding:12px;text-align:right}.order-detail-values strong{font-size:22px}.order-panel-title h2{margin:0 0 4px}.order-panel-title p{margin:0;color:#b7c6e6}.order-detail-timeline{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:16px}.order-detail-step{position:relative;display:grid;gap:8px;padding:13px;border-radius:17px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.16)}.order-detail-step strong{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff}.order-detail-step span{font-weight:900}.order-detail-step small{display:block;color:#b7c6e6;line-height:1.35}.order-detail-step.done{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08)}.order-detail-step.done strong{background:#22c55e}.order-detail-step.active{border-color:rgba(251,191,36,.34);background:rgba(251,191,36,.09)}.order-detail-step.active strong{background:#f59e0b}.order-detail-step.danger{border-color:rgba(239,68,68,.34);background:rgba(239,68,68,.09)}.order-detail-grid{display:grid;grid-template-columns:1.3fr .9fr;gap:16px}.order-history-list{display:grid;gap:11px;margin-top:10px}.order-history-item{position:relative;padding:12px 12px 12px 18px;border-radius:16px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.14)}.order-history-item:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:4px;border-radius:99px;background:#3b82f6}.order-history-item span{color:#93c5fd;font-size:12px;font-weight:900}.order-history-item strong{display:block;margin:3px 0}.order-history-item p{margin:0;color:#cbd5e1}.tracking-code-box,.purchase-status-box{border:1px solid rgba(96,165,250,.24);background:rgba(59,130,246,.09);border-radius:17px;padding:14px;margin-top:10px}.tracking-code-box strong{font-size:20px;color:#bfdbfe;word-break:break-all}.muted-box{border-color:rgba(148,163,184,.18);background:rgba(255,255,255,.04)}.order-address-lines{display:grid;gap:7px;color:#dbeafe}.order-address-lines strong{font-size:17px;color:#fff}.order-finance-list{display:grid;gap:8px}.order-finance-list div{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.12)}.order-finance-list div:last-child{border-bottom:none}.order-support-panel{display:grid;gap:14px}.order-support-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.order-detail-dispute{width:100%}.order-detail-dispute summary{width:max-content;list-style:none}.order-detail-dispute summary::-webkit-details-marker{display:none}.order-finished-note{display:inline-flex;padding:10px 12px;border-radius:14px;border:1px solid rgba(74,222,128,.30);background:rgba(74,222,128,.09);color:#bbf7d0;font-weight:900}@media(max-width:980px){.order-summary-card{grid-template-columns:90px minmax(0,1fr)}.order-summary-left img{width:90px;height:90px}.order-summary-actions{grid-column:1/-1;flex-direction:row}.order-summary-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.order-detail-hero,.order-detail-grid{grid-template-columns:1fr}.order-detail-values div{text-align:left}.order-detail-timeline{grid-template-columns:1fr 1fr}.order-detail-product{align-items:flex-start}}@media(max-width:620px){.order-summary-card{grid-template-columns:1fr}.order-summary-left img{width:100%;height:180px}.order-summary-title-row{flex-direction:column}.order-summary-meta,.order-detail-timeline{grid-template-columns:1fr}.order-detail-product{flex-direction:column}.order-detail-product img{width:100%;height:210px}.order-detail-topbar{align-items:flex-start;flex-direction:column}}
-
-
-.wins-page-pro{display:grid;gap:18px}.wins-head-pro{padding:22px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:linear-gradient(135deg,rgba(37,99,235,.16),rgba(15,23,42,.92));box-shadow:0 18px 45px rgba(0,0,0,.22)}.wins-eyebrow{display:inline-flex;margin-bottom:8px;color:#93c5fd;font-weight:900;text-transform:uppercase;letter-spacing:.08em;font-size:12px}.wins-head-pro h1{font-size:36px;margin:0 0 6px}.wins-head-pro p{max-width:760px}.wins-order-grid{display:grid;gap:16px}.win-order-card{display:grid;grid-template-columns:230px minmax(0,1fr);gap:0;border:1px solid rgba(148,163,184,.20);background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(15,23,42,.84));border-radius:24px;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.26)}.win-order-media{position:relative;min-height:210px;background:rgba(255,255,255,.04)}.win-order-media img{width:100%;height:100%;min-height:210px;object-fit:cover;display:block}.win-status-pill{position:absolute;left:12px;top:12px;display:inline-flex;padding:8px 11px;border-radius:999px;font-size:12px;font-weight:900;background:rgba(59,130,246,.88);border:1px solid rgba(255,255,255,.18);box-shadow:0 10px 24px rgba(0,0,0,.24)}.win-status-pill.status-expired{background:rgba(239,68,68,.88)}.win-status-pill.status-delivered,.win-status-pill.status-completed{background:rgba(34,197,94,.88)}.win-status-pill.status-purchased,.win-status-pill.status-sent,.win-status-pill.status-processing{background:rgba(14,165,233,.88)}.win-order-body{padding:18px;display:grid;gap:16px}.win-order-title-row{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.win-order-title-row h2{margin:0 0 5px;font-size:24px}.win-order-title-row p{margin:0;color:#b7c6e6}.win-price-box{min-width:135px;border:1px solid rgba(74,222,128,.25);background:rgba(74,222,128,.08);border-radius:18px;padding:12px;text-align:right}.win-price-box span,.win-info-grid span{display:block;color:#b7c6e6;font-size:12px;font-weight:800;margin-bottom:5px}.win-price-box strong{font-size:22px;color:#dcfce7}.win-order-timeline{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.win-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#94a3b8;font-weight:900}.win-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff;font-size:12px}.win-step.done{border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.09);color:#dcfce7}.win-step.done strong{background:#22c55e}.win-step.active{border-color:rgba(251,191,36,.38);background:rgba(251,191,36,.10);color:#fde68a}.win-step.active strong{background:#f59e0b}.win-info-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.win-info-grid div{border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.04);border-radius:16px;padding:12px}.win-info-grid strong{font-size:14px}.tracking-code{color:#bfdbfe}.win-order-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:2px}.win-progress-note,.win-success-note,.win-expired-note{display:inline-flex;padding:10px 12px;border-radius:14px;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);color:#dbeafe;font-weight:800}.win-success-note{border-color:rgba(74,222,128,.32);background:rgba(74,222,128,.08);color:#bbf7d0}.win-expired-note{border-color:rgba(239,68,68,.34);background:rgba(239,68,68,.09);color:#fecaca}.win-dispute-box{width:100%}.win-dispute-box summary{width:max-content;list-style:none}.win-dispute-box summary::-webkit-details-marker{display:none}.wins-empty-pro{text-align:center;padding:34px}.wins-empty-pro h2{margin-top:0}@media(max-width:900px){.win-order-card{grid-template-columns:1fr}.win-order-media img,.win-order-media{min-height:230px}.win-order-title-row{flex-direction:column}.win-price-box{text-align:left}.win-order-timeline,.win-info-grid{grid-template-columns:1fr}.wins-head-pro{flex-direction:column}}
-
-.account-doc-status-card{border-color:rgba(96,165,250,.28);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(15,23,42,.82))}.doc-status-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px}.doc-status-header h2{margin:4px 0 6px;font-size:24px}.doc-status-header p{margin:0;color:#b7c6e6;line-height:1.45}.doc-status-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:999px;font-weight:900;white-space:nowrap;border:1px solid rgba(251,191,36,.38);background:rgba(251,191,36,.12);color:#fde68a}.doc-status-pill.verified{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.12);color:#bbf7d0}.doc-status-pill.rejected{border-color:rgba(239,68,68,.45);background:rgba(239,68,68,.12);color:#fecaca}.doc-admin-note{display:grid;gap:5px;margin:12px 0 16px;padding:13px 14px;border-radius:15px;border:1px solid rgba(96,165,250,.26);background:rgba(37,99,235,.10)}.doc-admin-note span{color:#dbeafe}.doc-progress-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}.doc-step{display:flex;align-items:center;gap:8px;padding:10px;border-radius:15px;background:rgba(255,255,255,.045);border:1px solid rgba(148,163,184,.16);color:#b7c6e6;font-weight:800}.doc-step strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(148,163,184,.18);color:#fff}.doc-step.done{border-color:rgba(74,222,128,.34);background:rgba(74,222,128,.08);color:#dcfce7}.doc-step.done strong{background:#22c55e;color:#fff}.doc-check-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.doc-check-grid div{border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.045);border-radius:15px;padding:12px}.doc-check-grid span{display:block;color:#bfdbfe;font-size:13px;margin-bottom:5px}.doc-actions-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px}.doc-actions-row small{color:#b7c6e6}@media(max-width:850px){.doc-progress-line,.doc-check-grid{grid-template-columns:1fr}.doc-status-header{flex-direction:column}}
-
-.account-danger-link{color:#fecaca!important;border-color:rgba(248,113,113,.24)!important}.account-danger-link.active{background:rgba(239,68,68,.16)!important;color:#fff!important}.delete-account-card{border-color:rgba(248,113,113,.26)!important;background:linear-gradient(180deg,rgba(127,29,29,.12),rgba(15,23,42,.92))!important}.delete-account-card .section-head{margin-bottom:8px}.delete-account-form{display:grid;gap:12px;max-width:760px}.delete-account-form select,.delete-account-form textarea{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.delete-account-form textarea{resize:vertical;min-height:84px}.delete-account-form small{display:block;margin-top:6px;color:#b7c6e6}.delete-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:2px}.delete-actions .btn{width:auto}.danger-btn{background:linear-gradient(135deg,#dc2626,#991b1b)!important;border-color:rgba(248,113,113,.45)!important}.delete-confirm-overlay{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:22px;background:rgba(2,6,23,.72);backdrop-filter:blur(8px)}.delete-confirm-overlay.active{display:flex}.delete-confirm-card{width:min(460px,100%);border:1px solid rgba(248,113,113,.30);background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(30,41,59,.98));border-radius:22px;padding:20px;box-shadow:0 28px 80px rgba(0,0,0,.48)}.delete-confirm-card h2{margin:0 0 8px;font-size:26px}.delete-confirm-card p{margin:0 0 10px;color:#cbd5e1;line-height:1.45}.delete-confirm-card .delete-confirm-warning{border:1px solid rgba(248,113,113,.24);background:rgba(239,68,68,.10);color:#fecaca;border-radius:15px;padding:12px;margin:12px 0}.delete-confirm-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:16px}.delete-confirm-actions .btn{width:auto}
-.account-status-panel.verified{border-color:rgba(74,222,128,.35);background:rgba(74,222,128,.08)}.account-status-panel.pending{border-color:rgba(251,191,36,.32);background:rgba(251,191,36,.08)}.notice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.pending-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.12)}.pending-row:last-child{border-bottom:0}.mini-auction{display:flex;gap:12px;align-items:center}.mini-auction img{width:82px;height:82px;border-radius:14px;object-fit:cover}.account-wallet-panel.active{display:block}
-
-/* Minha Conta - verificação documental limpa */
-.account-doc-status-card.clean-doc-card{border-color:rgba(148,163,184,.18);background:linear-gradient(180deg,rgba(15,23,42,.94),rgba(15,23,42,.84))}.clean-doc-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:14px}.clean-doc-head h2{margin:4px 0 0;font-size:24px}.clean-doc-head .eyebrow{margin-bottom:2px}.clean-doc-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 13px;border-radius:999px;font-weight:950;white-space:nowrap;border:1px solid rgba(251,191,36,.34);background:rgba(251,191,36,.10);color:#fde68a}.clean-doc-pill.ok{border-color:rgba(74,222,128,.38);background:rgba(74,222,128,.10);color:#bbf7d0}.clean-doc-pill.bad{border-color:rgba(248,113,113,.38);background:rgba(239,68,68,.10);color:#fecaca}.clean-doc-list{display:grid;gap:8px;margin:12px 0 16px}.clean-doc-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;border-radius:14px;border:1px solid rgba(148,163,184,.14);background:rgba(255,255,255,.035)}.clean-doc-row span{color:#dbeafe;font-weight:900}.clean-doc-row strong{font-size:13px;padding:6px 10px;border-radius:999px;background:rgba(148,163,184,.12);color:#cbd5e1;white-space:nowrap}.clean-doc-row strong.done{background:rgba(74,222,128,.10);color:#bbf7d0;border:1px solid rgba(74,222,128,.24)}.clean-doc-row strong.pending{background:rgba(251,191,36,.10);color:#fde68a;border:1px solid rgba(251,191,36,.22)}.clean-doc-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.clean-doc-actions .btn{width:auto}@media(max-width:700px){.clean-doc-head{flex-direction:column}.clean-doc-row{align-items:flex-start;flex-direction:column}.clean-doc-actions .btn{width:100%}}
-
-.pix-payment-box{margin-top:14px;border:1px solid rgba(74,222,128,.28);background:rgba(74,222,128,.08);border-radius:18px;padding:14px;display:grid;gap:12px}
-.pix-payment-box h3{margin:0;font-size:18px}
-.pix-payment-box p{margin:0;color:#cbd5e1}
-.pix-qr-wrap{display:grid;grid-template-columns:180px minmax(0,1fr);gap:14px;align-items:center}
-.pix-qr-wrap img{width:180px;height:180px;border-radius:14px;background:#fff;padding:8px}
-.pix-code-copy{width:100%;min-height:96px;margin-top:7px;padding:12px;border-radius:12px;border:1px solid rgba(148,163,184,.22);background:rgba(15,23,42,.85);color:#fff;resize:vertical}
-.pix-expire-note{font-size:13px!important;color:#fde68a!important;font-weight:850}.payment-note{display:block;margin:8px 0 14px;color:#b7c6e6;font-size:13px;line-height:1.35}.pix-status-line{font-size:13px;font-weight:800;color:#fde68a}
-.pix-status-line.approved{color:#bbf7d0}
-@media(max-width:720px){.pix-qr-wrap{grid-template-columns:1fr}.pix-qr-wrap img{width:100%;height:auto;max-width:260px;margin:0 auto}}
-
-.wallet-error{display:none;margin-bottom:14px;padding:12px 14px;border-radius:12px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.30);color:#fecaca;font-weight:800;line-height:1.35}.wallet-error.show{display:block}
-
-</style>
-{% endblock %}
 {% block content %}
-<div class="account-shell">
-  <aside class="account-sidebar">
-    <h2>Minha Conta</h2>
+<section class="container account-page admin-page-pro admin-production-page">
+  <div class="account-layout admin-layout-pro">
+    <aside class="account-sidebar admin-sidebar-clean admin-production-sidebar">
+      <div class="admin-sidebar-top">
+        <span class="admin-badge">⚙️ Painel Admin</span>
+        <h2>Controle Geral</h2>        
+      </div>
 
-    <a href="/minha-conta" class="account-side-link {% if section == 'dashboard' %}active{% endif %}">
-      Resumo da conta
-    </a>
-
-    <a href="/minha-conta/saldo"
-       class="account-side-link account-side-balance {% if section == 'wallet' %}active{% endif %}">
-      Créditos LC
-    </a>
-
-    <a href="/minha-conta/cadastro" class="account-side-link {% if section == 'profile' %}active{% endif %}">
-      Meu Cadastro
-    </a>
-
-    <a href="/minha-conta/auditoria" class="account-side-link {% if section == 'receipts' %}active{% endif %}">
-      Auditoria
-    </a>
-
-    <a href="/minha-conta/participacoes" class="account-side-link {% if section == 'participations' %}active{% endif %}">
-      Leilões Participados
-    </a>
-
-    <a href="/minha-conta/ganhos" class="account-side-link {% if section in ['wins','order_detail'] %}active{% endif %}">
-      Leilões Ganhos
-    </a>
-
-    <a href="/minha-conta/pagamentos" class="account-side-link {% if section == 'payments' %}active{% endif %}">
-      Pagamentos Pendentes
-    </a>
-
-    <a href="/minha-conta/expirados" class="account-side-link {% if section == 'expired' %}active{% endif %}">
-      Produtos Expirados
-    </a>
-
-    <a href="/minha-conta/deletar" class="account-side-link account-danger-link {% if section == 'delete_account' %}active{% endif %}">
-      Excluir conta
-    </a>
-  </aside>
-
-  <main class="account-main">
-{% if section == 'dashboard' %}
-<div class="section-head">
-  <div>
-    <h1>Resumo da conta</h1>
-  </div>
-</div>
-
-<div class="stats-grid account-stats">
-  <div class="stat"><span>Participações</span><strong>{{ stats.distinct_auctions }}</strong></div>
-  <div class="stat"><span>Lances</span><strong>{{ stats.bids_total }}</strong></div>
-  <div class="stat"><span>Leilões ganhos</span><strong>{{ stats.won }}</strong></div>
-  <div class="stat"><span>Pagamentos pendentes</span><strong>{{ stats.pending }}</strong></div>
-  <div class="stat"><span>Produtos expirados</span><strong>{{ stats.expired }}</strong></div>
-</div>
-
-<div class="panel-card account-status-panel {{ 'verified' if user.identity_status == 'verified' else 'pending' }}">
-  <div>
-    <span class="status-dot"></span>
-    {% if user.identity_status == 'verified' %}
-      <h2>Conta ativada</h2>
-      <p>Seu cadastro e documentos estão aprovados.</p>
-    {% elif user.document_file_url and user.selfie_file_url and user.residence_proof_file_url %}
-      <h2>Conta com documentos em análise</h2>
-      <p>Recebemos seus documentos. Aguarde a conferência do administrador.</p>
-    {% else %}
-      <h2>Conta com pendências</h2>
-      <p>Envie seus documentos para liberar todas as funções da plataforma.</p>
-    {% endif %}
-  </div>
-  <a href="/minha-conta/cadastro" class="btn small {{ 'ghost' if user.identity_status == 'verified' else '' }}">Ver cadastro</a>
-</div>
-
-<div class="notice-grid">
-  <div class="panel-card">
-    <h2>Último leilão ganho</h2>
-    {% if latest_orders %}
-      {% set o = latest_orders[0] %}
-      <div class="mini-auction">
-        <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async">
-        <div>
-          <strong>{{ o.auction_title }}</strong>
-          <p>Status: {{ o.status_label or o.status }}</p>
-          <p>Valor final: <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></p>
-          <a href="/minha-conta/pedido/{{ o.id }}" class="btn small">Acompanhar</a>
+      <nav class="admin-sidebar-nav" aria-label="Menu do painel administrativo">
+        {% if user.is_superadmin %}
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Visão geral</span>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-dashboard' %}active{% endif %}" href="/admin?tab=admin-dashboard" data-target="admin-dashboard" data-no-prefetch="true">Resumo Geral</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-cashflow' %}active{% endif %}" href="/admin?tab=admin-cashflow" data-target="admin-cashflow" data-no-prefetch="true">Fluxo de Caixa</a>
         </div>
-      </div>
-    {% else %}
-      <p class="muted">Você ainda não ganhou nenhum leilão.</p>
-    {% endif %}
-  </div>
-
-  <div class="panel-card">
-    <h2>Pagamentos pendentes</h2>
-    {% if pending_orders %}
-      {% for o in pending_orders %}
-      <div class="pending-row">
-        <div>
-          <strong>{{ o.auction_title }}</strong>
-          <p>Valor: R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
-          <p class="highlight-warn">Prazo: {{ o.remaining_label }}</p>
-        </div>
-        <a href="/minha-conta/pagamentos/{{ o.auction_id }}" class="btn small">Pagar</a>
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="muted">Nenhum pagamento pendente no momento.</p>
-    {% endif %}
-  </div>
-
-  <div class="panel-card">
-    <h2>Chamados em aberto</h2>
-    {% if open_tickets %}
-      {% for t in open_tickets %}
-      <div class="pending-row">
-        <div>
-          <strong>{{ t.subject or 'Chamado de suporte' }}</strong>
-          <p>Status: {{ t.status }}</p>
-        </div>
-        {% if t.order_id %}<a href="/minha-conta/pedido/{{ t.order_id }}" class="btn small ghost">Ver pedido</a>{% endif %}
-      </div>
-      {% endfor %}
-    {% else %}
-      <p class="muted">Nenhum chamado em aberto.</p>
-    {% endif %}
-  </div>
-</div>
-
-{% elif section == 'wallet' %}
-<div id="account-balance-panel" class="panel-card account-wallet-panel active">
-  <div class="section-head compact-head">
-    <div>
-      <h1>Comprar Créditos LC</h1>
-      <p class="muted">Créditos LC são pré-pagos internos, usados para participar dos leilões e recursos da plataforma.</p>
-    </div>
-    <span class="wallet-badge">Créditos LC: {{ '%.2f'|format(user.wallet_balance or 0)|replace('.', ',') }}</span>
-  </div>
-
-  {% if error %}
-    <div class="alert">{{ error }}</div>
-  {% endif %}
-
-  <div class="wallet-action-tabs">
-    <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Comprar créditos</button>
-  </div>
-
-  <div id="wallet-deposit-panel" class="wallet-mode-panel active">
-    <div class="wallet-choice-row">
-      <button class="wallet-choice-btn active" type="button" data-deposit-target="deposit-pix-panel">PIX</button>
-      <button class="wallet-choice-btn" type="button" data-deposit-target="deposit-card-panel">Cartão</button>
-    </div>
-
-    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active" novalidate>
-      <div id="deposit-pix-alert" class="wallet-error" aria-live="polite"></div>
-
-      <label>Valor da compra de Créditos LC
-        <input
-          type="number"
-          step="0.01"
-          min="5"
-          name="amount"
-          id="deposit-pix-amount"
-          placeholder="Mínimo R$ 5,00"
-          inputmode="decimal"
-          required>
-        <small>Após a confirmação, o valor vira Créditos LC de uso interno. Créditos LC não são sacáveis nem conversíveis em dinheiro.</small>
-      </label>
-
-      <button class="btn full" type="submit">Gerar PIX para Créditos LC</button>
-
-      {% if pix_payment and pix_payment.qr_code_base64 %}
-      <div class="pix-payment-box" data-pix-payment="deposit" data-payment-id="{{ pix_payment.payment_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
-        <h3>Pix para Créditos LC gerado</h3>
-        <p>Valor/Créditos LC: <strong>{{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }} LC</strong></p>
-        <p class="pix-expire-note">Tempo para pagar: <strong data-pix-countdown>15:00</strong></p>
-        <div class="pix-qr-wrap">
-          <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
-          <div>
-            <label>Código Pix copia e cola
-              <textarea class="pix-code-copy" id="deposit-pix-code" readonly>{{ pix_payment.qr_code }}</textarea>
-            </label>
-            <button class="btn full ghost" type="button" data-copy-pix="deposit-pix-code">Copiar código Pix</button>
-          </div>
-        </div>
-        <div class="pix-status-line" id="deposit-pix-status">Aguardando confirmação do Mercado Pago...</div>
-      </div>
-      {% endif %}
-    </form>
-
-    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel" novalidate>
-      <div id="deposit-card-alert" class="wallet-error" aria-live="polite"></div>
-
-      <label>Valor da compra de Créditos LC
-        <input
-          type="number"
-          step="0.01"
-          min="5"
-          name="amount"
-          id="deposit-card-amount"
-          placeholder="Mínimo R$ 5,00"
-          inputmode="decimal"
-          required>
-        <small>Compra mínima de R$ 5,00. Os créditos comprados são de uso exclusivo dentro do site.</small>
-      </label>
-
-      <small class="payment-note">Para maior segurança você será direcionado para o Mercado Pago.</small>
-      <button class="btn full" type="submit">Comprar Créditos LC</button>
-    </form>
-  </div>
-  <div class="wallet-card" style="margin-top:14px">
-    <h3>Regra dos Créditos LC</h3>
-    <p class="muted">Créditos LC funcionam como crédito pré-pago: depois de comprados, eles só podem ser usados dentro do Lancei o Certo. Eles não podem ser sacados, transferidos ou convertidos novamente em dinheiro.</p>
-    <p class="muted"><strong>Código de indicação:</strong> {{ user.referral_code or 'será gerado automaticamente' }} — quando um indicado fizer a primeira compra válida, o bônus é liberado em Créditos LC após validação antifraude.</p>
-  </div>
-</div>
-
-
-{% elif section == 'profile' %}
-<div class="panel-card">
-  <div class="section-head"><div><h1>Meu Cadastro</h1></div></div>
-  <div class="profile-grid">
-    <div><span>Apelido público</span><strong>@{{ user.public_name or user.nickname }}</strong></div>
-    <div><span>Código de indicação</span><strong>{{ user.referral_code or '—' }}</strong></div>
-    <div><span>E-mail</span><strong>{{ user.email }}</strong></div>
-    <div><span>CPF</span><strong>{{ user.cpf or '—' }}</strong></div>
-    <div><span>Telefone</span><strong>{{ user.phone or '—' }}</strong></div>
-    <div><span>CEP</span><strong>{{ user.cep or '—' }}</strong></div>
-    <div><span>Rua</span><strong>{{ user.street or '—' }}</strong></div>
-    <div><span>Número</span><strong>{{ user.number or '—' }}</strong></div>
-    <div><span>Bairro</span><strong>{{ user.district or '—' }}</strong></div>
-    <div><span>Cidade</span><strong>{{ user.city or '—' }}</strong></div>
-    <div><span>Estado</span><strong>{{ user.state or '—' }}</strong></div>
-  </div>
-</div>
-
-<div class="panel-card account-doc-status-card clean-doc-card {{ user.identity_status or 'pending' }}">
-  <div class="clean-doc-head">
-    <div>
-      <span class="eyebrow">Verificação documental</span>
-      {% if user.identity_status == 'verified' %}
-        <h2>Cadastro aprovado</h2>
-      {% elif user.identity_status == 'rejected' %}
-        <h2>Documentos recusados</h2>
-      {% elif user.document_file_url and user.selfie_file_url and user.residence_proof_file_url %}
-        <h2>Documentos em análise</h2>
-      {% else %}
-        <h2>Aguardando documentos</h2>
-      {% endif %}
-    </div>
-    <span class="clean-doc-pill {% if user.identity_status == 'verified' %}ok{% elif user.identity_status == 'rejected' %}bad{% endif %}">
-      {% if user.identity_status == 'verified' %}Tudo certo{% elif user.identity_status == 'rejected' %}Reenviar{% elif user.document_file_url and user.selfie_file_url and user.residence_proof_file_url %}Em análise{% else %}Pendente{% endif %}
-    </span>
-  </div>
-
-  {% if user.identity_status == 'rejected' and user.identity_note %}
-    <div class="alert">{{ user.identity_note }}</div>
-  {% endif %}
-
-  <div class="clean-doc-list">
-    <div class="clean-doc-row">
-      <span>Documento</span>
-      <strong class="{{ 'done' if user.document_file_url else 'pending' }}">{{ 'Enviado' if user.document_file_url else 'Pendente' }}</strong>
-    </div>
-    <div class="clean-doc-row">
-      <span>Selfie</span>
-      <strong class="{{ 'done' if user.selfie_file_url else 'pending' }}">{{ 'Enviada' if user.selfie_file_url else 'Pendente' }}</strong>
-    </div>
-    <div class="clean-doc-row">
-      <span>Comprovante de residência</span>
-      <strong class="{{ 'done' if user.residence_proof_file_url else 'pending' }}">{{ 'Enviado' if user.residence_proof_file_url else 'Pendente' }}</strong>
-    </div>
-  </div>
-
-  <div class="clean-doc-actions">
-    <a href="/minha-conta/verificacao" class="btn">Gerenciar documentos</a>
-  </div>
-</div>
-
-{% elif section == 'receipts' %}
-<div class="panel-card">
-  <div class="section-head"><div><h1>Auditoria</h1></div></div>
-  <p class="muted">Histórico das suas movimentações, compras de Créditos LC, pedidos e alterações relevantes na conta.</p>
-
-  <h2>Movimentações de Créditos LC</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Observação</th></tr></thead>
-      <tbody>
-      {% for tx in wallet_transactions %}
-        <tr>
-          <td>{{ fmt_br_datetime(tx.created_at) if fmt_br_datetime is defined else tx.created_at }}</td>
-          <td>{{ tx.kind }}</td>
-          <td>{{ '%.2f'|format(tx.amount or 0)|replace('.', ',') }} LC</td>
-          <td>{{ tx.note or '—' }}</td>
-        </tr>
-      {% else %}
-        <tr><td colspan="4">Nenhuma movimentação de Créditos LC registrada.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<div class="panel-card">
-  <h2>Pedidos e pagamentos</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Produto</th><th>Valor</th><th>Status</th></tr></thead>
-      <tbody>
-      {% for o in orders_raw %}
-        <tr>
-          <td>{{ fmt_br_datetime(o.created_at) if fmt_br_datetime is defined else o.created_at }}</td>
-          <td>{{ o.auction.title if o.auction else 'Produto' }}</td>
-          <td>R$ {{ '%.2f'|format(o.final_price or 0)|replace('.', ',') }}</td>
-          <td>{{ o.status }}</td>
-        </tr>
-      {% else %}
-        <tr><td colspan="4">Nenhum pedido registrado.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<div class="panel-card">
-  <h2>Eventos da conta</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Ação</th><th>Detalhes</th></tr></thead>
-      <tbody>
-      {% for log in audit_logs %}
-        <tr>
-          <td>{{ fmt_br_datetime(log.created_at) if fmt_br_datetime is defined else log.created_at }}</td>
-          <td>{{ log.action }}</td>
-          <td>{{ log.details or '—' }}</td>
-        </tr>
-      {% else %}
-        <tr><td colspan="3">Nenhum evento registrado.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% elif section == 'participations' %}
-<div class="panel-card">
-  <div class="section-head"><div><h1>Leilões Participados</h1></div></div>
-  <div class="cards account-cards">
-    {% for item in items %}
-    <article class="card auction-card compact-card">
-      <img src="{{ item.image_url }}" alt="{{ item.title }}" class="card-image" loading="lazy" decoding="async"/>
-      <div class="card-body">
-        <h3>{{ item.title }}</h3>
-        <p>Total de lances: <strong>{{ item.total_bids }}</strong></p>
-        <p>Total gasto: <strong>R$ {{ '%.2f'|format(item.total_spent)|replace('.', ',') }}</strong></p>
-        <p>Status: {{ item.status }}</p>
-        <p>Resultado: {% if item.won %}<strong>Você venceu</strong>{% else %}Não venceu{% endif %}</p>
-        <a href="/auction/{{ item.auction_id }}" class="btn full">Ver leilão</a>
-      </div>
-    </article>
-    {% else %}
-    <div class="panel-card empty-card"><p class="muted">Você ainda não participou de nenhum leilão.</p></div>
-    {% endfor %}
-  </div>
-</div>
-
-{% elif section == 'payments' %}
-<div class="panel-card">
-  <div class="section-head"><div><h1>Pagamentos Pendentes</h1></div></div>
-  <div class="cards account-cards">
-    {% for o in orders %}
-    <article class="card auction-card compact-card">
-      <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" class="card-image" loading="lazy" decoding="async"/>
-      <div class="card-body">
-        <h3>{{ o.auction_title }}</h3>
-        <p>Valor vencido: <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></p>
-        <p class="highlight-warn">Prazo restante: {{ o.remaining_label }}</p>
-        <a href="{{ o.payment_link }}" class="btn full">Continuar compra</a>
-      </div>
-    </article>
-    {% else %}
-    <div class="panel-card empty-card"><p class="muted">Nenhum pagamento pendente.</p></div>
-    {% endfor %}
-  </div>
-</div>
-
-{% elif section == 'wins' %}
-<div class="orders-page-marketplace">
-  <h1 style="margin:0 0 14px;font-size:34px;line-height:1.1;">Leilões Ganhos</h1>
-
-  <div class="orders-list-marketplace">
-    {% for o in orders %}
-      {% set market_value = o.source_price if o.source_price is defined else 0 %}
-      {% set savings = (market_value - o.final_price) if market_value and market_value > o.final_price else 0 %}
-      <article class="order-summary-card status-{{ o.status }}">
-        <div class="order-summary-left">
-          <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
-        </div>
-
-        <div class="order-summary-center">
-          <div class="order-summary-title-row">
-            <div>
-              <span class="order-number">Pedido #{{ '%06d'|format(o.id) }}</span>
-              <h2>{{ o.auction_title }}</h2>
-            </div>
-            <span class="order-status-chip status-{{ o.status }}">{{ o.status_label }}</span>
-          </div>
-
-          <div class="order-summary-progress">
-            {% for step in o.timeline %}
-              <span class="order-dot {{ step.state }}" title="{{ step.label }}"></span>
-            {% endfor %}
-          </div>
-
-          <div class="order-summary-meta">
-            <div><span>Arrematado por</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
-            <div><span>Valor de mercado</span><strong>{% if market_value %}R$ {{ '%.2f'|format(market_value)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
-            <div><span>Economia</span><strong class="order-saving">{% if savings %}R$ {{ '%.2f'|format(savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
-            <div><span>Atendimento</span><strong>{% if o.fulfillment_mode == "customer_purchase" %}Pedido feito por você{% elif o.fulfillment_mode == "site_purchase" %}Compra assistida{% else %}Aguardando escolha{% endif %}</strong></div>
-          </div>
-        </div>
-
-        <div class="order-summary-actions">
-          {% if o.status == 'pending_payment' %}
-            <a class="btn small" href="{{ o.payment_link }}">Pagar agora</a>
-          {% endif %}
-          <a class="btn small ghost" href="/minha-conta/pedido/{{ o.id }}">Acompanhar pedido</a>
-        </div>
-      </article>
-    {% else %}
-      <div class="panel-card empty-card orders-empty-marketplace">
-        <h2>Você ainda não ganhou nenhum leilão.</h2>
-        <a class="btn small" href="/">Ver leilões disponíveis</a>
-      </div>
-    {% endfor %}
-  </div>
-</div>
-
-{% elif section == 'order_detail' %}
-{% set o = order %}
-<div class="order-detail-page">
-  <div class="order-detail-topbar">
-    <a class="btn small ghost" href="/minha-conta/ganhos">← Voltar aos pedidos</a>
-    <span class="order-status-chip status-{{ o.status }}">{{ o.status_label }}</span>
-  </div>
-
-  <section class="order-detail-hero">
-    <div class="order-detail-product">
-      <img src="{{ o.image_url }}" alt="{{ o.auction_title }}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
-      <div>
-        <span class="order-number">Pedido #{{ '%06d'|format(o.id) }}</span>
-        <h1>{{ o.auction_title }}</h1>
-        <p>{{ o.status_description }}</p>
-      </div>
-    </div>
-
-    <div class="order-detail-values">
-      <div><span>Arrematado por</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
-      <div><span>Valor de mercado</span><strong>{% if o.source_price %}R$ {{ '%.2f'|format(o.source_price)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
-      <div><span>Economia obtida</span><strong class="order-saving">{% if o.savings %}R$ {{ '%.2f'|format(o.savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
-    </div>
-  </section>
-
-  <section class="panel-card order-tracking-panel">
-    <div class="order-panel-title">
-      <h2>Acompanhe seu pedido</h2>
-      <p>Status atualizado conforme o administrador confirma compra, envio e entrega.</p>
-    </div>
-
-    <div class="order-detail-timeline">
-      {% for step in o.timeline %}
-      <div class="order-detail-step {{ step.state }}">
-        <strong>{{ loop.index }}</strong>
-        <div>
-          <span>{{ step.label }}</span>
-          <small>{{ step.date_label or step.helper }}</small>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="panel-card order-fulfillment-card">
-    <div class="order-panel-title">
-      <h2>Como deseja receber este produto?</h2>
-      <p>Após o pagamento aprovado, você pode deixar o LanceioCerto comprar/enviar ou fazer o pedido no site original e enviar o link/código Pix para validação.</p>
-    </div>
-
-    {% if o.status in ['paid','aguardando_escolha'] %}
-      <div class="fulfillment-choice-grid">
-        <form method="post" action="/minha-conta/pedido/{{ o.id }}/escolher-atendimento" class="wallet-card">
-          <input type="hidden" name="fulfillment_mode" value="site_purchase">
-          <h3>Compra assistida pelo LanceioCerto</h3>
-          <p class="muted">A equipe faz a compra e atualiza envio, rastreio e entrega dentro da sua conta.</p>
-          <button class="btn" type="submit">Quero que o LanceioCerto compre</button>
-        </form>
-
-        <form method="post" action="/minha-conta/pedido/{{ o.id }}/escolher-atendimento" class="wallet-card">
-          <input type="hidden" name="fulfillment_mode" value="customer_purchase">
-          <h3>Quero fazer meu próprio pedido</h3>
-          <p class="muted">Você abre o link original, faz o pedido em seu nome/endereço, escolhe Pix e envia o link/código para validação.</p>
-          <button class="btn ghost" type="submit">Vou fazer o pedido</button>
-        </form>
-      </div>
-    {% elif o.fulfillment_mode == 'customer_purchase' %}
-      <div class="customer-purchase-box">
-        <div class="profile-grid">
-          <div><span>Loja original</span><strong>{{ o.source_store or 'Loja cadastrada' }}</strong></div>
-          <div><span>Status do link</span><strong>{{ o.status_label }}</strong></div>
-          <div><span>Domínio validado</span><strong>{{ o.submitted_link_domain or 'Aguardando envio' }}</strong></div>
-          <div><span>Conferido em</span><strong>{{ o.submitted_link_checked_at or '—' }}</strong></div>
-        </div>
-
-        <p><strong>Link original do produto:</strong>
-          {% if o.source_url %}<a href="{{ o.source_url }}" target="_blank" rel="noopener">Abrir site original</a>{% else %}<span class="muted">não informado</span>{% endif %}
-        </p>
-
-        {% if o.status in ['aguardando_link','link_rejeitado'] %}
-          {% if o.submitted_link_validation_note %}
-            <div class="alert">{{ o.submitted_link_validation_note }}</div>
-          {% endif %}
-          <form method="post" action="/minha-conta/pedido/{{ o.id }}/enviar-link-pagamento" class="wallet-card">
-            <label>Link ou código de pagamento do pedido
-              <input name="submitted_purchase_link" value="{{ o.submitted_purchase_link or '' }}" placeholder="Cole aqui o link/código Pix gerado no site original" required>
-            </label>
-            <small>O sistema confere automaticamente se o domínio é compatível com a loja cadastrada do produto. Links encurtados ou de outra plataforma são recusados.</small>
-            <button class="btn" type="submit">Enviar para validação</button>
-          </form>
-        {% elif o.status in ['aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','finalized'] %}
-          <div class="tracking-code-box">
-            <span>Link enviado</span>
-            <strong>{{ o.submitted_link_domain or 'Domínio validado' }}</strong>
-          </div>
-          {% if o.submitted_link_validation_note %}<p class="muted">{{ o.submitted_link_validation_note }}</p>{% endif %}
-          <p class="muted">Agora aguarde a conferência e atualização da equipe.</p>
         {% endif %}
-      </div>
-    {% elif o.fulfillment_mode == 'site_purchase' %}
-      <div class="tracking-code-box">
-        <span>Atendimento escolhido</span>
-        <strong>Compra assistida pelo LanceioCerto</strong>
-      </div>
-      <p class="muted">A equipe seguirá com compra, envio, rastreio e entrega por aqui.</p>
-    {% else %}
-      <p class="muted">Esta opção ficará disponível assim que o pagamento for aprovado.</p>
-    {% endif %}
-  </section>
 
-  <div class="order-detail-grid">
-    <section class="panel-card order-history-card">
-      <div class="order-panel-title"><h2>Histórico do pedido</h2></div>
-      <div class="order-history-list">
-        {% for event in o.history %}
-        <div class="order-history-item">
-          <span>{{ event.date_label }}</span>
-          <strong>{{ event.title }}</strong>
-          <p>{{ event.description }}</p>
-        </div>
-        {% else %}
-        <p class="muted">Assim que houver novas atualizações, elas aparecerão aqui.</p>
-        {% endfor %}
-      </div>
-    </section>
-
-    <section class="panel-card order-shipping-card">
-      <div class="order-panel-title"><h2>{% if o.fulfillment_mode == 'customer_purchase' %}Pedido feito por você{% else %}Rastreamento{% endif %}</h2></div>
-      {% if o.fulfillment_mode == 'customer_purchase' %}
-        <div class="tracking-code-box">
-          <span>Status</span>
-          <strong>{{ o.status_label }}</strong>
-        </div>
-        <p class="muted">Neste modelo você faz o pedido em seu nome no site original. O LanceioCerto valida o link e registra as etapas de aprovação/pagamento.</p>
-      {% elif o.tracking_code %}
-        <div class="tracking-code-box">
-          <span>Código de rastreio</span>
-          <strong>{{ o.tracking_code }}</strong>
-        </div>
-        <p class="muted">Use esse código no site da transportadora ou Correios para acompanhar a entrega.</p>
-      {% else %}
-        <div class="tracking-code-box muted-box">
-          <span>Rastreio</span>
-          <strong>Aguardando envio</strong>
-        </div>
-        <p class="muted">O código aparecerá aqui quando o administrador registrar o envio.</p>
-      {% endif %}
-
-      {% if o.purchase_status %}
-      <div class="purchase-status-box">
-        <span>Status interno da compra</span>
-        <strong>{{ o.purchase_status }}</strong>
-      </div>
-      {% endif %}
-    </section>
-
-    <section class="panel-card order-address-card">
-      <div class="order-panel-title"><h2>Endereço de entrega</h2></div>
-      <div class="order-address-lines">
-        <strong>{{ o.delivery_name or user.full_name }}</strong>
-        <span>{{ user.phone or 'Telefone não informado' }}</span>
-        <span>{{ o.delivery_street or user.street or 'Rua não informada' }}, {{ o.delivery_number or user.number or 's/n' }}</span>
-        <span>{{ o.delivery_district or user.district or 'Bairro não informado' }}</span>
-        <span>{{ o.delivery_city or user.city or 'Cidade não informada' }} - {{ o.delivery_state or user.state or 'UF' }}</span>
-        <span>CEP: {{ o.delivery_cep or user.cep or 'Não informado' }}</span>
-      </div>
-    </section>
-
-    <section class="panel-card order-finance-card">
-      <div class="order-panel-title"><h2>Resumo financeiro</h2></div>
-      <div class="order-finance-list">
-        <div><span>Valor arrematado</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
-        <div><span>Frete</span><strong>A calcular / conforme envio</strong></div>
-        <div><span>Total pago</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
-        <div><span>Economia</span><strong>{% if o.savings %}R$ {{ '%.2f'|format(o.savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
-      </div>
-    </section>
-  </div>
-
-  <section class="panel-card order-support-panel">
-    <div class="order-panel-title">
-      <h2>Precisa de ajuda?</h2>
-      <p>Use esta área se houver problema com entrega, produto ou pagamento.</p>
-    </div>
-
-    <div class="order-support-actions">
-      {% if o.status == 'pending_payment' %}
-        <a class="btn" href="{{ o.payment_link }}">Pagar agora</a>
-      {% elif o.status == 'delivered' %}
-        <form method="post" action="/minha-conta/pedido/{{ o.id }}/confirmar-recebimento">
-          <button class="btn" type="submit">Recebi meu produto</button>
-        </form>
-      {% elif o.status in ['finalized','completed'] %}
-        <span class="order-finished-note">Pedido concluído. Obrigado por comprar com a Lanceio Certo.</span>
-      {% endif %}
-
-      {% if o.status in ['delivered','sent','purchased','processing','paid','aguardando_escolha','aguardando_link','link_rejeitado','aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','finalized'] %}
-      <details class="account-dispute-box order-detail-dispute">
-        <summary class="btn small ghost">Abrir disputa ou chamado</summary>
-        <form method="post" action="/minha-conta/chamado" enctype="multipart/form-data" class="wallet-card">
-          <input type="hidden" name="order_id" value="{{ o.id }}">
-          <input type="hidden" name="subject" value="Problema no pedido #{{ o.id }}">
-          <label>Descreva o problema<textarea name="message" required placeholder="Explique o que aconteceu com seu pedido."></textarea></label>
-          <label>Comprovante/foto opcional<input type="file" name="proof_file" accept="image/*,application/pdf"></label>
-          <button class="btn small" type="submit">Enviar chamado</button>
-        </form>
-      </details>
-      {% endif %}
-    </div>
-  </section>
-</div>
-
-{% elif section == 'expired' %}
-<div class="panel-card">
-  <div class="section-head"><div><h1>Produtos Expirados</h1></div></div>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Produto</th><th>Valor</th><th>Prazo encerrado</th><th>Status</th></tr></thead>
-      <tbody>
-        {% for o in orders %}
-        <tr><td>{{ o.auction_title }}</td><td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td><td>{{ o.deadline_label }}</td><td>{{ o.status }}</td></tr>
-        {% else %}
-        <tr><td colspan="4">Nenhum produto expirado.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-{% elif section == 'checkout' %}
-{% set has_order_pix_payment = pix_payment is defined and pix_payment and pix_payment.qr_code_base64 %}
-{% set checkout_payment_active = has_order_pix_payment or (checkout_force_payment is defined and checkout_force_payment) %}
-<div class="panel-card checkout-page-card">
-  <div class="section-head">
-    <div>
-      <h1>Fechamento do pedido</h1>
-      <p>Confirme seus dados de entrega, aceite os termos e escolha a forma de pagamento.</p>
-    </div>
-  </div>
-
-  {% if error %}
-    <div class="alert">{{ error }}</div>
-  {% endif %}
-
-  <div class="checkout-grid checkout-grid-pro">
-
-    <!-- ESQUERDA -->
-    <div class="checkout-summary checkout-summary-pro">
-      <img src="{{ order.image_url }}" alt="{{ order.auction_title }}" loading="lazy" decoding="async">
-
-      <h3>{{ order.auction_title }}</h3>
-
-      <div class="checkout-box">
-        <h3>Resumo do pedido</h3>
-
-        <div class="summary-row">
-          <span>Valor do leilão</span>
-          <strong>R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</strong>
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Leilões</span>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-product' %}active{% endif %}" href="/admin?tab=admin-product" data-target="admin-product" data-no-prefetch="true">Cadastrar Produto</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-returned' %}active{% endif %}" href="/admin?tab=admin-returned" data-target="admin-returned" data-no-prefetch="true">Produtos Retornados</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-auctions' %}active{% endif %}" href="/admin?tab=admin-auctions" data-target="admin-auctions" data-no-prefetch="true">Gerenciar Leilões</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-finished' %}active{% endif %}" href="/admin?tab=admin-finished" data-target="admin-finished" data-no-prefetch="true">Leilões Finalizados</a>
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}" href="/admin?tab=admin-pending-payments" data-target="admin-pending-payments" data-no-prefetch="true">Leilões Pendentes</a>{% endif %}
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-shipping' %}active{% endif %}" href="/admin?tab=admin-shipping" data-target="admin-shipping" data-no-prefetch="true">Pedidos dos Vencedores</a>
         </div>
 
-        <div class="summary-row">
-          <span>Frete estimado</span>
-          <strong>A calcular</strong>
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Usuários e suporte</span>
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-users' %}active{% endif %}" href="/admin?tab=admin-users" data-target="admin-users" data-no-prefetch="true">Usuários</a>{% endif %}
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}" href="/admin?tab=admin-identity-pending" data-target="admin-identity-pending" data-no-prefetch="true">Usuários pendentes</a>{% endif %}
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}" href="/admin?tab=admin-withdrawals" data-target="admin-withdrawals" data-no-prefetch="true">Saques Pendentes</a>{% endif %}
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-tickets' %}active{% endif %}" href="/admin?tab=admin-tickets" data-target="admin-tickets" data-no-prefetch="true">Chamados/Disputas</a>
         </div>
 
-        <div class="summary-row total">
-          <span>Total inicial</span>
-          <strong>R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</strong>
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Ferramentas</span>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}" href="/admin?tab=admin-suggestions" data-target="admin-suggestions" data-no-prefetch="true">Indicações</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}" href="/admin?tab=admin-search-orders" data-target="admin-search-orders" data-no-prefetch="true">Consulta</a>
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-audit' %}active{% endif %}" href="/admin?tab=admin-audit" data-target="admin-audit" data-no-prefetch="true">Central de Auditoria</a>{% endif %}
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-moderation' %}active{% endif %}" href="/admin?tab=admin-moderation" data-target="admin-moderation" data-no-prefetch="true">Moderação</a>
         </div>
+      </nav>
+    </aside>
 
-        <p class="summary-note">As taxas de cartão e parcelamento serão calculadas automaticamente pelo Mercado Pago na etapa de pagamento.</p>
-      </div>
-
-      <div class="checkout-box">
-        <h3>Informações importantes</h3>
-        <p class="highlight-warn">Prazo restante: {{ order.remaining_label }}</p>
-        <p>Após a confirmação do pagamento, o pedido será preparado para envio.</p>
-        <p>Quando o rastreio for informado, você poderá acompanhar pela aba <strong>Rastreio</strong>.</p>
-      </div>
-
-      {% if order.source_url %}
-      <a href="{{ order.source_url }}" target="_blank" class="btn full ghost">Ver produto oficial</a>
-      {% endif %}
-    </div>
-
-    <!-- DIREITA -->
-    <form id="checkoutForm" class="form-card checkout-form-pro" method="post" action="/minha-conta/pagamentos/{{ entity.auction_id }}/confirmar" data-checkout-initial-step="{{ 'payment' if checkout_payment_active else 'delivery' }}">
-
-      <!-- ETAPA 1 -->
-      <div class="checkout-step {% if not checkout_payment_active %}active{% endif %}" data-checkout-step="delivery">
-        <div class="checkout-step-head">
-          <span>1</span>
+    <div class="account-content admin-content-clean admin-production-content">
+      {% if user.is_superadmin %}
+{% if admin_active_panel == 'admin-dashboard' %}
+<section id="admin-dashboard" class="admin-panel {% if admin_active_panel == 'admin-dashboard' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
           <div>
-            <h2>Confirmação dos dados de entrega</h2>
-            <p>Os dados abaixo foram preenchidos com base no seu cadastro. Confira antes de continuar.</p>
+            <h1>Resumo Geral</h1>
+            <p>Visão executiva da operação, com indicadores de leilões, usuários, caixa e risco financeiro.</p>
           </div>
+          <a class="btn small" href="/admin?tab=admin-cashflow" data-no-prefetch="true">Abrir fluxo de caixa</a>
         </div>
 
-        <label>Nome completo do recebedor
-          <input name="delivery_name" value="{{ entity.delivery_name or user.full_name or '' }}" required>
-        </label>
-
-        <div class="grid-2">
-          <label>CPF do recebedor
-            <input name="delivery_cpf" value="{{ user.cpf or '' }}" placeholder="000.000.000-00" required>
-          </label>
-
-          <label>Telefone
-            <input name="delivery_phone" value="{{ user.phone or '' }}" placeholder="(00) 00000-0000" required>
-          </label>
+        <div class="stats-grid account-stats admin-stats-pro admin-kpi-grid">
+          <div class="stat"><span>Usuários cadastrados</span><strong>{{ stats.users }}</strong><small>Total de contas criadas</small></div>
+          <div class="stat"><span>Usuários ativos</span><strong>{{ stats.active_users if stats.active_users is defined else '—' }}</strong><small>Com acesso ou atividade recente</small></div>
+          <div class="stat"><span>Ao vivo</span><strong>{{ stats.live }}</strong><small>Leilões em disputa</small></div>
+          <div class="stat"><span>Próximos</span><strong>{{ stats.scheduled }}</strong><small>Leilões agendados</small></div>
+          <div class="stat"><span>Pagamentos pendentes</span><strong>{{ stats.pending_payment }}</strong><small>Vencedores aguardando pagamento</small></div>
+          <div class="stat"><span>Encerrados</span><strong>{{ stats.completed }}</strong><small>Leilões já finalizados</small></div>
+          <div class="stat"><span>Identidades pendentes</span><strong>{{ stats.identity_pending if stats.identity_pending is defined else 0 }}</strong><small>Documentos para conferência</small></div>
+          <div class="stat"><span>Saques pendentes</span><strong>{{ stats.pending_withdrawals if stats.pending_withdrawals is defined else 0 }}</strong><small>Solicitações aguardando admin</small></div>
+          <div class="stat"><span>Chamados abertos</span><strong>{{ stats.open_tickets if stats.open_tickets is defined else 0 }}</strong><small>Disputas ou suporte</small></div>
         </div>
 
-        <div class="grid-2">
-          <label>CEP
-            <input name="delivery_cep" value="{{ entity.delivery_cep or user.cep or '' }}" placeholder="00000-000" required>
-          </label>
-
-          <label>Número
-            <input name="delivery_number" value="{{ entity.delivery_number or user.number or '' }}" required>
-          </label>
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat finance-card positive"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Total bruto que saiu do saldo dos usuários nos leilões</small></div>
+          <div class="stat finance-card positive"><span>Taxas arrecadadas</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Taxas dos lances + taxa de saque separadas do lucro</small></div>
+          <div class="stat finance-card positive"><span>Lucro nos lances</span><strong>R$ {{ '%.2f'|format(finance.bid_profit_total if finance is defined and finance.bid_profit_total is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe margem operacional, sem contar taxas</small></div>
+          <div class="stat finance-card"><span>Pagamentos recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Valores pagos por vencedores</small></div>
+          <div class="stat finance-card warning"><span>Saldo dos usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong><small>Valor em custódia dos clientes</small></div>
+          <div class="stat finance-card"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Entradas operacionais menos saídas/reservas</small></div>
+          <div class="stat finance-card {% if finance is defined and finance.real_cash is defined and finance.real_cash < 0 %}danger{% else %}positive{% endif %}"><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong><small>Caixa após cobrir todas as saídas previstas</small></div>
+          <div class="stat finance-card {% if finance is defined and finance.coverage_percent is defined and finance.coverage_percent < 100 %}danger{% else %}positive{% endif %}"><span>Índice de cobertura</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong><small>Quanto o caixa cobre das saídas previstas</small></div>
+          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Complemento do site nos leilões + saques líquidos pendentes</small></div>
+          <div class="stat finance-card"><span>Lucro estimado</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit if finance is defined and finance.estimated_profit is defined else 0)|replace('.', ',') }}</strong><small>Resultado operacional estimado</small></div>
+          <div class="stat finance-card danger"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Produtos vendidos abaixo do equilíbrio</small></div>
         </div>
 
-        <label>Rua
-          <input name="delivery_street" value="{{ entity.delivery_street or user.street or '' }}" required>
-        </label>
-
-        <label>Bairro
-          <input name="delivery_district" value="{{ entity.delivery_district or user.district or '' }}" required>
-        </label>
-
-        <div class="grid-2">
-          <label>Cidade
-            <input name="delivery_city" value="{{ entity.delivery_city or user.city or '' }}" required>
-          </label>
-
-          <label>Estado
-            <input name="delivery_state" value="{{ entity.delivery_state or user.state or '' }}" maxlength="2" required>
-          </label>
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat"><span>Lucro hoje</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit_today if finance is defined and finance.estimated_profit_today is defined else 0)|replace('.', ',') }}</strong><small>Resultado positivo do dia</small></div>
+          <div class="stat"><span>Prejuízo hoje</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss_today if finance is defined and finance.accumulated_loss_today is defined else 0)|replace('.', ',') }}</strong><small>Resultado negativo do dia</small></div>
+          <div class="stat"><span>Lucro semana</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit_week if finance is defined and finance.estimated_profit_week is defined else 0)|replace('.', ',') }}</strong><small>Resultado positivo semanal</small></div>
+          <div class="stat"><span>Prejuízo semana</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss_week if finance is defined and finance.accumulated_loss_week is defined else 0)|replace('.', ',') }}</strong><small>Resultado negativo semanal</small></div>
+          <div class="stat"><span>Lucro mês</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit_month if finance is defined and finance.estimated_profit_month is defined else 0)|replace('.', ',') }}</strong><small>Resultado positivo mensal</small></div>
+          <div class="stat"><span>Prejuízo mês</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss_month if finance is defined and finance.accumulated_loss_month is defined else 0)|replace('.', ',') }}</strong><small>Resultado negativo mensal</small></div>
         </div>
 
-        <label>Complemento
-          <input name="delivery_complement" value="{{ entity.delivery_complement or user.complement or '' }}" placeholder="Apto, bloco, casa, sala">
-        </label>
-
-        <label>Ponto de referência
-          <input name="delivery_reference" value="{{ entity.delivery_reference or '' }}" placeholder="Ex: próximo à padaria">
-        </label>
-
-        <div class="security-box">
-          🔒 Seus dados serão usados apenas para confirmação, pagamento e envio do produto.
-        </div>
-
-        <label class="terms-check">
-          <input id="deliveryTerms" type="checkbox" required {% if checkout_payment_active %}checked{% endif %}>
-          <span>
-            Ao selecionar esta caixa, você confirma que leu e concorda com os
-            <button type="button" class="link-button" data-open-terms>termos de compra</button>.
-          </span>
-        </label>
-
-        <button class="btn full" type="button" id="goToPayment">Finalizar pedido e escolher pagamento</button>
-      </div>
-
-      <!-- ETAPA 2 -->
-      <div class="checkout-step {% if checkout_payment_active %}active{% endif %}" data-checkout-step="payment">
-        <div class="checkout-step-head">
-          <span>2</span>
-          <div>
-            <h2>Forma de pagamento</h2>
-            <p>Escolha como deseja pagar. A integração final com Mercado Pago será concluída no backend.</p>
-          </div>
-        </div>
-
-        <input type="hidden" name="payment_method" id="paymentMethodInput" value="pix">
-
-        <div class="payment-options">
-          <button type="button" class="payment-option" data-payment-method="wallet">
-            <strong>Créditos LC da conta</strong>
-            <span>Use seus Créditos LC disponíveis: {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</span>
-          </button>
-
-          <button type="button" class="payment-option active" data-payment-method="pix">
-            <strong>PIX</strong>
-            <span>Pagamento rápido com confirmação automática.</span>
-          </button>
-
-          <button type="button" class="payment-option" data-payment-method="credit_card">
-            <strong>Cartão de crédito</strong>
-            <span>Somente cartão em nome do usuário cadastrado.</span>
-          </button>
-        </div>
-
-        <div id="walletPaymentPanel" class="payment-panel">
-          <h3>Pagar com Créditos LC</h3>
-
-          {% if user.wallet_balance >= order.final_price %}
-            <p>Seus Créditos LC são suficientes para pagar este pedido.</p>
-            <p><strong>Créditos LC atuais:</strong> {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
-            <p><strong>Valor do pedido:</strong> R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</p>
-            <div class="security-box">
-              ⚡ Pagamento instantâneo usando Créditos LC. Ao confirmar, o valor será descontado dos seus Créditos LC.
+        <div class="notice-grid admin-overview-grid">
+          <div class="panel-card admin-card-pro">
+            <div class="card-title-row"><h2>Saúde da operação</h2><span class="pill-soft">Auditoria</span></div>
+            <div class="profile-grid">
+              <div><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong></div>
+              <div><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong></div>
+              <div><span>Cobertura das saídas</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong></div>
+              <div><span>Reservado para usuários</span><strong>R$ {{ '%.2f'|format(finance.user_wallet_total if finance is defined and finance.user_wallet_total is defined else 0)|replace('.', ',') }}</strong></div>
+              <div><span>Produtos aguardando compra</span><strong>{{ stats.pending_shipping if stats.pending_shipping is defined else '—' }}</strong></div>
+              <div><span>Produtos retornados</span><strong>{{ stats.returned_products if stats.returned_products is defined else '—' }}</strong></div>
             </div>
-          {% else %}
-            <p class="highlight-warn">Créditos LC insuficientes para pagar este pedido.</p>
-            <p><strong>Créditos LC atuais:</strong> {{ '%.2f'|format(user.wallet_balance)|replace('.', ',') }}</p>
-            <p><strong>Valor do pedido:</strong> R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</p>
-            <p><strong>Falta:</strong> R$ {{ '%.2f'|format(order.final_price - user.wallet_balance)|replace('.', ',') }}</p>
-            <a href="/minha-conta?saldo=1" class="btn full ghost">Comprar Créditos LC</a>
-          {% endif %}
+          </div>
+
+          <div class="panel-card admin-card-pro">
+            <div class="card-title-row"><h2>Alertas importantes</h2><span class="pill-soft warn">Atenção</span></div>
+            <div class="admin-alert-list">
+              <div><strong>Pagamentos pendentes</strong><span>{{ stats.pending_payment }} leilões aguardando pagamento.</span></div>
+              <div><strong>Envios pendentes</strong><span>{{ stats.pending_shipping if stats.pending_shipping is defined else '—' }} produtos pagos aguardando envio.</span></div>
+              <div><strong>Controle de risco</strong><span>Revise lucro/prejuízo antes de relançar produtos retornados.</span></div>
+              <div><strong>Cobertura do caixa</strong><span>{% if finance is defined and finance.coverage_percent is defined and finance.coverage_percent < 100 %}Atenção: caixa abaixo das saídas previstas.{% else %}Caixa cobre as saídas previstas no momento.{% endif %}</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {% endif %}
+
+      {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-cashflow' %}
+<section id="admin-cashflow" class="admin-panel {% if admin_active_panel == 'admin-cashflow' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Fluxo de Caixa</h1>
+            <p>Controle rigoroso de entradas, saídas, taxas, pagamentos autorizados, saldo em custódia e resultado por leilão.</p>
+          </div>
         </div>
 
-        <div id="pixPaymentPanel" class="payment-panel active">
-          <h3>Pagamento via PIX</h3>
-          {% if has_order_pix_payment %}
-          <p>Seu Pix já foi gerado. Pague pelo QR Code abaixo ou copie o código Pix.</p>
-          {% else %}
-          <p>Ao confirmar, o sistema gera o QR Code Pix pelo Mercado Pago.</p>
-          {% endif %}
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat"><span>Total de entradas</span><strong>R$ {{ '%.2f'|format(finance.total_income if finance is defined and finance.total_income is defined else 0)|replace('.', ',') }}</strong><small>Lances recebidos + pagamentos dos vencedores</small></div>
+          <div class="stat"><span>Total de saídas</span><strong>R$ {{ '%.2f'|format(finance.total_outgoing if finance is defined and finance.total_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Produtos comprados/enviados, saques pagos e estornos</small></div>
+          <div class="stat"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Disponível após saídas e saques pendentes</small></div>
+          <div class="stat"><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong><small>Caixa disponível menos complemento dos leilões</small></div>
+          <div class="stat"><span>Índice de cobertura</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong><small>Capacidade de cobrir saídas previstas</small></div>
+          <div class="stat"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Entrada bruta dos leilões</small></div>
+          <div class="stat"><span>Taxas de lance</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita separada por taxa</small></div>
+          <div class="stat"><span>Caixa dos lances p/ produto</span><strong>R$ {{ '%.2f'|format(finance.bid_product_cash if finance is defined and finance.bid_product_cash is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe o valor do leilão</small></div>
+          <div class="stat"><span>Pagamentos de vencedores</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Entradas após vitória</small></div>
+          <div class="stat"><span>Saques pendentes</span><strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong><small>Valor líquido a pagar aos usuários</small></div>
+          <div class="stat"><span>Lucro nos lances</span><strong>R$ {{ '%.2f'|format(finance.bid_profit_total if finance is defined and finance.bid_profit_total is defined else 0)|replace('.', ',') }}</strong><small>Lucro operacional dos lances, sem taxas</small></div>
+          <div class="stat"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Quando a operação fecha negativa</small></div>
+        </div>
 
-          {% if pix_payment and pix_payment.qr_code_base64 %}
-          <div class="pix-payment-box" data-pix-payment="order" data-payment-id="{{ pix_payment.payment_id }}" data-auction-id="{{ entity.auction_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
-            <h3>Pix gerado</h3>
-            <p>Valor: <strong>R$ {{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }}</strong></p>
-            <p class="pix-expire-note">Tempo para pagar: <strong data-pix-countdown>15:00</strong></p>
-            <div class="pix-qr-wrap">
-              <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
-              <div>
-                <label>Código Pix copia e cola
-                  <textarea class="pix-code-copy" id="order-pix-code" readonly>{{ pix_payment.qr_code }}</textarea>
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Movimentações financeiras</h2><span class="pill-soft">Últimas 100 na tela</span></div>
+          <div class="table-wrap admin-scroll-table">
+            <table>
+              <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Entrada</th><th>Saída</th><th>Saldo</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for m in cashflow_movements if cashflow_movements is defined %}
+                <tr>
+                  <td>{{ fmt_br_datetime(m.created_at) }}</td>
+                  <td>{{ m.type }}</td>
+                  <td>{{ m.description }}</td>
+                  <td>{% if m.amount > 0 %}R$ {{ '%.2f'|format(m.amount)|replace('.', ',') }}{% else %}—{% endif %}</td>
+                  <td>{% if m.amount < 0 %}R$ {{ '%.2f'|format((m.amount * -1))|replace('.', ',') }}{% else %}—{% endif %}</td>
+                  <td>{% if m.balance_after is not none %}R$ {{ '%.2f'|format(m.balance_after)|replace('.', ',') }}{% else %}—{% endif %}</td>
+                  <td>{{ m.status }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7">Nenhuma movimentação financeira registrada ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Resultado por leilão</h2><span class="pill-soft">Últimos 100 na tela</span></div>
+          <div class="table-wrap admin-scroll-table">
+            <table>
+              <thead><tr><th>Produto</th><th>Preço original</th><th>Lances recebidos</th><th>Taxas</th><th>Caixa dos lances</th><th>Pago pelo vencedor</th><th>Saída produto</th><th>Complemento</th><th>Resultado</th><th>Situação</th></tr></thead>
+              <tbody>
+                {% for r in auction_results if auction_results is defined %}
+                <tr>
+                  <td>{{ r.title }}</td>
+                  <td>R$ {{ '%.2f'|format(r.source_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.gross_bids if r.gross_bids is defined else 0)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.fees_total)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.product_cash if r.product_cash is defined else 0)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.final_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.outgoing if r.outgoing is defined else 0)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(r.site_complement)|replace('.', ',') }}</td>
+                  <td class="{% if r.result >= 0 %}positive-text{% else %}danger-text{% endif %}">R$ {{ '%.2f'|format(r.result)|replace('.', ',') }}</td>
+                  <td>{{ r.status_label }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="10">Nenhum resultado por leilão disponível ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {% endif %}
+{% endif %}
+{% if admin_active_panel == 'admin-product' %}
+
+      <section id="admin-product" class="admin-panel {% if admin_active_panel == 'admin-product' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Cadastrar Produto</h1>
+            <p>Cadastro avançado com agendamento, calendário, regras de turbo, margem mínima e controle financeiro do produto.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <form class="form-card no-shadow admin-advanced-form" method="post" action="/admin/item/create" enctype="multipart/form-data">
+            <div class="form-section-title"><h2>Dados principais</h2><p>Informações básicas do produto e origem de compra.</p></div>
+            <div class="profile-grid admin-form-grid">
+              <label>Título do produto<input name="title" required></label>
+              <label>Loja de origem<input name="source_store" value="Mercado Livre"></label>
+              <label>Link oficial do produto<input name="source_url" placeholder="https://..."></label>
+              <label>Preço original<input type="number" step="0.01" name="source_price" required></label>
+              <label>Imagem do computador<input type="file" name="image_file" accept="image/*"></label>
+            </div>
+            <label>Descrição do produto<textarea name="description" placeholder="Descreva o produto."></textarea></label>
+
+            <div class="form-section-title"><h2>Agendamento</h2><p>Escolha início por tempo ou por data exata.</p></div>
+            <div class="profile-grid admin-form-grid">
+              <label>Tipo de início
+                <select name="schedule_mode" id="schedule-mode">
+                  <option value="minutes">Iniciar em minutos</option>
+                  <option value="datetime">Agendar por data e hora</option>
+                </select>
+              </label>
+              <label class="schedule-minutes-field">Iniciar em quantos minutos?<input type="number" name="start_in_minutes" value="60" min="0"></label>
+              <label class="schedule-datetime-field">Data e hora do início<input type="datetime-local" name="scheduled_start_at"></label>
+              <label>Tempo inicial do leilão em minutos
+                <input type="number" name="initial_duration_minutes" value="30" min="1" max="60">
+                <small>Máximo recomendado: 60 minutos.</small>
+              </label>
+            </div>
+
+            <div class="form-section-title"><h2>Modo turbo automático, taxa e cashback</h2><p>O sistema calcula sozinho, mas você pode editar os parâmetros antes de cadastrar.</p></div>
+            <div class="profile-grid admin-form-grid">
+              <label>Ativar turbo automático
+                <select name="turbo_enabled">
+                  <option value="1">Sim</option>
+                  <option value="0">Não</option>
+                </select>
+              </label>
+              <label>Meta de lucro desejada sobre o produto (%)
+                <input type="number" step="0.01" name="turbo_fee_target_percent" value="10" min="0" max="40">
+              </label>
+              <label>Preço mínimo desejado antes do turbo (%)
+                <input type="number" step="0.01" name="winner_min_percent" value="50" min="1" max="90">
+              </label>
+              <label>Forçar Turbo 2.0 em (%)
+                <input type="number" step="0.01" name="turbo_trigger_percent" value="0" min="0" max="95">
+                <small>0 = cálculo automático. Ex.: 50% + metade da meta de 10% = 55%. Produto de R$ 16,00 entra no Turbo 2.0 em R$ 8,80.</small>
+              </label>
+              <label>Taxa interna por lance (%)
+                <input type="number" step="0.01" name="bid_fee_percent" value="10" min="0" max="50">
+                <small>Ex.: R$ 1,00 de lance gera R$ 0,10 de taxa para o site.</small>
+              </label>
+              <label>Cashback opcional no fim do leilão
+                <select name="cashback_enabled">
+                  <option value="0">Não ativar</option>
+                  <option value="1">Ativar neste leilão</option>
+                </select>
+                <small>Use apenas em leilões estratégicos, quando houver caixa disponível.</small>
+              </label>
+            </div>
+
+            <div class="admin-strategy-box" id="turbo-preview-box">
+              <strong>Prévia do Turbo:</strong>
+              <p id="turbo-preview-text">Digite o preço original para ver o valor aproximado em que o Turbo 2.0 será ativado.</p>
+            </div>
+
+            <div class="admin-toolbar-end">
+              <button class="btn" type="submit">Criar leilão profissional</button>
+            </div>
+          </form>
+        </div>
+      </section>
+{% endif %}
+{% if admin_active_panel == 'admin-returned' %}
+
+      <section id="admin-returned" class="admin-panel {% if admin_active_panel == 'admin-returned' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Produtos Retornados</h1>
+            <p>Produtos que voltaram por falta de pagamento. Clique em abrir para editar e relançar com regra especial de turbo.</p>
+          </div>
+        </div>
+
+        <div class="returned-card-grid">
+          {% for item in returned_items if returned_items is defined %}
+          <article class="returned-mini-card">
+            <img src="{{ item.image_url }}" alt="{{ item.title }}" loading="lazy" decoding="async">
+            <div>
+              <h3>{{ item.title }}</h3>
+              <p>Original: <strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></p>
+              <p>Caixa reservado: <strong>R$ {{ '%.2f'|format(item.reserved_cash)|replace('.', ',') }}</strong></p>
+              <p>Se tivesse pago: <strong>R$ {{ '%.2f'|format(item.expected_total_if_paid)|replace('.', ',') }}</strong></p>
+              <button class="btn small returned-open-btn" type="button" data-returned-panel="returned-panel-{{ item.id }}">Abrir / editar</button>
+            </div>
+          </article>
+
+          <div id="returned-panel-{{ item.id }}" class="panel-card admin-card-pro returned-edit-panel">
+            <div class="card-title-row">
+              <h2>Editar e relançar: {{ item.title }}</h2>
+              <span class="pill-soft warn">Retornado</span>
+            </div>
+
+            <div class="profile-grid returned-summary-grid">
+              <div><span>Preço original mantido</span><strong>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</strong></div>
+              <div><span>Último valor final</span><strong>R$ {{ '%.2f'|format(item.last_final_price)|replace('.', ',') }}</strong></div>
+              <div><span>Taxas acumuladas</span><strong>R$ {{ '%.2f'|format(item.accumulated_fees)|replace('.', ',') }}</strong></div>
+              <div><span>Caixa reservado</span><strong>R$ {{ '%.2f'|format(item.reserved_cash)|replace('.', ',') }}</strong></div>
+              <div><span>Total se tivesse pago</span><strong>R$ {{ '%.2f'|format(item.expected_total_if_paid)|replace('.', ',') }}</strong></div>
+              <div><span>Resultado se tivesse pago</span><strong>R$ {{ '%.2f'|format(item.expected_profit_if_paid)|replace('.', ',') }}</strong></div>
+            </div>
+
+            <form class="form-card no-shadow admin-advanced-form returned-product-form" method="post" action="/admin/item/{{ item.id }}/returned-update-relist" enctype="multipart/form-data">
+              <div class="profile-grid admin-form-grid">
+                <label>Título do produto<input name="title" value="{{ item.title }}" required></label>
+                <label>Preço original<input value="R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}" readonly></label>
+                <label>Loja de origem<input name="source_store" value="{{ item.source_store or '' }}"></label>
+                <label>Link oficial do produto<input name="source_url" value="{{ item.source_url or '' }}" placeholder="https://..."></label>
+                <label>Nova imagem<input type="file" name="image_file" accept="image/*"></label>
+              </div>
+
+              <label>Descrição do produto<textarea name="description">{{ item.description or '' }}</textarea></label>
+
+              <div class="form-section-title"><h2>Relançamento estratégico</h2><p>Digite o valor-base. O Turbo 2.0 entrará na metade desse valor-base, considerando preço atual + taxas.</p></div>
+
+              <div class="profile-grid admin-form-grid">
+                <label>Valor-base para calcular o Turbo
+                  <input type="number" step="0.01" name="turbo_base_value" value="{{ item.suggested_turbo_base }}" required>
                 </label>
-                <button class="btn full ghost" type="button" data-copy-pix="order-pix-code">Copiar código Pix</button>
+                <label>Taxa interna por lance (%)
+                  <input type="number" step="0.01" name="bid_fee_percent" value="10" min="0" max="50">
+                </label>
+                <label>Relançar em quantos minutos?
+                  <input type="number" name="start_in_minutes" value="5" min="0">
+                </label>
+                <label>Tempo inicial em minutos
+                  <input type="number" name="initial_duration_minutes" value="30" min="1" max="60">
+                </label>
+                <label>Cashback opcional
+                  <select name="cashback_enabled">
+                    <option value="0">Não ativar</option>
+                    <option value="1">Ativar neste relançamento</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="admin-strategy-box">
+                <strong>Regra especial do produto retornado:</strong>
+                <p>O preço original permanece R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}. O Turbo 2.0 será calculado pela metade do valor-base digitado.</p>
+              </div>
+
+              <div class="admin-toolbar-end returned-actions">
+                <a class="btn small ghost" href="/auction/{{ item.id }}">Abrir produto</a>
+                <button class="btn" type="submit">Salvar e relançar produto</button>
+              </div>
+            </form>
+          </div>
+          {% else %}
+          <div class="panel-card admin-card-pro">
+            <p>Nenhum produto retornado por falta de pagamento.</p>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+{% endif %}
+{% if admin_active_panel == 'admin-auctions' %}
+
+      <section id="admin-auctions" class="admin-panel {% if admin_active_panel == 'admin-auctions' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Gerenciar Leilões</h1>
+            <p>Controle operacional dos leilões ao vivo, agendados e em preparação.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Status</th><th>Preço atual</th><th>Origem</th><th>Turbo</th><th>Arrecadado</th><th>Vencedor</th><th>Ações</th></tr></thead>
+              <tbody>
+                {% for item in items %}
+                <tr>
+                  <td>{{ item.title }}</td>
+                  <td><span class="status {{ item.status }}">{{ item.status }}</span></td>
+                  <td>R$ {{ '%.2f'|format(item.current_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</td>
+                  <td>{{ item.turbo_level }}</td>
+                  <td>{{ item.collected_percent if item.collected_percent is defined else '—' }}%</td>
+                  <td>{% if item.winner %}{{ item.winner.full_name }}{% else %}—{% endif %}</td>
+                  <td>
+                    <div class="admin-action-stack admin-action-grid-pro">
+                      <form method="post" action="/admin/item/{{ item.id }}/start-now" class="inline-form"><button class="btn small" type="submit">Começar</button></form>
+                      <form method="post" action="/admin/item/{{ item.id }}/relist" class="inline-form">
+                        <input type="number" name="start_in_minutes" value="60" min="0" required title="Começar em quantos minutos">
+                        <input type="number" name="initial_duration_minutes" value="30" min="1" max="60" required title="Tempo inicial do leilão">
+                        <button class="btn small ghost" type="submit">Relançar</button>
+                      </form>
+                      {% if item.status != 'live' %}<form method="post" action="/admin/item/{{ item.id }}/delete" class="inline-form"><button class="btn small danger" type="submit">Excluir</button></form>{% endif %}
+                      <a class="btn small ghost" href="/auction/{{ item.id }}">Abrir</a>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8">Nenhum leilão cadastrado.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+{% endif %}
+{% if admin_active_panel == 'admin-finished' %}
+
+      <section id="admin-finished" class="admin-panel {% if admin_active_panel == 'admin-finished' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Leilões Finalizados</h1>
+            <p>Histórico completo com valor de saída, taxa arrecadada, complemento do site, lucro e prejuízo.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Vencedor</th><th>Original</th><th>Saiu por</th><th>Taxas</th><th>Site completou</th><th>Lucro/Prejuízo</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for item in finished_auctions if finished_auctions is defined %}
+                <tr>
+                  <td>{{ item.title }}</td>
+                  <td>{{ item.winner_name or 'Sem vencedor' }}</td>
+                  <td>R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.final_price)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.fees_total)|replace('.', ',') }}</td>
+                  <td>R$ {{ '%.2f'|format(item.site_complement)|replace('.', ',') }}</td>
+                  <td class="{% if item.result >= 0 %}positive-text{% else %}danger-text{% endif %}">R$ {{ '%.2f'|format(item.result)|replace('.', ',') }}</td>
+                  <td>{{ item.status_label }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8">Nenhum leilão finalizado com contabilidade calculada ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {% endif %}
+
+      {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-pending-payments' %}
+<section id="admin-pending-payments" class="admin-panel {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Leilões Pendentes</h1>
+            <p>Produtos vencidos que aguardam pagamento do vencedor dentro do prazo.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produto</th><th>Vencedor</th><th>E-mail</th><th>Telefone</th><th>Valor</th><th>Prazo</th><th>Status</th><th>Ação</th></tr></thead>
+              <tbody>
+                {% for o in orders %}
+                {% if o.status in ['pending_payment', 'pending_gateway'] %}
+                <tr>
+                  <td>{{ o.auction.title }}</td>
+                  <td>{{ o.user.full_name }}</td>
+                  <td>{{ o.user.email }}</td>
+                  <td>{{ o.user.phone or '—' }}</td>
+                  <td>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</td>
+                  <td>{{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</td>
+                  <td>{{ o.status }}{% if o.status == 'pending_gateway' %}<br><small>Aguardando gateway</small>{% endif %}</td>
+                  <td>
+                    <a class="btn small ghost" href="/auction/{{ o.auction.id }}">Abrir</a>
+                    <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
+                      <input type="number" name="extra_minutes" value="10" min="1" title="Minutos extras">
+                      <button class="btn small" type="submit">Dar mais prazo</button>
+                    </form>
+                  </td>
+                </tr>
+                {% endif %}
+                {% else %}
+                <tr><td colspan="8">Nenhum leilão pendente de pagamento.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {% endif %}
+{% if admin_active_panel == 'admin-shipping' %}
+
+      <section id="admin-shipping" class="admin-panel {% if admin_active_panel == 'admin-shipping' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Pedidos dos Vencedores</h1>
+            <p>Central organizada dos produtos pagos: escolha do vencedor, validação de link, autorização de pagamento, compra assistida, envio e entrega.</p>
+          </div>
+        </div>
+
+        <div class="winner-orders-grid">
+          {% set visible_statuses = ['paid','aguardando_escolha','aguardando_link','link_recebido','link_rejeitado','aguardando_aprovacao','aprovado_para_pagamento','pagamento_pedido_realizado','processing','purchased','sent','delivered','dispute','resolved'] %}
+          {% for o in orders %}
+          {% if o.status in visible_statuses %}
+          <details class="winner-order-card status-{{ o.status }}">
+            <summary class="winner-order-summary">
+              <div class="winner-order-product">
+                <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/static/lanceio_hero_slide_01.png';">
+                <div>
+                  <span class="order-number">Pedido #{{ '%06d'|format(o.id) }}</span>
+                  <h3>{{ o.auction.title }}</h3>
+                  <small>{{ o.auction.source_store or 'Loja não informada' }} • {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</small>
+                </div>
+              </div>
+              <div class="winner-order-client">
+                <span>Vencedor</span>
+                <strong>{{ o.user.full_name }}</strong>
+                <small>{{ o.user.email }}</small>
+              </div>
+              <div class="winner-order-value">
+                <span>Valor pago</span>
+                <strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong>
+              </div>
+              <div>
+                <span class="order-status-chip status-{{ o.status }}">{{ order_status_label(o.status) if order_status_label is defined else o.status }}</span>
+              </div>
+              <span class="btn small ghost">Ver mais</span>
+            </summary>
+
+            <div class="winner-order-details">
+              <div class="panel-card admin-card-pro">
+                <h3>Resumo operacional</h3>
+                <div class="profile-grid">
+                  <div><span>Modo de atendimento</span><strong>{% if o.fulfillment_mode == 'customer_purchase' %}Cliente faz o pedido{% elif o.fulfillment_mode == 'site_purchase' %}LanceioCerto compra/envia{% else %}Aguardando escolha{% endif %}</strong></div>
+                  <div><span>Status</span><strong>{{ order_status_label(o.status) if order_status_label is defined else o.status }}</strong></div>
+                  <div><span>Data do pedido</span><strong>{{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</strong></div>
+                  <div><span>Produto original</span><strong><a href="{{ o.auction.source_url or '#' }}" target="_blank" rel="noopener">Abrir link cadastrado</a></strong></div>
+                </div>
+              </div>
+
+              <div class="panel-card admin-card-pro">
+                <h3>Link enviado pelo vencedor</h3>
+                <div class="profile-grid">
+                  <div><span>Domínio validado</span><strong>{{ o.submitted_link_domain or '—' }}</strong></div>
+                  <div><span>Validação</span><strong>{% if o.submitted_link_valid %}Compatível{% elif o.submitted_purchase_link %}Recusado/pendente{% else %}Aguardando envio{% endif %}</strong></div>
+                  <div><span>Conferido em</span><strong>{{ o.submitted_link_checked_at.strftime('%d/%m/%Y %H:%M') if o.submitted_link_checked_at else '—' }}</strong></div>
+                  <div><span>Aprovado em</span><strong>{{ o.approved_at.strftime('%d/%m/%Y %H:%M') if o.approved_at else '—' }}</strong></div>
+                </div>
+                {% if o.submitted_purchase_link %}
+                  <p><strong>Link/código:</strong> <a href="{{ o.submitted_purchase_link }}" target="_blank" rel="noopener">{{ o.submitted_purchase_link }}</a></p>
+                {% else %}
+                  <p class="muted">O vencedor ainda não enviou link ou código de pagamento.</p>
+                {% endif %}
+                {% if o.submitted_link_validation_note %}
+                  <p class="admin-fee-note">{{ o.submitted_link_validation_note }}</p>
+                {% endif %}
+              </div>
+
+              <div class="panel-card admin-card-pro">
+                <h3>Dados completos do vencedor</h3>
+                <div class="profile-grid">
+                  <div><span>Nome</span><strong>{{ o.user.full_name }}</strong></div>
+                  <div><span>E-mail</span><strong>{{ o.user.email }}</strong></div>
+                  <div><span>CPF</span><strong>{{ o.user.cpf or '—' }}</strong></div>
+                  <div><span>Contato</span><strong>{{ o.user.phone or '—' }}</strong></div>
+                  <div><span>Endereço</span><strong>{{ o.delivery_street or o.user.street or '—' }}, {{ o.delivery_number or o.user.number or '—' }}</strong></div>
+                  <div><span>Cidade/UF</span><strong>{{ o.delivery_city or o.user.city or '—' }}/{{ o.delivery_state or o.user.state or '—' }}</strong></div>
+                  <div><span>CEP</span><strong>{{ o.delivery_cep or o.user.cep or '—' }}</strong></div>
+                </div>
+              </div>
+
+              <div class="panel-card admin-card-pro">
+                <h3>Controle do pedido</h3>
+                <form method="post" action="/admin/order/{{ o.id }}/admin-update" class="order-admin-form">
+                  <div class="profile-grid admin-form-grid">
+                    <label>Link de compra/admin
+                      <input name="purchase_link" value="{{ o.purchase_link or o.auction.source_url or '' }}" placeholder="https://...">
+                    </label>
+                    <label>Status do pedido
+                      {% set current_order_flow_status = o.status if o.status else (o.purchase_status or '') %}
+                      <select name="purchase_status">
+                        <option value="aguardando_escolha" {% if current_order_flow_status in ['', 'paid', 'aguardando_escolha'] %}selected{% endif %}>Aguardando escolha</option>
+                        <option value="aguardando_link" {% if current_order_flow_status == 'aguardando_link' %}selected{% endif %}>Aguardando link</option>
+                        <option value="link_recebido" {% if current_order_flow_status == 'link_recebido' %}selected{% endif %}>Link recebido</option>
+                        <option value="link_rejeitado" {% if current_order_flow_status == 'link_rejeitado' %}selected{% endif %}>Link recusado</option>
+                        <option value="aguardando_aprovacao" {% if current_order_flow_status == 'aguardando_aprovacao' %}selected{% endif %}>Aguardando aprovação</option>
+                        <option value="aprovado_para_pagamento" {% if current_order_flow_status == 'aprovado_para_pagamento' %}selected{% endif %}>Aprovado para pagamento</option>
+                        <option value="pagamento_pedido_realizado" {% if current_order_flow_status == 'pagamento_pedido_realizado' %}selected{% endif %}>Pedido pago</option>
+                        <option value="purchased" {% if current_order_flow_status in ['purchased', 'compra_realizada'] %}selected{% endif %}>Compra realizada</option>
+                        <option value="sent" {% if current_order_flow_status in ['sent', 'produto_enviado'] %}selected{% endif %}>Produto enviado</option>
+                        <option value="delivered" {% if current_order_flow_status in ['delivered', 'produto_entregue'] %}selected{% endif %}>Produto entregue</option>
+                        <option value="finalized" {% if current_order_flow_status == 'finalized' %}selected{% endif %}>Finalizado</option>
+                      </select>
+                    </label>
+                    <label>Código de rastreio
+                      <input name="tracking_code" value="{{ o.tracking_code or '' }}" placeholder="Ex.: BR123456789BR">
+                    </label>
+                  </div>
+                  <label>Observação interna
+                    <textarea name="admin_note">{{ o.admin_note or '' }}</textarea>
+                  </label>
+
+                  <button class="btn" type="submit">Salvar controle</button>
+                </form>
               </div>
             </div>
-            <div class="pix-status-line" id="order-pix-status">Aguardando confirmação do Mercado Pago...</div>
-          </div>
+          </details>
           {% endif %}
+          {% else %}
+            <div class="panel-card empty-card"><h2>Nenhum pedido de vencedor em andamento.</h2></div>
+          {% endfor %}
         </div>
+      </section>
 
-        <div id="cardPaymentPanel" class="payment-panel">
-          <h3>Pagamento com cartão</h3>
-          <p>Ao confirmar, você será direcionado para o ambiente seguro do Mercado Pago.</p>
-          <div class="security-box">
-            🔒 O LanceioCerto não recebe nem armazena número do cartão, validade ou CVV. A confirmação volta automaticamente pelo Mercado Pago.
+      {% endif %}
+
+      {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-users' %}
+<section id="admin-users" class="admin-panel {% if admin_active_panel == 'admin-users' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Usuários</h1>
+            <p>Controle contábil dos saldos, documentos, selo confirmado, bloqueio, chat e auditoria do usuário.</p>
           </div>
         </div>
 
-        <label class="terms-check">
-          <input id="paymentTerms" name="accepted_terms" value="1" type="checkbox" required {% if checkout_payment_active %}checked{% endif %}>
-          <span>
-            Confirmo novamente que li e aceito os
-            <button type="button" class="link-button" data-open-terms>termos de compra</button>
-            antes de concluir o pagamento.
-          </span>
-        </label>
-
-        <div class="checkout-actions">
-          <button class="btn ghost" type="button" id="backToDelivery">Voltar aos dados</button>
-          <button class="btn full" type="submit" id="confirmPaymentButton">{% if has_order_pix_payment %}Pix gerado — atualizar confirmação{% else %}Confirmar pagamento{% endif %}</button>
+        <div class="panel-card admin-card-pro">
+          <form method="get" action="/admin" class="inline-form" style="margin-bottom:14px">
+            <input name="q" value="{{ search if search is defined else '' }}" placeholder="Buscar por nome, e-mail, CPF ou telefone">
+            <button class="btn small" type="submit">Buscar usuário</button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nome</th><th>E-mail</th><th>CPF</th><th>Saldo no site</th><th>Identidade</th><th>Status</th><th>Detalhes</th></tr></thead>
+              <tbody>
+                {% for u in users %}
+                <tr class="user-summary-row" data-user-panel="user-panel-{{ u.id }}">
+                  <td><button class="link-button admin-user-toggle" type="button" data-user-panel="user-panel-{{ u.id }}">{{ u.full_name }}</button></td>
+                  <td>{{ u.email }}</td>
+                  <td>{{ u.cpf or '—' }}</td>
+                  <td>R$ {{ '%.2f'|format(u.wallet_balance)|replace('.', ',') }}</td>
+                  <td>{% if u.identity_status == 'verified' %}<span class="pill-soft">Confirmado</span>{% elif u.identity_status == 'rejected' %}<span class="pill-soft warn">Recusado</span>{% else %}<span class="pill-soft warn">Pendente</span>{% endif %}</td>
+                  <td>{% if u.is_banned %}Banido{% else %}Ativo{% endif %}{% if u.chat_muted %}<br>Chat mutado{% endif %}{% if u.is_admin %}<br>Admin{% endif %}</td>
+                  <td><button class="btn small ghost admin-user-toggle" type="button" data-user-panel="user-panel-{{ u.id }}">Abrir ficha</button></td>
+                </tr>
+                <tr id="user-panel-{{ u.id }}" class="admin-user-detail-row">
+                  <td colspan="7">
+                    <div class="admin-user-detail-card">
+                      <div class="profile-grid">
+                        <div><span>Nome</span><strong>{{ u.full_name }}</strong></div>
+                        <div><span>E-mail</span><strong>{{ u.email }}</strong></div>
+                        <div><span>CPF</span><strong>{{ u.cpf or '—' }}</strong></div>
+                        <div><span>Telefone</span><strong>{{ u.phone or '—' }}</strong></div>
+                        <div><span>Endereço</span><strong>{{ u.street or '—' }}, {{ u.number or '—' }} - {{ u.city or '—' }}/{{ u.state or '—' }}</strong></div>
+                        <div><span>Saldo</span><strong>R$ {{ '%.2f'|format(u.wallet_balance)|replace('.', ',') }}</strong></div>
+                        <div><span>Documento</span><strong>{{ u.document_type or 'CPF' }}: {{ u.document_number or u.cpf or '—' }}</strong></div>
+                        <div><span>Status identidade</span><strong>{{ u.identity_status or 'pending' }}</strong></div>
+                        <div><span>Observação</span><strong>{{ u.identity_note or '—' }}</strong></div>
+                      </div>
+                      <div class="admin-user-docs">
+                        {% if u.document_file_url %}<a class="btn small ghost" href="{{ u.document_file_url }}" target="_blank">Abrir frente do documento</a>{% endif %}
+                        {% if u.document_back_file_url %}<a class="btn small ghost" href="{{ u.document_back_file_url }}" target="_blank">Abrir verso do documento</a>{% endif %}
+                        {% if u.selfie_file_url %}<a class="btn small ghost" href="{{ u.selfie_file_url }}" target="_blank">Abrir selfie</a>{% endif %}
+                      </div>
+                      <div class="admin-user-actions">
+                        <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form"><input name="note" placeholder="Observação da conferência"><button class="btn small" type="submit">Dar selo confirmado</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form"><input name="note" placeholder="Motivo da recusa"><button class="btn small danger" type="submit">Recusar documento</button></form>
+                      </div>
+                      <div class="admin-user-actions">
+                       
+                        {% if not u.is_superadmin %}
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">{% if u.is_banned %}Desbanir usuário{% else %}Banir usuário{% endif %}</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
+                        {% endif %}
+                      </div>
+                      <div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Descrição</th></tr></thead><tbody>{% for tx in user_audit[u.id].transactions if user_audit is defined and user_audit[u.id] is defined %}<tr><td>{{ tx.created_at.strftime('%d/%m/%Y %H:%M') }}</td><td>{{ tx.kind }}</td><td>R$ {{ '%.2f'|format(tx.amount)|replace('.', ',') }}</td><td>{{ tx.note }}</td></tr>{% else %}<tr><td colspan="4">Sem movimentações recentes.</td></tr>{% endfor %}</tbody></table></div>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7">Nenhum usuário cadastrado.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <!-- ETAPA 3 - mensagem visual usada quando o backend futuramente retornar sucesso na mesma página -->
-      <div id="checkoutSuccessMessage" class="checkout-success">
-        <h2>Pagamento finalizado com sucesso 🎉</h2>
-        <p>Parabéns! Em poucos dias seu produto será enviado.</p>
-        <p>Acompanhe tudo pelo site na aba <strong>Rastreio</strong>. Quando o código estiver disponível, ele poderá abrir o link de rastreamento em tempo real.</p>
-        <a href="/minha-conta/ganhos" class="btn full">Acompanhar meu pedido</a>
-      </div>
 
+      {% endif %}
+
+      {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-identity-pending' %}
+<section id="admin-identity-pending" class="admin-panel {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Usuários pendentes</h1>
+            <p>Lista compacta para análise. Clique em <strong>Abrir dados</strong> para conferir documentos, selfie e comprovante de residência.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro identity-compact-card">
+          <div class="table-wrap">
+            <table class="identity-compact-table">
+              <thead>
+                <tr>
+                  <th>Nome completo</th>
+                  <th>Apelido</th>
+                  <th>E-mail</th>
+                  <th>Status</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+              {% for u in identity_pending_users if identity_pending_users is defined %}
+                <tr>
+                  <td><strong>{{ u.full_name }}</strong></td>
+                  <td>@{{ u.public_name or u.nickname or '—' }}</td>
+                  <td>{{ u.email }}</td>
+                  <td><span class="pill-soft warn">Pendente</span></td>
+                  <td><button class="btn small ghost identity-open-btn" type="button" data-identity-panel="identity-panel-{{ u.id }}">Abrir dados</button></td>
+                </tr>
+                <tr id="identity-panel-{{ u.id }}" class="identity-detail-row">
+                  <td colspan="5">
+                    <div class="identity-detail-card">
+                      <div class="card-title-row">
+                        <div>
+                          <h2>{{ u.full_name }}</h2>
+                          <p class="muted">CPF: {{ u.cpf or '—' }} • Telefone: {{ u.phone or '—' }} • Nascimento: {{ u.birth_date or '—' }}</p>
+                        </div>
+                        <span class="pill-soft warn">Conferência manual</span>
+                      </div>
+
+                      <div class="profile-grid identity-user-grid">
+                        <div><span>CPF</span><strong>{{ u.cpf or '—' }}</strong></div>
+                        <div><span>Telefone</span><strong>{{ u.phone or '—' }}</strong></div>
+                        <div><span>Gênero</span><strong>{{ u.gender or '—' }}</strong></div>
+                        <div><span>Nascimento</span><strong>{{ u.birth_date or '—' }}</strong></div>
+                        <div><span>Endereço</span><strong>{{ u.street or '—' }}, {{ u.number or '—' }}{% if u.complement %} - {{ u.complement }}{% endif %}</strong></div>
+                        <div><span>Cidade/UF</span><strong>{{ u.city or '—' }}/{{ u.state or '—' }}</strong></div>
+                      </div>
+
+                      <div class="identity-doc-grid identity-doc-grid-4">
+                        <div>
+                          <span>Frente do documento</span>
+                          {% if u.document_file_url %}
+                            <a class="identity-doc-link" href="{{ u.document_file_url }}" target="_blank" rel="noopener">
+                              {% if u.document_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_file_url }}" alt="Frente do documento" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviado.</p>{% endif %}
+                        </div>
+                        <div>
+                          <span>Verso do documento</span>
+                          {% if u.document_back_file_url %}
+                            <a class="identity-doc-link" href="{{ u.document_back_file_url }}" target="_blank" rel="noopener">
+                              {% if u.document_back_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_back_file_url }}" alt="Verso do documento" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviado.</p>{% endif %}
+                        </div>
+                        <div>
+                          <span>Selfie atual</span>
+                          {% if u.selfie_file_url %}
+                            <a class="identity-doc-link" href="{{ u.selfie_file_url }}" target="_blank" rel="noopener">
+                              {% if u.selfie_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir arquivo</span>{% else %}<img src="{{ u.selfie_file_url }}" alt="Selfie" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviada.</p>{% endif %}
+                        </div>
+                        <div>
+                          <span>Comprovante de residência</span>
+                          {% if u.residence_proof_file_url %}
+                            <a class="identity-doc-link" href="{{ u.residence_proof_file_url }}" target="_blank" rel="noopener">
+                              {% if u.residence_proof_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir comprovante</span>{% else %}<img src="{{ u.residence_proof_file_url }}" alt="Comprovante de residência" loading="lazy">{% endif %}
+                            </a>
+                          {% else %}<p>Não enviado.</p>{% endif %}
+                        </div>
+                      </div>
+
+                      <div class="identity-review-actions">
+                        <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form">
+                          <input name="note" value="Documentação conferida e aprovada." placeholder="Observação da aprovação">
+                          <button class="btn small" type="submit">Validar usuário</button>
+                        </form>
+
+                        <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form">
+                          <input name="note" value="Documentação ilegível ou incompatível com os dados informados." placeholder="Motivo da recusa">
+                          <button class="btn small danger" type="submit">Enviar incompatibilidade</button>
+                        </form>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="5">Nenhum usuário pendente de verificação no momento.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      {% endif %}
+
+      {% if user.is_superadmin %}
+{% endif %}
+{% if admin_active_panel == 'admin-withdrawals' %}
+<section id="admin-withdrawals" class="admin-panel {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Saques Pendentes</h1>
+            <p>Solicitações feitas pelos usuários. O valor já sai do saldo do usuário no momento do pedido e fica reservado no caixa para pagamento manual.</p>
+          </div>
+        </div>
+
+        <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
+          <div class="stat finance-card warning">
+            <span>Total pendente</span>
+            <strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong>
+            <small>Valor reservado para pagar manualmente</small>
+          </div>
+          <div class="stat">
+            <span>Quantidade</span>
+            <strong>{{ stats.pending_withdrawals if stats.pending_withdrawals is defined else 0 }}</strong>
+            <small>Solicitações aguardando ação</small>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row">
+            <h2>Solicitações de saque</h2>
+            <span class="pill-soft warn">Execução manual</span>
+          </div>
+          <p class="muted withdraw-admin-note">
+            Ao aprovar ou marcar como pago, o saldo do usuário não é descontado novamente, porque já foi reservado no pedido. Se recusar, o sistema devolve o valor ao saldo do usuário automaticamente.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Usuário</th>
+                  <th>CPF</th>
+                  <th>E-mail</th>
+                  <th>Valor pedido</th>
+                  <th>Taxa 1%</th>
+                  <th>Valor a pagar</th>
+                  <th>Chave PIX</th>
+                  <th>Status</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for w in withdrawal_requests if withdrawal_requests is defined %}
+                <tr class="{% if w.status == 'pending' %}withdraw-row-pending{% endif %}">
+                  <td>{{ w.created_at.strftime('%d/%m/%Y %H:%M') if w.created_at else '—' }}</td>
+                  <td>{{ w.user.full_name if w.user else 'Usuário removido' }}<br><small>@{{ w.user.public_name or w.user.nickname if w.user else '—' }}</small></td>
+                  <td>{{ w.user.cpf if w.user and w.user.cpf else '—' }}</td>
+                  <td>{{ w.user.email if w.user else '—' }}</td>
+                  <td><strong>R$ {{ '%.2f'|format(w.amount)|replace('.', ',') }}</strong></td>
+                  <td>R$ {{ '%.2f'|format(w.fee_amount if w.fee_amount is defined else (w.amount * 0.01))|replace('.', ',') }}</td>
+                  <td><strong class="positive-text">R$ {{ '%.2f'|format(w.net_amount if w.net_amount is defined else (w.amount * 0.99))|replace('.', ',') }}</strong></td>
+                  <td><code class="pix-key-code">{{ w.pix_key }}</code></td>
+                  <td><span class="status {{ w.status }}">{{ w.status }}</span></td>
+                  <td>
+                    <form method="post" action="/admin/withdrawal/{{ w.id }}/set-status" class="withdraw-admin-form">
+                      <select name="status">
+                        <option value="pending" {% if w.status == 'pending' %}selected{% endif %}>Pendente</option>
+                        <option value="approved" {% if w.status == 'approved' %}selected{% endif %}>Aprovado</option>
+                        <option value="paid" {% if w.status == 'paid' %}selected{% endif %}>Pago manualmente</option>
+                        <option value="rejected" {% if w.status == 'rejected' %}selected{% endif %}>Recusar e devolver</option>
+                      </select>
+                      <input name="admin_note" value="{{ w.admin_note or '' }}" placeholder="Observação do admin">
+                      <button class="btn small" type="submit">Salvar</button>
+                    </form>
+                    {% if w.status in ['pending', 'approved'] %}
+                    <form method="post" action="/admin/withdrawal/{{ w.id }}/set-status" class="inline-form">
+                      <input type="hidden" name="status" value="paid">
+                      <input type="hidden" name="admin_note" value="Saque pago manualmente pelo administrador.">
+                      <button class="btn small" type="submit">Concluir saque</button>
+                    </form>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="10">Nenhuma solicitação de saque encontrada.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+
+      {% endif %}
+{% if admin_active_panel == 'admin-tickets' %}
+
+      <section id="admin-tickets" class="admin-panel {% if admin_active_panel == 'admin-tickets' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Chamados e Disputas</h1>
+            <p>Atendimento operacional dos usuários, sem acesso ao caixa.</p>
+          </div>
+        </div>
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Chamados recentes</h2><span class="pill-soft">Suporte</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Data</th><th>Usuário</th><th>Assunto</th><th>Status</th><th>Observação</th><th>Ação</th></tr></thead>
+              <tbody>
+                {% for t in support_tickets if support_tickets is defined %}
+                <tr>
+                  <td>{{ t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '—' }}</td>
+                  <td>{{ t.user.full_name if t.user else '—' }}<br><small>@{{ t.user.public_name or t.user.nickname if t.user else '—' }}</small></td>
+                  <td><strong>{{ t.subject or 'Chamado' }}</strong><br><small>{{ t.message[:140] if t.message else '' }}</small></td>
+                  <td>{{ t.status }}</td>
+                  <td>{{ t.admin_note or '—' }}</td>
+                  <td>
+                    <form method="post" action="/admin/ticket/{{ t.id }}/set-status" class="inline-form">
+                      <select name="status">
+                        <option value="open" {% if t.status == 'open' %}selected{% endif %}>Aberto</option>
+                        <option value="in_review" {% if t.status == 'in_review' %}selected{% endif %}>Em análise</option>
+                        <option value="awaiting_customer" {% if t.status == 'awaiting_customer' %}selected{% endif %}>Aguardando cliente</option>
+                        <option value="dispute" {% if t.status == 'dispute' %}selected{% endif %}>Disputa</option>
+                        <option value="resolved" {% if t.status == 'resolved' %}selected{% endif %}>Resolvido</option>
+                        <option value="closed" {% if t.status == 'closed' %}selected{% endif %}>Fechado</option>
+                      </select>
+                      <select name="result">
+                        <option value="">Resultado</option>
+                        <option value="client">Favorável ao cliente</option>
+                        <option value="site">Favorável ao site</option>
+                        <option value="agreement">Acordo</option>
+                      </select>
+                      <input name="admin_note" value="{{ t.admin_note or '' }}" placeholder="Observação">
+                      <button class="btn small" type="submit">Salvar</button>
+                    </form>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6">Nenhum chamado encontrado.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+{% endif %}
+{% if admin_active_panel == 'admin-suggestions' %}
+
+
+      <section id="admin-suggestions" class="admin-panel {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Indicações de Produtos</h1>
+            <p>Produtos mais pedidos pelos usuários para próximos leilões. Cada usuário pode votar uma vez por dia.</p>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row">
+            <h2>Ranking de interesse</h2>
+            <span class="pill-soft">Votação</span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Posição</th>
+                  <th>Produto</th>
+                  <th>Categoria</th>
+                  <th>Faixa</th>
+                  <th>Votos</th>
+                  <th>Percentual</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in suggestion_vote_stats if suggestion_vote_stats is defined %}
+                <tr>
+                  <td>#{{ loop.index }}</td>
+                  <td>{{ item.name }}</td>
+                  <td>{{ item.category }}</td>
+                  <td>{{ item.price_level }}</td>
+                  <td>{{ item.votes }}</td>
+                  <td>
+                    <strong>{{ '%.2f'|format(item.percent)|replace('.', ',') }}%</strong>
+                    <div class="suggestion-admin-bar">
+                      <span style="width: {{ item.percent if item.percent <= 100 else 100 }}%"></span>
+                    </div>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6">Nenhuma votação registrada ainda.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+{% endif %}
+{% if admin_active_panel == 'admin-search-orders' %}
+
+            <section id="admin-search-orders" class="admin-panel {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Central de Controle de Arremates</h1>
+            <p>Pesquise e abra o painel interno do pedido para controlar compra, envio, rastreio e mensagens. Informações financeiras ficam restritas ao super admin.</p>
+          </div>
+        </div>
+        <div class="panel-card admin-card-pro">
+          <input id="admin-order-search" placeholder="Pesquisar por cliente, e-mail, CPF, produto ou status...">
+          <div class="admin-order-list">
+            {% for card in admin_order_cards if admin_order_cards is defined %}
+              {% set o = card.order %}
+              {% set f = card.finance %}
+              <article class="admin-order-card" data-search="{{ (o.user.full_name ~ ' ' ~ o.user.email ~ ' ' ~ o.user.cpf ~ ' ' ~ o.auction.title ~ ' ' ~ o.status)|lower }}">
+                <div class="admin-order-summary">
+                  <img src="{{ o.auction.image_url }}" alt="{{ o.auction.title }}" loading="lazy" decoding="async">
+                  <div>
+                    <h3>{{ o.auction.title }}</h3>
+                    <p><strong>Ganhador:</strong> {{ o.user.full_name }} • {{ o.user.email }}</p>
+                    <p><strong>Status:</strong> {{ o.status }} • <strong>Valor:</strong> R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
+                    <p><strong>Arrematado em:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
+                  </div>
+                  <button class="btn small order-panel-btn" type="button" data-order-panel="order-panel-{{ o.id }}">Abrir painel</button>
+                </div>
+
+                <div id="order-panel-{{ o.id }}" class="admin-order-detail">
+                  <div class="order-detail-grid">
+                    <div class="panel-card mini-detail-card">
+                      <h4>Cliente</h4>
+                      <p><strong>Nome:</strong> {{ o.user.full_name }}</p>
+                      <p><strong>E-mail:</strong> {{ o.user.email }}</p>
+                      <p><strong>CPF:</strong> {{ o.user.cpf or '—' }}</p>
+                      <p><strong>Telefone:</strong> {{ o.user.phone or '—' }}</p>
+                    </div>
+                    <div class="panel-card mini-detail-card">
+                      <h4>Produto</h4>
+                      <p><strong>Produto:</strong> {{ o.auction.title }}</p>
+                      <p><strong>Loja:</strong> {{ o.auction.source_store or '—' }}</p>
+                      <p><strong>Preço original:</strong> R$ {{ '%.2f'|format(o.auction.source_price)|replace('.', ',') }}</p>
+                      {% if o.auction.source_url %}
+                      <p><a href="{{ o.auction.source_url }}" target="_blank" rel="noopener noreferrer" class="btn small ghost">Abrir link de compra original</a></p>
+                      {% endif %}
+                    </div>
+                    <div class="panel-card mini-detail-card">
+                      <h4>Pagamento e prazo</h4>
+                      <p><strong>Arrematou:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
+                      <p><strong>Pagamento:</strong> {{ o.paid_at.strftime('%d/%m/%Y %H:%M') if o.paid_at else 'Não confirmado' }}</p>
+                      <p><strong>Prazo:</strong> {{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</p>
+                      {% if user.is_superadmin and (o.status == 'expired' or not o.paid_at) %}
+                      <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
+                        <input type="number" name="extra_minutes" value="10" min="1">
+                        <button class="btn small" type="submit">Dar mais prazo</button>
+                      </form>
+                      {% endif %}
+                    </div>
+{% if user.is_superadmin %}
+                    <div class="panel-card mini-detail-card">
+                      <h4>Contabilidade</h4>
+                      <p><strong>Lances acumulados:</strong> R$ {{ '%.2f'|format(f.bid_pool)|replace('.', ',') }}</p>
+                      <p><strong>Taxas:</strong> R$ {{ '%.2f'|format(f.fees)|replace('.', ',') }}</p>
+                      <p><strong>Caixa antes do pagamento:</strong> R$ {{ '%.2f'|format(f.reserved_before_payment)|replace('.', ',') }}</p>
+                      <p><strong>Total se pago:</strong> R$ {{ '%.2f'|format(f.total_if_paid)|replace('.', ',') }}</p>
+                      <p><strong>Resultado estimado:</strong> R$ {{ '%.2f'|format(f.result_if_paid)|replace('.', ',') }}</p>
+                    </div>
+                    {% endif %}
+                  </div>
+
+                  <div class="panel-card admin-card-pro">
+                    <h3>Compra, envio e rastreio</h3>
+                    <form method="post" action="/admin/order/{{ o.id }}/admin-update" class="order-admin-form">
+                      <div class="profile-grid admin-form-grid">
+                        <label>Link de compra do admin
+                          <input name="purchase_link" value="{{ o.purchase_link or o.auction.source_url or '' }}" placeholder="https://...">
+                        </label>
+                        <label>Status da compra externa
+                          <select name="purchase_status">
+                            <option value="" {% if not o.purchase_status %}selected{% endif %}>Não comprado ainda</option>
+                            <option value="comprar" {% if o.purchase_status == 'comprar' %}selected{% endif %}>A comprar</option>
+                            <option value="comprado" {% if o.purchase_status == 'comprado' %}selected{% endif %}>Comprado</option>
+                            <option value="aguardando_envio" {% if o.purchase_status == 'aguardando_envio' %}selected{% endif %}>Aguardando envio</option>
+                            <option value="enviado" {% if o.purchase_status == 'enviado' %}selected{% endif %}>Enviado</option>
+                            <option value="entregue" {% if o.purchase_status == 'entregue' %}selected{% endif %}>Entregue</option>
+                          </select>
+                        </label>
+                        <label>Código de rastreio
+                          <input name="tracking_code" value="{{ o.tracking_code or '' }}" placeholder="Ex.: BR123456789BR">
+                        </label>
+                      </div>
+                      <label>Observação interna
+                        <textarea name="admin_note">{{ o.admin_note or '' }}</textarea>
+                      </label>
+                      
+                      <button class="btn" type="submit">Salvar controle</button>
+                      {% if o.status in ['delivered', 'resolved'] %}
+                      <form method="post" action="/admin/order/{{ o.id }}/finalize-operation" class="inline-form">
+                        <input name="admin_note" placeholder="Observação final" value="Operação conferida e finalizada.">
+                        <button class="btn small" type="submit">Finalizar operação agora</button>
+                      </form>
+                      {% endif %}
+                    </form>
+                  </div>
+
+                  <div class="panel-card admin-card-pro">
+                    <h3>Mensagem direta ao ganhador</h3>
+                    <div class="direct-message-box">
+                      {% for msg in card.messages %}
+                      <div class="direct-message-line {% if not msg.is_open %}closed{% endif %}">
+                        <strong>{{ msg.admin.full_name if msg.admin else 'Admin' }}</strong>
+                        <span>{{ msg.created_at.strftime('%d/%m/%Y %H:%M') if msg.created_at else '—' }}</span>
+                        <p>{{ msg.message }}</p>
+                        {% if not msg.is_open %}<small>Atendimento fechado</small>{% endif %}
+                      </div>
+                      {% else %}
+                      <p class="muted">Nenhuma mensagem direta enviada ainda.</p>
+                      {% endfor %}
+                    </div>
+                    <form method="post" action="/admin/order/{{ o.id }}/message">
+                      <textarea name="message" placeholder="Escreva uma mensagem direta..." required></textarea>
+                      <button class="btn small" type="submit">Enviar mensagem</button>
+                    </form>
+                    <div class="admin-toolbar-end">
+                      <form method="post" action="/admin/order/{{ o.id }}/close-chat" class="inline-form"><button class="btn small ghost" type="submit">Fechar atendimento</button></form>
+                      <form method="post" action="/admin/order/{{ o.id }}/reopen-chat" class="inline-form"><button class="btn small" type="submit">Reabrir atendimento</button></form>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            {% else %}
+              <p>Nenhum arremate encontrado.</p>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+
+
+{% if user.is_superadmin %}
+{% endif %}
+{% endif %}
+{% if admin_active_panel == 'admin-audit' %}
+<section id="admin-audit" class="admin-panel {% if admin_active_panel == 'admin-audit' %}active{% endif %}">
+  <div class="section-head admin-section-head-pro">
+    <div>
+      <h1>Central de Auditoria</h1>
+      <p>Arquivo central da empresa: financeiro, leilões, pedidos, usuários, ações administrativas e arquivo morto, tudo separado em pastas pesquisáveis.</p>
+    </div>
+    <a class="btn small" href="/admin/audit/export?folder={{ audit_folder or 'geral' }}&q={{ audit_search or '' }}&from={{ audit_date_from or '' }}&to={{ audit_date_to or '' }}" data-no-prefetch="true">Exportar CSV</a>
+  </div>
+
+  <div class="audit-folder-grid">
+    {% for folder in audit_folders if audit_folders is defined %}
+      <a class="audit-folder-card {% if folder.active %}active{% endif %}" href="/admin?tab=admin-audit&folder={{ folder.key }}&q={{ audit_search or '' }}&from={{ audit_date_from or '' }}&to={{ audit_date_to or '' }}" data-no-prefetch="true">
+        <span>{{ folder.label }}</span>
+        <strong>{{ folder.count }}</strong>
+        <small>{{ folder.description }}</small>
+      </a>
+    {% endfor %}
+  </div>
+
+  <div class="panel-card admin-card-pro audit-filter-card">
+    <div class="card-title-row">
+      <h2>Pesquisa e filtros</h2>
+      <span class="pill-soft">{{ audit_total_loaded if audit_total_loaded is defined else 0 }} registros carregados</span>
+    </div>
+    <form method="get" action="/admin" class="audit-search-form">
+      <input type="hidden" name="tab" value="admin-audit">
+      <label>Pesquisar
+        <input name="q" value="{{ audit_search or '' }}" placeholder="Nome, e-mail, CPF, produto, pedido, ação, IP ou detalhe">
+      </label>
+      <label>Pasta
+        <select name="folder">
+          {% for folder in audit_folders if audit_folders is defined %}
+            <option value="{{ folder.key }}" {% if folder.active %}selected{% endif %}>{{ folder.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>De
+        <input type="date" name="from" value="{{ audit_date_from or '' }}">
+      </label>
+      <label>Até
+        <input type="date" name="to" value="{{ audit_date_to or '' }}">
+      </label>
+      <button class="btn" type="submit">Buscar</button>
+      <a class="btn ghost" href="/admin?tab=admin-audit" data-no-prefetch="true">Limpar</a>
     </form>
   </div>
-</div>
 
-<div id="termsModal" class="terms-modal" aria-hidden="true">
-  <div class="terms-modal-card">
-    <div class="terms-modal-head">
-      <h2>Termos e regras de compra</h2>
-      <button type="button" class="terms-close" data-close-terms>×</button>
+  <div class="notice-grid audit-archive-layout">
+    <div class="panel-card admin-card-pro audit-explain-card">
+      <div class="card-title-row"><h2>Como essa central organiza</h2><span class="pill-soft">Arquivo empresarial</span></div>
+      <div class="admin-alert-list">
+        <div><strong>Financeiro</strong><span>Entradas, saídas, saques, taxas, estornos, créditos manuais e pagamentos confirmados.</span></div>
+        <div><strong>Operação</strong><span>Leilões, pedidos, compra do produto, envio, entrega, disputa e finalização.</span></div>
+        <div><strong>Arquivo morto</strong><span>Registros antigos ou concluídos ficam consultáveis para auditoria futura.</span></div>
+      </div>
     </div>
 
-    <div class="terms-modal-body">
-      <p><strong>1. Confirmação dos dados:</strong> o comprador é responsável por conferir nome, CPF, telefone e endereço antes da confirmação.</p>
-      <p><strong>2. Prazo de pagamento:</strong> o vencedor deve concluir o pagamento dentro do prazo informado no pedido.</p>
-      <p><strong>3. Pagamento:</strong> PIX e cartão poderão ser disponibilizados conforme integração com Mercado Pago. Taxas de cartão e parcelamento podem ser aplicadas pela operadora.</p>
-      <p><strong>4. Cartão de crédito:</strong> por segurança, o cartão deve estar em nome do usuário cadastrado ou do responsável validado pela plataforma.</p>
-      <p><strong>5. Envio:</strong> o produto será preparado após a confirmação do pagamento. O prazo de entrega depende da transportadora/Correios.</p>
-      <p><strong>6. Rastreio:</strong> quando o código for informado, o acompanhamento poderá ser feito pela aba Rastreio.</p>
-      <p><strong>7. Dados pessoais:</strong> os dados informados serão usados para pagamento, emissão de comprovantes e envio do produto.</p>
-      <p><strong>8. Produto:</strong> imagens, descrições e informações do item devem ser conferidas antes da finalização da compra.</p>
-    </div>
-
-    <button type="button" class="btn full" data-close-terms>Entendi</button>
-  </div>
-</div>
-
-{% elif section == 'delete_account' %}
-<div class="panel-card delete-account-card">
-  <div class="section-head compact-head">
-    <div>
-      <h1>Excluir conta</h1>
-      <p>Informe o motivo e confirme com sua senha.</p>
+    <div class="panel-card admin-card-pro audit-explain-card">
+      <div class="card-title-row"><h2>Regra de segurança</h2><span class="pill-soft warn">Não apagar</span></div>
+      <p class="muted">A central foi pensada para consulta e exportação. O correto é nunca apagar registros antigos; eles devem permanecer arquivados para reconstruir qualquer evento importante do site.</p>
     </div>
   </div>
 
-  {% if error %}
-    <div class="alert">{{ error }}</div>
-  {% endif %}
-
-
-  <form method="post" action="/minha-conta/deletar" class="delete-account-form" id="delete-account-form">
-    <label>Motivo da exclusão
-      <select name="delete_reason" required>
-        <option value="">Selecione um motivo</option>
-        <option value="nao_uso">Não uso mais a plataforma</option>
-        <option value="privacidade">Privacidade/dados pessoais</option>
-        <option value="dificuldade">Dificuldade para usar o site</option>
-        <option value="problema_pagamento">Problema com pagamento ou Créditos LC</option>
-        <option value="problema_leilao">Problema com leilão ou pedido</option>
-        <option value="teste">Conta criada apenas para teste</option>
-        <option value="outro">Outro motivo</option>
-      </select>
-    </label>
-
-    <label>Detalhes adicionais
-      <textarea name="delete_details" maxlength="1000" placeholder="Opcional: conte brevemente o motivo."></textarea>
-      <small>Essas informações aparecem na Central de Auditoria do admin.</small>
-    </label>
-
-    <label>Confirme sua senha
-      <input type="password" name="password" autocomplete="current-password" required placeholder="Digite sua senha">
-    </label>
-
-    <input type="hidden" name="confirm_delete" value="1">
-
-    <div class="delete-actions">
-      <button class="btn danger-btn" type="button" id="open-delete-confirm" data-delete-account-submit>Excluir minha conta</button>
-      <a class="btn ghost" href="/minha-conta">Cancelar</a>
-    </div>
-  </form>
-</div>
-
-<div id="delete-confirm-modal" class="delete-confirm-overlay" aria-hidden="true">
-  <div class="delete-confirm-card" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
-    <h2 id="delete-confirm-title">Excluir conta?</h2>
-
-    <p>Seu acesso será encerrado imediatamente.</p>
-
-    <div class="delete-confirm-actions">
-      <button class="btn ghost" type="button" id="cancel-delete-confirm">
-        Cancelar
-      </button>
-
-      <button class="btn danger-btn" type="button" id="confirm-delete-account">
-        Excluir conta
-      </button>
-    </div>
+  <div class="panel-card admin-card-pro">
+    <div class="card-title-row"><h2>Registros arquivados</h2><span class="pill-soft">Rastreabilidade</span></div>
+    <div class="table-wrap audit-table-wrap"><table class="audit-table"><thead><tr><th>Data</th><th>Pasta</th><th>Usuário/Admin</th><th>Ação</th><th>Entidade</th><th>IP</th><th>Detalhes</th></tr></thead><tbody>
+      {% for a in audit_logs if audit_logs is defined %}
+      <tr class="{% if a.archived %}audit-row-archived{% endif %}">
+        <td>{{ a.created_at.strftime('%d/%m/%Y %H:%M') if a.created_at else '—' }}{% if a.archived %}<br><small>arquivo morto</small>{% endif %}</td>
+        <td><span class="audit-folder-pill">{{ a.folder_label }}</span></td>
+        <td>{{ a.user_label if a.user_label is defined else (a.user.public_name if a.user and a.user.public_name else (a.user.email if a.user else 'Sistema')) }}</td>
+        <td><strong>{{ a.action }}</strong></td>
+        <td>{{ a.entity_type }}{% if a.entity_id %} #{{ a.entity_id }}{% endif %}</td>
+        <td>{{ a.ip_address }}</td>
+        <td class="audit-details-cell">{{ a.details }}</td>
+      </tr>
+      {% else %}<tr><td colspan="7">Nenhum registro encontrado com esses filtros.</td></tr>{% endfor %}
+    </tbody></table></div>
   </div>
-</div>
-
-<script>
-(function(){
-  const form = document.getElementById('delete-account-form');
-  const openBtn = document.getElementById('open-delete-confirm');
-  const modal = document.getElementById('delete-confirm-modal');
-  const cancelBtn = document.getElementById('cancel-delete-confirm');
-  const confirmBtn = document.getElementById('confirm-delete-account');
-  if (!form || !openBtn || !modal || !cancelBtn || !confirmBtn) return;
-
-  function openModal(){
-    modal.classList.add('active');
-    modal.setAttribute('aria-hidden', 'false');
-    cancelBtn.focus();
-  }
-
-  function closeModal(){
-    modal.classList.remove('active');
-    modal.setAttribute('aria-hidden', 'true');
-    openBtn.focus();
-  }
-
-  openBtn.addEventListener('click', function(){
-    if (typeof form.reportValidity === 'function' && !form.reportValidity()) return;
-    openModal();
-  });
-
-  cancelBtn.addEventListener('click', closeModal);
-
-  modal.addEventListener('click', function(event){
-    if (event.target === modal) closeModal();
-  });
-
-  document.addEventListener('keydown', function(event){
-    if (event.key === 'Escape' && modal.classList.contains('active')) closeModal();
-  });
-
-  confirmBtn.addEventListener('click', function(){
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = 'Excluindo...';
-    form.submit();
-  });
-})();
-</script>
+</section>
 
 {% endif %}
-  
+{% if admin_active_panel == 'admin-moderation' %}
 
-</main>
-</div>
-{% endblock %}
+      <section id="admin-moderation" class="admin-panel {% if admin_active_panel == 'admin-moderation' %}active{% endif %}">
+        <div class="section-head admin-section-head-pro">
+          <div>
+            <h1>Moderação</h1>
+            <p>Área de segurança para infrações, chat, bloqueios e estabilidade da operação.</p>
+          </div>
+        </div>
 
-{% block extra_scripts %}
+        <div class="notice-grid">
+          <div class="panel-card admin-card-pro">
+            <h2>Conduta e segurança</h2>
+            <div class="profile-grid">
+              <div><span>Usuários</span><strong>Banimento apenas por infração real</strong></div>
+              <div><span>Chat</span><strong>Mutar comportamentos abusivos</strong></div>
+              <div><span>Leilões</span><strong>Pausar chat em momentos críticos</strong></div>
+              <div><span>Auditoria</span><strong>Registrar motivo das ações</strong></div>
+            </div>
+          </div>
+          <div class="panel-card admin-card-pro">
+            <h2>Boas práticas</h2>
+            <div class="admin-alert-list">
+              <div><strong>Transparência</strong><span>Manter leilões, resultados e vencedores auditáveis.</span></div>
+              <div><strong>Contabilidade</strong><span>Separar saldo dos usuários do caixa operacional.</span></div>
+              <div><strong>Risco</strong><span>Não relançar produto sem revisar margem e prejuízo acumulado.</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card admin-card-pro">
+          <div class="card-title-row"><h2>Usuários para moderação de chat</h2><span class="pill-soft">Operacional</span></div>
+          <p class="muted">Admins operacionais podem mutar/desmutar chat. Banimento total da conta fica restrito ao super admin.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Nome</th><th>Apelido</th><th>E-mail</th><th>Status</th><th>Ação</th></tr></thead>
+              <tbody>
+                {% for u in moderation_users if moderation_users is defined %}
+                <tr>
+                  <td>{{ u.full_name }}</td>
+                  <td>@{{ u.public_name or u.nickname or '—' }}</td>
+                  <td>{{ u.email }}</td>
+                  <td>{% if u.chat_muted %}Chat mutado{% else %}Chat liberado{% endif %}{% if u.is_banned %}<br>Conta banida{% endif %}<br><small>Ocorrências: {{ u.ban_count if u.ban_count is defined else 0 }}{% if u.banned_until %} • até {{ fmt_br_datetime(u.banned_until) }}{% endif %}{% if u.ban_reason %}<br>{{ u.ban_reason }}{% endif %}</small></td>
+                  <td>
+                    {% if not u.is_superadmin %}
+                      <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
+                      <form method="post" action="/admin/user/{{ u.id }}/ban-1-day" class="inline-form moderation-ban-form">
+                        <input name="reason" placeholder="Motivo da punição" value="Infração nas regras do chat">
+                        <button class="btn small danger" type="submit">Banir 1 dia</button>
+                      </form>
+                      {% if user.is_superadmin %}
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">Banimento permanente</button></form>
+                        {% if u.is_banned %}<form method="post" action="/admin/user/{{ u.id }}/unban" class="inline-form"><button class="btn small ghost" type="submit">Liberar acesso</button></form>{% endif %}
+                      {% endif %}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5">Nenhum usuário encontrado para moderação.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+{% endif %}
+
+    </div>
+  </div>
+</section>
+
 <script>
-(function () {
-  function openBalancePanel(scroll = true) {
-    const panel = document.getElementById("account-balance-panel");
-    if (!panel) return;
-    panel.classList.add("active");
-    if (scroll) {
-      panel.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+document.addEventListener("DOMContentLoaded", function () {
+  // As abas principais do admin agora carregam por demanda pelo backend:
+  // /admin?tab=admin-auctions, /admin?tab=admin-cashflow etc.
+  // Isso evita montar financeiro, auditoria e usuários em toda abertura.
+  // Os botões laterais são links normais; este script fica apenas para
+  // detalhes internos dos cards, sem trocar painéis pesados localmente.
+
+
+  const scheduleMode = document.getElementById("schedule-mode");
+  const minuteField = document.querySelector(".schedule-minutes-field");
+  const dateField = document.querySelector(".schedule-datetime-field");
+  function toggleScheduleFields() {
+    if (!scheduleMode || !minuteField || !dateField) return;
+    const byDate = scheduleMode.value === "datetime";
+    minuteField.style.display = byDate ? "none" : "block";
+    dateField.style.display = byDate ? "block" : "none";
+  }
+  if (scheduleMode) {
+    scheduleMode.addEventListener("change", toggleScheduleFields);
+    toggleScheduleFields();
   }
 
-  const balanceButtons = document.querySelectorAll("[data-account-target]");
-  balanceButtons.forEach((button) => {
-    button.addEventListener("click", function (event) {
-      const target = this.getAttribute("data-account-target");
-      const panel = document.getElementById(target);
-
-      if (!panel) {
-        return;
-      }
-
-      event.preventDefault();
-      panel.classList.add("active");
-      balanceButtons.forEach((item) => item.classList.add("active"));
-
-      if (window.history && window.location.hash !== `#${target}`) {
-        history.replaceState(null, "", `#${target}`);
-      }
-
-      panel.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  });
-
-  if (window.location.hash === "#account-balance-panel" || new URLSearchParams(window.location.search).get("saldo") === "1") {
-    setTimeout(() => openBalancePanel(true), 200);
-  }
-
-  const walletButtons = document.querySelectorAll("[data-wallet-mode]");
-  const walletPanels = document.querySelectorAll(".wallet-mode-panel");
-
-  walletButtons.forEach((button) => {
+  document.querySelectorAll(".returned-open-btn").forEach((button) => {
     button.addEventListener("click", function () {
-      const target = this.getAttribute("data-wallet-mode");
-
-      walletButtons.forEach((item) => item.classList.remove("active"));
-      walletPanels.forEach((panel) => panel.classList.remove("active"));
-
-      this.classList.add("active");
-
-      const selected = document.getElementById(target);
-      if (selected) selected.classList.add("active");
+      const id = this.getAttribute("data-returned-panel");
+      const panel = document.getElementById(id);
+      if (panel) panel.classList.toggle("active");
     });
   });
 
-  const depositButtons = document.querySelectorAll("[data-deposit-target]");
-  const depositPanels = document.querySelectorAll(".deposit-panel");
-
-  depositButtons.forEach((button) => {
+  document.querySelectorAll(".order-panel-btn").forEach((button) => {
     button.addEventListener("click", function () {
-      const target = this.getAttribute("data-deposit-target");
-
-      depositButtons.forEach((item) => item.classList.remove("active"));
-      depositPanels.forEach((panel) => panel.classList.remove("active"));
-
-      this.classList.add("active");
-
-      const selected = document.getElementById(target);
-      if (selected) selected.classList.add("active");
+      const id = this.getAttribute("data-order-panel");
+      const panel = document.getElementById(id);
+      if (panel) panel.classList.toggle("active");
     });
   });
-  const checkoutForm = document.getElementById("checkoutForm");
-  const confirmPaymentButton = document.getElementById("confirmPaymentButton");
-  const goToPayment = document.getElementById("goToPayment");
-  const backToDelivery = document.getElementById("backToDelivery");
-  const deliveryTerms = document.getElementById("deliveryTerms");
-  const paymentTerms = document.getElementById("paymentTerms");
-  const deliveryStep = document.querySelector('[data-checkout-step="delivery"]');
-  const paymentStep = document.querySelector('[data-checkout-step="payment"]');
-  const paymentMethodInput = document.getElementById("paymentMethodInput");
-  const paymentOptions = document.querySelectorAll("[data-payment-method]");
-  const pixPaymentPanel = document.getElementById("pixPaymentPanel");
-  const cardPaymentPanel = document.getElementById("cardPaymentPanel");
-  const walletPaymentPanel = document.getElementById("walletPaymentPanel");
-  const termsModal = document.getElementById("termsModal");
 
-  function setCheckoutStep(step) {
-    if (!deliveryStep || !paymentStep) return;
-    deliveryStep.classList.toggle("active", step === "delivery");
-    paymentStep.classList.toggle("active", step === "payment");
-    if (checkoutForm) checkoutForm.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  if (checkoutForm && checkoutForm.dataset.checkoutInitialStep === "payment" && deliveryStep && paymentStep) {
-    deliveryStep.classList.remove("active");
-    paymentStep.classList.add("active");
-  }
-
-  if (checkoutForm) {
-    checkoutForm.addEventListener("submit", function (event) {
-      if (checkoutForm.dataset.submitting === "1") {
-        event.preventDefault();
-        return;
-      }
-
-      checkoutForm.dataset.submitting = "1";
-
-      if (confirmPaymentButton) {
-        const method = paymentMethodInput ? paymentMethodInput.value : "pix";
-        confirmPaymentButton.disabled = true;
-        confirmPaymentButton.setAttribute("aria-busy", "true");
-        if (method === "wallet") {
-          confirmPaymentButton.textContent = "Confirmando Créditos LC...";
-        } else if (method === "credit_card") {
-          confirmPaymentButton.textContent = "Abrindo Mercado Pago...";
-        } else {
-          confirmPaymentButton.textContent = "Gerando Pix...";
-        }
-      }
+  const orderSearch = document.getElementById("admin-order-search");
+  if (orderSearch) {
+    orderSearch.addEventListener("input", function () {
+      const term = this.value.toLowerCase().trim();
+      document.querySelectorAll("#admin-order-table tbody tr[data-search]").forEach((row) => {
+        row.style.display = row.getAttribute("data-search").includes(term) ? "" : "none";
+      });
     });
   }
 
-  if (goToPayment) {
-    goToPayment.addEventListener("click", function () {
-      if (!checkoutForm) return;
-
-      const deliveryInputs = deliveryStep.querySelectorAll("input[required]");
-      for (const input of deliveryInputs) {
-        if (!input.checkValidity()) {
-          input.reportValidity();
-          return;
-        }
-      }
-
-      if (!deliveryTerms || !deliveryTerms.checked) {
-        deliveryTerms.reportValidity();
-        return;
-      }
-
-      setCheckoutStep("payment");
-    });
-  }
-
-  if (backToDelivery) {
-    backToDelivery.addEventListener("click", function () {
-      setCheckoutStep("delivery");
-    });
-  }
-
-  paymentOptions.forEach((button) => {
+  document.querySelectorAll(".admin-user-toggle").forEach((button) => {
     button.addEventListener("click", function () {
-      const method = this.getAttribute("data-payment-method");
-
-      paymentOptions.forEach((item) => item.classList.remove("active"));
-      this.classList.add("active");
-
-      if (paymentMethodInput) paymentMethodInput.value = method || "pix";
-
-      if (walletPaymentPanel) walletPaymentPanel.classList.toggle("active", method === "wallet");
-      if (pixPaymentPanel) pixPaymentPanel.classList.toggle("active", method === "pix");
-      if (cardPaymentPanel) cardPaymentPanel.classList.toggle("active", method === "credit_card");
+      const id = this.getAttribute("data-user-panel");
+      const panel = document.getElementById(id);
+      if (panel) panel.classList.toggle("active");
     });
   });
 
-  document.querySelectorAll("[data-open-terms]").forEach((button) => {
+  document.querySelectorAll(".identity-open-btn").forEach((button) => {
     button.addEventListener("click", function () {
-      if (termsModal) {
-        termsModal.classList.add("active");
-        termsModal.setAttribute("aria-hidden", "false");
+      const id = this.getAttribute("data-identity-panel");
+      const panel = document.getElementById(id);
+      if (panel) {
+        panel.classList.toggle("active");
+        this.textContent = panel.classList.contains("active") ? "Fechar dados" : "Abrir dados";
       }
     });
   });
-
-  document.querySelectorAll("[data-close-terms]").forEach((button) => {
-    button.addEventListener("click", function () {
-      if (termsModal) {
-        termsModal.classList.remove("active");
-        termsModal.setAttribute("aria-hidden", "true");
-      }
-    });
-  });
-
-  if (termsModal) {
-    termsModal.addEventListener("click", function (event) {
-      if (event.target === termsModal) {
-        termsModal.classList.remove("active");
-        termsModal.setAttribute("aria-hidden", "true");
-      }
-    });
-  }
-
-
-  document.querySelectorAll("[data-copy-pix]").forEach((button) => {
-    button.addEventListener("click", async function () {
-      const id = this.getAttribute("data-copy-pix");
-      const field = document.getElementById(id);
-      if (!field) return;
-      try {
-        await navigator.clipboard.writeText(field.value || field.textContent || "");
-        this.textContent = "Código copiado";
-        setTimeout(() => { this.textContent = "Copiar código Pix"; }, 1800);
-      } catch (_) {
-        field.select();
-        document.execCommand("copy");
-        this.textContent = "Código copiado";
-        setTimeout(() => { this.textContent = "Copiar código Pix"; }, 1800);
-      }
-    });
-  });
-
-  function startPixPolling(box) {
-    if (!box) return;
-    const paymentId = box.getAttribute("data-payment-id");
-    const type = box.getAttribute("data-pix-payment");
-    const auctionId = box.getAttribute("data-auction-id");
-    if (!paymentId || box.dataset.pollingStarted === "1") return;
-    box.dataset.pollingStarted = "1";
-
-    const statusEl = type === "order" ? document.getElementById("order-pix-status") : document.getElementById("deposit-pix-status");
-    const countdownEl = box.querySelector("[data-pix-countdown]");
-    const expiresIso = box.getAttribute("data-expires-iso");
-    const expiresAt = expiresIso ? Date.parse(expiresIso) : (Date.now() + 15 * 60 * 1000);
-    let pixExpired = false;
-
-    function updateCountdown(){
-      const remaining = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
-      const minutes = String(Math.floor(remaining / 60)).padStart(2, "0");
-      const seconds = String(remaining % 60).padStart(2, "0");
-      if (countdownEl) countdownEl.textContent = `${minutes}:${seconds}`;
-      if (remaining <= 0) {
-        pixExpired = true;
-        if (statusEl && !statusEl.classList.contains("approved")) {
-          statusEl.textContent = "Tempo do Pix encerrado. Gere um novo Pix para pagar.";
-        }
-        return;
-      }
-      setTimeout(updateCountdown, 1000);
-    }
-    updateCountdown();
-
-    let tries = 0;
-
-    async function check() {
-      tries += 1;
-      const url = type === "order"
-        ? `/minha-conta/pagamentos/${auctionId}/pix/status?payment_id=${encodeURIComponent(paymentId)}`
-        : `/minha-conta/saldo/pix/status?payment_id=${encodeURIComponent(paymentId)}`;
-
-      try {
-        const resp = await fetch(url, { headers: { "accept": "application/json" } });
-        const data = await resp.json();
-        if (data && data.approved) {
-          if (statusEl) {
-            statusEl.textContent = "Pagamento aprovado!";
-            statusEl.classList.add("approved");
-          }
-          setTimeout(() => {
-            window.location.href = data.redirect_url || "/minha-conta/saldo";
-          }, 900);
-          return;
-        }
-        if (statusEl && data && data.status) {
-          statusEl.textContent = `Aguardando confirmação do Mercado Pago... status: ${data.status}`;
-        }
-      } catch (_) {}
-
-      if (!pixExpired && tries < 180) {
-        setTimeout(check, 5000);
-      } else if (statusEl && !statusEl.classList.contains("approved")) {
-        statusEl.textContent = "Tempo do Pix encerrado. Gere um novo Pix para pagar.";
-      }
-    }
-
-    setTimeout(check, 2500);
-  }
-
-  document.querySelectorAll("[data-pix-payment]").forEach(startPixPolling);
-
-
-})();
-
-
-(function(){
-  function moneyToNumber(value){
-    return Number(String(value || "").replace(",", "."));
-  }
-
-  function showWalletError(id, message){
-    const box = document.getElementById(id);
-    if (!box) return;
-    box.textContent = message;
-    box.classList.add("show");
-  }
-
-  function hideWalletError(id){
-    const box = document.getElementById(id);
-    if (!box) return;
-    box.textContent = "";
-    box.classList.remove("show");
-  }
-
-  function validateAmountForm(formId, inputId, alertId, message){
-    const form = document.getElementById(formId);
-    const input = document.getElementById(inputId);
-    if (!form || !input) return;
-
-    form.addEventListener("submit", function(event){
-      hideWalletError(alertId);
-      const amount = moneyToNumber(input.value);
-
-      if (!Number.isFinite(amount) || amount < 1){
-        event.preventDefault();
-        showWalletError(alertId, message);
-        input.focus();
-        return false;
-      }
-    });
-
-    input.addEventListener("input", function(){
-      hideWalletError(alertId);
-    });
-  }
-
-  validateAmountForm(
-    "deposit-pix-panel",
-    "deposit-pix-amount",
-    "deposit-pix-alert",
-    "O valor mínimo para comprar Créditos LC é R$ 5,00."
-  );
-
-  validateAmountForm(
-    "deposit-card-panel",
-    "deposit-card-amount",
-    "deposit-card-alert",
-    "O valor mínimo para comprar Créditos LC é R$ 5,00."
-  );
-
-  const withdrawForm = document.getElementById("withdraw-form");
-  const withdrawAmount = document.getElementById("withdraw-amount");
-  const withdrawPixKey = document.getElementById("withdraw-pix-key");
-
-  if (withdrawForm && withdrawAmount && withdrawPixKey){
-    withdrawForm.addEventListener("submit", function(event){
-      hideWalletError("withdraw-alert");
-      const amount = moneyToNumber(withdrawAmount.value);
-      const pixKey = String(withdrawPixKey.value || "").trim();
-
-      if (!Number.isFinite(amount) || amount < 1){
-        event.preventDefault();
-        showWalletError("withdraw-alert", "Créditos LC não podem ser sacados.");
-        withdrawAmount.focus();
-        return false;
-      }
-
-      if (!pixKey){
-        event.preventDefault();
-        showWalletError("withdraw-alert", "Créditos LC não podem ser sacados.");
-        withdrawPixKey.focus();
-        return false;
-      }
-    });
-
-    withdrawAmount.addEventListener("input", function(){
-      hideWalletError("withdraw-alert");
-    });
-
-    withdrawPixKey.addEventListener("input", function(){
-      hideWalletError("withdraw-alert");
-    });
-  }
-})();
-
-(function(){
-  const input = document.querySelector('[data-withdraw-amount]');
-  const preview = document.getElementById('withdraw-net-preview');
-  if (!input || !preview) return;
-  function money(v){ return Number(v || 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
-  input.addEventListener('input', function(){
-    const gross = Math.max(0, Number(String(input.value || '').replace(',', '.')) || 0);
-    const fee = Math.round(gross * 0.01 * 100) / 100;
-    const net = Math.max(0, Math.round((gross - fee) * 100) / 100);
-    preview.textContent = gross > 0 ? `Taxa: ${money(fee)} • Você recebe: ${money(net)}` : 'Digite um valor para ver quanto será recebido após a taxa.';
-  });
-})();
+});
 </script>
+
+<style>
+.admin-production-page .admin-panel { display: none; }
+.admin-production-page .admin-panel.active { display: block; }
+.admin-production-sidebar { position: sticky; top: 86px; align-self: flex-start; max-height: calc(100vh - 104px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.admin-sidebar-top { margin-bottom: 18px; }
+.admin-sidebar-top p { margin: 8px 0 0; opacity: .78; line-height: 1.4; }
+.admin-sidebar-nav { display: grid; gap: 14px; padding-right: 4px; }
+.admin-menu-group { padding: 10px; border: 1px solid rgba(255,255,255,.07); border-radius: 16px; background: rgba(255,255,255,.025); }
+.admin-menu-label { display: block; margin: 0 0 8px; color: #93c5fd; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.admin-menu-group .side-link, .admin-menu-group .admin-link { margin-bottom: 8px; }
+.admin-menu-group .side-link:last-child, .admin-menu-group .admin-link:last-child { margin-bottom: 0; }
+.admin-badge { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 12px; margin-bottom: 10px; }
+.admin-section-head-pro { align-items: center; gap: 14px; }
+.admin-kpi-grid, .admin-finance-grid { margin-bottom: 18px; }
+.admin-kpi-grid .stat small, .admin-finance-grid .stat small { display: block; margin-top: 6px; opacity: .72; font-size: 12px; font-weight: 500; }
+.admin-card-pro { overflow: hidden; }
+.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.card-title-row h2 { margin: 0; }
+.pill-soft { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; background: rgba(34,197,94,.12); color: #86efac; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.pill-soft.warn { background: rgba(245,158,11,.12); color: #fcd34d; }
+.finance-card.positive { border-color: rgba(34,197,94,.32); }
+.finance-card.warning { border-color: rgba(245,158,11,.35); }
+.finance-card.danger { border-color: rgba(239,68,68,.35); }
+.admin-alert-list { display: grid; gap: 12px; }
+.admin-alert-list div { padding: 12px; border-radius: 14px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); }
+.admin-alert-list strong { display: block; margin-bottom: 4px; }
+.admin-alert-list span { opacity: .78; font-size: 13px; }
+.form-section-title { margin: 22px 0 12px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }
+.form-section-title:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.form-section-title h2 { margin: 0 0 4px; }
+.form-section-title p { margin: 0; opacity: .75; }
+.admin-form-grid label { min-width: 0; }
+.admin-strategy-box { margin-top: 14px; padding: 14px; border-radius: 16px; background: rgba(59,130,246,.10); border: 1px solid rgba(59,130,246,.22); }
+.admin-strategy-box p { margin: 6px 0 0; opacity: .82; line-height: 1.45; }
+.admin-toolbar-end { display: flex; justify-content: flex-end; margin-top: 18px; }
+.admin-action-grid-pro { gap: 8px; }
+.admin-action-grid-pro .inline-form { flex-wrap: wrap; }
+.positive-text { color: #86efac; font-weight: 800; }
+.danger-text { color: #fca5a5; font-weight: 800; }
+.link-button { background: none; border: 0; color: inherit; font: inherit; font-weight: 800; cursor: pointer; padding: 0; text-align: left; }
+.link-button:hover { text-decoration: underline; }
+.admin-user-detail-row { display: none; }
+.admin-user-detail-row.active { display: table-row; }
+.admin-user-detail-card { padding: 16px; border-radius: 16px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.08); }
+.admin-user-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.admin-production-page table small { opacity: .72; }
+.admin-scroll-table { max-height: 560px; overflow: auto; scrollbar-gutter: stable; border-radius: 16px; border: 1px solid rgba(255,255,255,.06); }
+.admin-scroll-table table { min-width: 980px; }
+.moderation-ban-form input { min-width: 180px; max-width: 260px; }
+@media (max-width: 980px) { .admin-production-sidebar { position: static; max-height: none; overflow: visible; } .admin-section-head-pro { align-items: flex-start; } }
+
+.suggestion-admin-bar {
+  width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  margin-top: 6px;
+  background: rgba(255,255,255,.08);
+  overflow: hidden;
+}
+.suggestion-admin-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg,#22c55e,#3b82f6);
+}
+.returned-edit-card{margin-bottom:18px}.returned-summary-grid{margin-bottom:18px}.returned-product-form{margin-top:14px}.returned-actions{gap:10px;align-items:center}
+.returned-card-grid{display:grid;gap:14px}
+.returned-mini-card{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:center;border:1px solid rgba(148,163,184,.18);border-radius:18px;background:rgba(15,23,42,.72);padding:14px}
+.returned-mini-card img{width:96px;height:96px;object-fit:cover;border-radius:14px}
+.returned-mini-card h3{margin:0 0 6px}
+.returned-mini-card p{margin:3px 0;color:#cbd5e1}
+.returned-edit-panel{display:none}
+.returned-edit-panel.active{display:block}
+.returned-summary-grid{margin-bottom:18px}
+.returned-actions{gap:10px;align-items:center}
+
+.admin-order-list{display:grid;gap:14px;margin-top:16px}
+.admin-order-card{border:1px solid rgba(148,163,184,.18);border-radius:18px;background:rgba(15,23,42,.72);padding:14px}
+.admin-order-summary{display:grid;grid-template-columns:82px 1fr auto;gap:14px;align-items:center}
+.admin-order-summary img{width:82px;height:82px;border-radius:14px;object-fit:cover}
+.admin-order-summary h3{margin:0 0 6px}
+.admin-order-summary p{margin:3px 0;color:#cbd5e1}
+.admin-order-detail{display:none;margin-top:16px}
+.admin-order-detail.active{display:block}
+.order-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.mini-detail-card{margin:0;padding:14px}
+.mini-detail-card h4{margin:0 0 10px}
+.order-admin-form textarea,.admin-order-detail textarea{width:100%;min-height:90px;margin-top:8px;padding:12px;border-radius:12px;border:1px solid rgba(148,163,184,.18);background:rgba(255,255,255,.08);color:#fff}
+.admin-checkbox-row{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.admin-checkbox-row label{display:flex;gap:8px;align-items:center;color:#dbeafe}
+.admin-checkbox-row input{width:auto}
+.direct-message-box{display:grid;gap:10px;margin-bottom:12px}
+.direct-message-line{border:1px solid rgba(59,130,246,.22);background:rgba(59,130,246,.08);border-radius:14px;padding:12px}
+.direct-message-line.closed{opacity:.65}
+.direct-message-line span{display:block;color:#b7c6e6;font-size:12px;margin-top:3px}
+.direct-message-line p{margin:8px 0 0}
+@media(max-width:900px){.admin-order-summary{grid-template-columns:1fr}.order-detail-grid{grid-template-columns:1fr}}
+
+.identity-compact-card{padding:0;overflow:hidden}.identity-compact-table th,.identity-compact-table td{vertical-align:middle}.identity-detail-row{display:none}.identity-detail-row.active{display:table-row}.identity-detail-row>td{padding:0!important;background:rgba(2,6,23,.35)}.identity-detail-card{margin:12px;padding:16px;border-radius:18px;background:rgba(15,23,42,.92);border:1px solid rgba(148,163,184,.20)}.identity-user-grid{margin:14px 0}.identity-doc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}.identity-doc-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}.identity-doc-grid>div{border:1px solid rgba(148,163,184,.18);border-radius:16px;background:rgba(255,255,255,.035);padding:12px}.identity-doc-grid span{display:block;color:#b7c6e6;font-size:13px;margin-bottom:8px}.identity-doc-grid img{width:100%;height:170px;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.08)}.identity-doc-link{display:block;text-decoration:none}.identity-pdf-preview{display:grid!important;place-items:center;width:100%;min-height:170px;border-radius:12px;border:1px dashed rgba(147,197,253,.45);background:rgba(59,130,246,.10);color:#bfdbfe!important;font-weight:900;text-align:center;padding:14px}.identity-doc-grid p{color:#b7c6e6}.identity-review-actions{display:grid;gap:10px}.identity-review-actions .inline-form{display:flex;gap:8px;flex-wrap:wrap}.identity-review-actions input{min-width:260px;flex:1}@media(max-width:1100px){.identity-doc-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.identity-compact-table{min-width:760px}.identity-doc-grid,.identity-doc-grid-4{grid-template-columns:1fr}.identity-doc-grid img{height:auto;max-height:260px}}
+
+
+/* Correção visual do select de cashback e formulários admin no tema escuro */
+.admin-page-pro select,
+.admin-production-page select,
+.withdraw-admin-form select {
+  color: #ffffff;
+  background: #1e293b;
+  border: 1px solid rgba(148,163,184,.28);
+  border-radius: 12px;
+}
+.admin-page-pro select option,
+.admin-production-page select option,
+.withdraw-admin-form select option {
+  color: #ffffff;
+  background: #1e293b;
+}
+.withdraw-admin-note{margin:0 0 14px}.withdraw-row-pending{background:rgba(251,191,36,.045)}.withdraw-admin-form{display:grid;grid-template-columns:150px minmax(170px,1fr) auto;gap:8px;align-items:center}.pix-key-code{display:inline-block;max-width:210px;white-space:normal;word-break:break-word;padding:6px 8px;border-radius:9px;background:rgba(255,255,255,.07);color:#bfdbfe}@media(max-width:900px){.withdraw-admin-form{grid-template-columns:1fr}}
+
+</style>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const priceInput = document.querySelector('input[name="source_price"]');
+  const targetInput = document.querySelector('input[name="turbo_fee_target_percent"]');
+  const previewText = document.getElementById("turbo-preview-text");
+
+  function moneyBR(value) {
+    return "R$ " + Number(value || 0).toFixed(2).replace(".", ",");
+  }
+
+  function updateTurboPreview() {
+    if (!priceInput || !targetInput || !previewText) return;
+    const price = Number(String(priceInput.value || "0").replace(",", "."));
+    const target = Number(String(targetInput.value || "10").replace(",", "."));
+    const triggerPercent = Math.min(95, Math.max(1, 50 + target));
+    const amount = price * (triggerPercent / 100);
+    if (price > 0) {
+      previewText.textContent = `Com esse preço, o Turbo 2.0 entrará aproximadamente em ${moneyBR(amount)} (${triggerPercent.toFixed(2).replace(".", ",")}% do produto, contando o valor arrecadado com taxas). Turbo 3.0 e 4.0 entram automaticamente depois.`;
+    } else {
+      previewText.textContent = "Digite o preço original para ver o valor aproximado em que o Turbo 2.0 será ativado.";
+    }
+  }
+
+  priceInput?.addEventListener("input", updateTurboPreview);
+  targetInput?.addEventListener("input", updateTurboPreview);
+  updateTurboPreview();
+});
+</script>
+
 {% endblock %}
