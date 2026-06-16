@@ -144,9 +144,16 @@
       </div>
 
       <div class="legal-accept-box">
-        <label class="check-line"><input type="checkbox" name="accept_terms" {% if fd.accept_terms %}checked{% endif %} required> Li e aceito os <a href="/termos-de-uso" target="_blank" rel="noopener">Termos de Uso</a> e as <a href="/regras-do-leilao" target="_blank" rel="noopener">Regras do Leilão</a>.</label>
-        <label class="check-line"><input type="checkbox" name="accept_privacy" {% if fd.accept_privacy %}checked{% endif %} required> Li e aceito a <a href="/politica-de-privacidade" target="_blank" rel="noopener">Política de Privacidade</a>.</label>
-        <label class="check-line"><input type="checkbox" name="accept_truth" {% if fd.accept_truth %}checked{% endif %} required> Declaro que os dados informados são verdadeiros e pertencem a mim.</label>
+        <label class="check-line legal-single-accept">
+          <input type="checkbox" name="accept_legal" {% if fd.accept_legal %}checked{% endif %} required>
+          <span>
+            Li, compreendi e aceito o
+            <a href="/contrato-de-servico" target="_blank" rel="noopener">Contrato de Serviço e Termos de Uso</a>,
+            as <a href="/regras-de-participacao" target="_blank" rel="noopener">Regras de Participação e Compra Assistida</a>
+            e a <a href="/politica-de-privacidade" target="_blank" rel="noopener">Política de Privacidade</a>.
+            Declaro que os dados informados são verdadeiros e pertencem a mim, e estou ciente de que os Créditos LC são pré-pagos de uso interno, não sacáveis e não conversíveis em dinheiro.
+          </span>
+        </label>
       </div>
 
       <button class="btn full" type="submit" id="register-submit" disabled>Avançar para confirmação de e-mail</button>
@@ -155,7 +162,7 @@
 </section>
 
 <style>
-.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.password-guidance{margin:8px 0 12px;padding:11px 13px;border:1px solid rgba(96,165,250,.20);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;font-weight:800}.password-guidance strong{color:#bfdbfe}.password-live-hint{display:block;margin-top:7px}.field-error{display:none;margin:8px 0 12px;padding:10px 12px;border:1px solid rgba(248,113,113,.35);border-radius:13px;background:rgba(239,68,68,.12);color:#fecaca;font-weight:850}.field-error.show{display:block}.input-error{border-color:rgba(248,113,113,.70)!important;box-shadow:0 0 0 3px rgba(239,68,68,.13)}.input-ok{border-color:rgba(74,222,128,.62)!important}.password-live-hint.ok{color:#bbf7d0}.password-live-hint.bad{color:#fecaca}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
+.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}.legal-single-accept span{line-height:1.5}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.password-guidance{margin:8px 0 12px;padding:11px 13px;border:1px solid rgba(96,165,250,.20);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;font-weight:800}.password-guidance strong{color:#bfdbfe}.password-live-hint{display:block;margin-top:7px}.field-error{display:none;margin:8px 0 12px;padding:10px 12px;border:1px solid rgba(248,113,113,.35);border-radius:13px;background:rgba(239,68,68,.12);color:#fecaca;font-weight:850}.field-error.show{display:block}.input-error{border-color:rgba(248,113,113,.70)!important;box-shadow:0 0 0 3px rgba(239,68,68,.13)}.input-ok{border-color:rgba(74,222,128,.62)!important}.password-live-hint.ok{color:#bbf7d0}.password-live-hint.bad{color:#fecaca}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
 </style>
 
 <script>
@@ -290,7 +297,7 @@
   function focusReturnedField(){
     const fieldName = form?.dataset.focusField || "";
     if(!fieldName) return;
-    const target = form.querySelector(`[name="${fieldName}"]`) || (fieldName === "accept_terms" ? form.querySelector('.legal-accept-box input[type="checkbox"]') : null);
+    const target = form.querySelector(`[name="${fieldName}"]`) || (fieldName === "accept_legal" ? form.querySelector('.legal-accept-box input[type="checkbox"]') : null);
     if(target){
       setTimeout(() => {
         target.focus({ preventScroll: true });

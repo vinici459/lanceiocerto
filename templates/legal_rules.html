@@ -1,16 +1,57 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="container legal-page"><div class="legal-card">
-  <span class="eyebrow">Regras operacionais</span>
-  <h1>Regras do Leilão</h1>
-  <p class="muted">Regulamento-base para operação transparente e auditável.</p>
-  <h2>1. Participação</h2><p>Para participar, o usuário precisa estar logado, com cadastro preenchido e sem bloqueio administrativo. Documentos pendentes permitem participar, mas impedem saque e entrega até aprovação.</p>
-  <h2>2. Lances</h2><p>Cada botão de lance possui valor e tempo de bloqueio/cooldown exibido no próprio botão. O sistema registra data, usuário, leilão, valor e IP quando aplicável.</p>
-  <h2>3. Vencedor</h2><p>Ao encerrar o tempo, o último participante válido é considerado vencedor, salvo falha técnica, fraude, inconsistência cadastral ou intervenção administrativa fundamentada.</p>
-  <h2>4. Pagamento do arremate</h2><p>O pagamento deve ocorrer no prazo indicado. Pagamentos por Pix/cartão só são considerados confirmados após retorno oficial do gateway. Enquanto isso, o pedido fica pendente.</p>
-  <h2>5. Entrega</h2><p>O produto só é enviado após pagamento confirmado, documentos aprovados e endereço válido. O rastreio deve ficar disponível na área do usuário quando informado.</p>
-  <h2>6. Cancelamento, disputa e suporte</h2><p>O usuário pode abrir chamado em sua conta. A administração deve registrar motivo, comprovantes e histórico de decisão para auditoria.</p>
-  <h2>7. Transparência</h2><p>Resultados, vencedores por apelido público, status de pagamento, solicitações financeiras e ações administrativas devem permanecer rastreáveis dentro do painel.</p>
-</div></section>
+<section class="container legal-page">
+  <div class="legal-card">
+    <span class="eyebrow">Regras operacionais</span>
+    <h1>Regras de Participação e Compra Assistida</h1>
+    <p class="muted">Versão {{ legal_rules_version }} — Regulamento-base para participação transparente, uso de Créditos LC, leilões digitais e fluxo de compra assistida.</p>
+
+    <h2>1. Quem pode participar</h2>
+    <p>Para participar, o usuário precisa estar logado, com cadastro preenchido, aceite legal registrado, e sem bloqueio administrativo. A plataforma poderá exigir confirmação de e-mail, documentos, selfie e validação de identidade para liberar compra assistida, entrega, suporte avançado, análise de bônus ou conclusão de pedido.</p>
+
+    <h2>2. Conta única e dados verdadeiros</h2>
+    <p>Cada participante pode ter apenas uma conta. Não são permitidos e-mail, CPF, telefone, documento ou apelido público repetidos. Contas relacionadas por CPF, telefone, documento, IP suspeito, dispositivo suspeito, método de pagamento, endereço ou padrão de uso poderão ser submetidas à análise antifraude.</p>
+
+    <h2>3. Créditos LC</h2>
+    <p>Os Créditos LC são pré-pagos de uso interno. Eles servem para participar da plataforma e realizar lances. Créditos LC não são dinheiro, não são saldo bancário, não são sacáveis, não são transferíveis entre contas e não podem ser convertidos novamente em moeda corrente.</p>
+
+    <h2>4. Lances</h2>
+    <p>Cada botão de lance informa o custo em Créditos LC e, quando aplicável, o tempo de bloqueio/cooldown. Ao confirmar o lance, o usuário autoriza o consumo imediato dos Créditos LC. Créditos LC consumidos em lances válidos não retornam se o usuário não vencer.</p>
+    <p>O sistema poderá registrar data, usuário, leilão, valor, IP, dispositivo, identificador de lance e demais dados técnicos para auditoria.</p>
+
+    <h2>5. Tempo, cooldown e modo turbo</h2>
+    <p>Os leilões podem possuir regras de tempo, cooldown, incremento, valor de lance, fases especiais e modo turbo. Essas regras são exibidas na página do produto e integram estas Regras de Participação.</p>
+
+    <h2>6. Vencedor</h2>
+    <p>Ao encerrar o tempo, o último participante válido será considerado vencedor, salvo falha técnica, fraude, inconsistência cadastral, manipulação, intervenção administrativa fundamentada ou regra específica em sentido diferente.</p>
+
+    <h2>7. Pagamento do arremate</h2>
+    <p>O vencedor deverá pagar o valor de arremate dentro do prazo indicado. O pedido só avança após confirmação oficial do gateway de pagamento. Comprovantes enviados manualmente não substituem a confirmação oficial.</p>
+
+    <h2>8. Compra assistida</h2>
+    <p>Após o pagamento do arremate, o vencedor acessa o fluxo de compra assistida. O pedido poderá ser feito pelo próprio usuário em loja terceira aprovada, com envio de link, código Pix ou checkout para análise, ou pela equipe da plataforma quando necessário.</p>
+    <p>A plataforma poderá recusar links de pagamento inválidos, encurtados, suspeitos, incompatíveis com o produto, com domínio diferente do aprovado, produto divergente, preço divergente, frete abusivo, loja não confiável, produto esgotado ou carrinho com itens extras.</p>
+
+    <h2>9. Produto, entrega e garantia</h2>
+    <p>Quando o produto for comprado em loja terceira, a venda, nota fiscal, garantia, troca, devolução, disponibilidade, prazo de entrega e rastreio seguem as regras da loja vendedora, com acompanhamento do suporte Lancei o Certo dentro dos limites da intermediação.</p>
+    <p>O usuário deve informar endereço correto, guardar comprovantes, acompanhar o pedido e comunicar qualquer problema pelos canais oficiais de suporte.</p>
+
+    <h2>10. Produto esgotado, preço alterado ou frete divergente</h2>
+    <p>Se o produto ficar indisponível, tiver alteração relevante de preço, mudança de frete ou cancelamento pela loja, a plataforma poderá solicitar novo link, oferecer produto equivalente, aguardar reposição, cancelar a compra assistida, reembolsar o valor de arremate ou adotar solução proporcional ao caso.</p>
+
+    <h2>11. Bônus LC e indicação</h2>
+    <p>Bônus de indicação, bônus de participação e Créditos LC promocionais são benefícios internos. Eles não possuem valor em dinheiro, não são sacáveis e podem depender de depósito mínimo, compra mínima, uso legítimo, validação antifraude e ausência de contas relacionadas.</p>
+    <p>O depósito mínimo para ativar indicação é de R$ 5,00, e a compra mínima elegível é de 1 Crédito LC, salvo regra promocional mais restritiva.</p>
+
+    <h2>12. Cancelamento, disputa e suporte</h2>
+    <p>O usuário pode abrir chamado em sua conta para contestar pagamento, lance, pedido, link, entrega, defeito, documento, indicação ou qualquer problema operacional. A administração deverá registrar categoria, motivo, comprovantes, histórico e decisão para auditoria.</p>
+
+    <h2>13. Transparência e auditoria</h2>
+    <p>Resultados, vencedores por apelido público, status de pagamento, uso de Créditos LC, pedidos, solicitações, chamados e ações administrativas devem permanecer rastreáveis dentro do painel e dos registros internos.</p>
+
+    <h2>14. Condutas proibidas</h2>
+    <p>São proibidos múltiplas contas, documentos falsos, dados de terceiros, automação, bots, exploração de falhas, conluio, manipulação de lances, chargeback fraudulento, ofensas, tentativa de converter Créditos LC em dinheiro e qualquer ação destinada a obter vantagem indevida.</p>
+  </div>
+</section>
 <style>.legal-page{padding:34px 20px}.legal-card{max-width:980px;margin:0 auto;border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.88);border-radius:24px;padding:28px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,.25)}.legal-card h1{font-size:36px;margin:8px 0 12px}.legal-card h2{margin-top:24px;color:#bfdbfe}.legal-card p{line-height:1.65;color:#dbeafe}.muted{color:#b7c6e6!important}.eyebrow{color:#60a5fa;font-weight:900;text-transform:uppercase;letter-spacing:.08em}</style>
 {% endblock %}

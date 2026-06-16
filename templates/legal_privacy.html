@@ -1,16 +1,41 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="container legal-page"><div class="legal-card">
-  <span class="eyebrow">LGPD e dados pessoais</span>
-  <h1>Política de Privacidade</h1>
-  <p class="muted">Base para revisão jurídica antes da publicação definitiva.</p>
-  <h2>1. Dados coletados</h2><p>Coletamos nome, e-mail, senha, CPF, telefone, endereço, apelido público, código de indicação, documento com foto, selfie, IP, dados de dispositivo, registros de acesso, lances, compras de Créditos LC, pagamentos, chamados e comprovantes.</p>
-  <h2>2. Finalidade</h2><p>Os dados são usados para criar conta, autenticar acesso, prevenir fraude, verificar identidade, processar pagamentos, administrar leilões, liberar entrega, validar indicações, atender chamados, cumprir obrigações legais e manter trilha de auditoria.</p>
-  <h2>3. Documentos e selfie</h2><p>Documentos são usados somente para validação de identidade, segurança operacional, prevenção de fraude e liberação de compra assistida/entrega. O acesso deve ser restrito a administradores autorizados.</p>
-  <h2>4. Compartilhamento</h2><p>Dados podem ser compartilhados com gateways de pagamento, serviços de hospedagem, autoridades quando exigido por lei e prestadores necessários à operação, sempre de forma proporcional à finalidade.</p>
-  <h2>5. Segurança</h2><p>A plataforma deve manter controle de acesso administrativo, registros de auditoria, restrição de uploads, separação entre Créditos LC em circulação e caixa operacional, validação antifraude e confirmação de pagamento por webhook oficial.</p>
-  <h2>6. Direitos do titular</h2><p>O usuário pode solicitar acesso, correção, revisão, portabilidade ou exclusão de dados quando aplicável, respeitados prazos legais, prevenção à fraude e obrigações de auditoria.</p>
-  <h2>7. Retenção</h2><p>Dados financeiros, documentos e registros de operação podem ser mantidos pelo prazo necessário para auditoria, prevenção de fraude, defesa de direitos e cumprimento de obrigações legais.</p>
-</div></section>
-<style>.legal-page{padding:34px 24px}.legal-card{max-width:920px;margin:auto;border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.86);border-radius:24px;padding:24px;box-shadow:0 18px 45px rgba(0,0,0,.25)}.legal-card h1{margin-top:6px}.legal-card h2{margin-top:24px}</style>
+<section class="container legal-page">
+  <div class="legal-card">
+    <span class="eyebrow">LGPD e dados pessoais</span>
+    <h1>Política de Privacidade</h1>
+    <p class="muted">Versão {{ legal_privacy_version }} — Base para revisão jurídica antes da publicação definitiva.</p>
+
+    <h2>1. Dados coletados</h2>
+    <p>A plataforma poderá coletar nome, e-mail, senha, CPF, telefone, data de nascimento, endereço, apelido público, código de indicação, documento com foto, selfie, comprovante de residência, IP, dados de dispositivo, navegador, registros de acesso, aceite legal, lances, compras de Créditos LC, pagamentos, pedidos, links de compra assistida, chamados, comprovantes e histórico de auditoria.</p>
+
+    <h2>2. Finalidades do tratamento</h2>
+    <p>Os dados são usados para criar e autenticar conta, confirmar e-mail, prevenir fraude, verificar identidade, validar conta única, processar pagamentos, administrar Créditos LC, registrar lances, liberar compra assistida, acompanhar pedidos, validar indicações, atender chamados, cumprir obrigações legais, proteger usuários e manter trilha de auditoria.</p>
+
+    <h2>3. Contrato, aceite e auditoria</h2>
+    <p>Ao criar conta, a plataforma poderá registrar a versão do Contrato de Serviço, das Regras de Participação e da Política de Privacidade aceitas pelo usuário, além de data, horário, IP, user-agent e identificadores técnicos. Esses dados servem para comprovar aceite, segurança, transparência e defesa de direitos.</p>
+
+    <h2>4. Documentos e selfie</h2>
+    <p>Documentos, selfies e comprovantes são usados para validação de identidade, prevenção de fraude, análise de contas relacionadas, liberação de compra assistida, suporte, disputas e defesa de direitos. O acesso deve ser restrito a administradores autorizados e protegido por controles internos.</p>
+
+    <h2>5. IP, dispositivo e antifraude</h2>
+    <p>A plataforma poderá analisar IP, dispositivo, navegador, cookies, comportamento de cadastro, histórico de lances, pagamentos, indicações, documentos e padrões de uso para detectar contas duplicadas, fraude, abuso promocional, automação, manipulação, chargeback indevido ou risco operacional.</p>
+
+    <h2>6. Compartilhamento</h2>
+    <p>Dados podem ser compartilhados com gateways de pagamento, serviços de hospedagem, e-mail, armazenamento, suporte, provedores antifraude, lojas terceiras envolvidas na compra assistida, transportadoras, autoridades públicas quando exigido por lei e prestadores necessários à operação, sempre de forma proporcional à finalidade.</p>
+
+    <h2>7. Segurança</h2>
+    <p>A plataforma deve adotar medidas razoáveis de segurança, incluindo controle de acesso administrativo, registros de auditoria, restrição de uploads, validação antifraude, confirmação de pagamento por webhook oficial, proteção de documentos e separação operacional entre Créditos LC em circulação e caixa da empresa.</p>
+
+    <h2>8. Direitos do titular</h2>
+    <p>O usuário poderá solicitar acesso, confirmação de tratamento, correção, atualização, revisão, portabilidade, oposição ou exclusão de dados quando aplicável. Algumas informações poderão ser mantidas pelo prazo necessário para cumprimento legal, prevenção de fraude, auditoria, suporte, disputas e defesa de direitos.</p>
+
+    <h2>9. Retenção</h2>
+    <p>Dados financeiros, registros de pagamento, lances, documentos, aceite legal, pedidos, chamados e logs de segurança poderão ser mantidos enquanto necessários para operação, obrigações fiscais/legais, prevenção de fraude, resolução de disputas e defesa de direitos.</p>
+
+    <h2>10. Comunicações</h2>
+    <p>A plataforma poderá usar e-mail, telefone, WhatsApp, SMS, notificações internas ou outros canais informados para comunicações sobre cadastro, segurança, pagamentos, pedidos, suporte, alterações legais e avisos operacionais. Comunicações promocionais opcionais poderão depender de consentimento específico quando exigido.</p>
+  </div>
+</section>
+<style>.legal-page{padding:34px 24px}.legal-card{max-width:920px;margin:auto;border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.86);border-radius:24px;padding:24px;color:#fff;box-shadow:0 18px 45px rgba(0,0,0,.25)}.legal-card h1{margin-top:6px}.legal-card h2{margin-top:24px;color:#bfdbfe}.legal-card p{line-height:1.65;color:#dbeafe}.muted{color:#b7c6e6!important}.eyebrow{color:#60a5fa;font-weight:900;text-transform:uppercase;letter-spacing:.08em}</style>
 {% endblock %}

@@ -133,6 +133,13 @@ class User(Base):
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     terms_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     privacy_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Aceite único do Contrato de Serviço + Regras de Participação + Política de Privacidade.
+    accepted_legal_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    accepted_legal_ip: Mapped[str] = mapped_column(String(80), default="")
+    accepted_legal_user_agent: Mapped[str] = mapped_column(String(600), default="")
+    accepted_terms_version: Mapped[str] = mapped_column(String(40), default="")
+    accepted_rules_version: Mapped[str] = mapped_column(String(40), default="")
+    accepted_privacy_version: Mapped[str] = mapped_column(String(40), default="")
     # Compatibilidade: wallet_balance passa a representar Créditos LC comprados/promocionais,
     # não saldo financeiro sacável. A linguagem pública foi alterada para Créditos LC.
     wallet_balance: Mapped[float] = mapped_column(Float, default=0.0)
@@ -545,6 +552,15 @@ app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE
 templates = Jinja2Templates(directory="templates")
 ASSET_VERSION = os.getenv("ASSET_VERSION", "20260615-realtime-v14-single-home-clock")
 templates.env.globals["asset_version"] = ASSET_VERSION
+
+# Versões dos documentos legais aceitos no cadastro.
+# Atualize estes valores sempre que houver mudança relevante no contrato/regras/privacidade.
+LEGAL_TERMS_VERSION = os.getenv("LEGAL_TERMS_VERSION", "2026-06-16-v1")
+LEGAL_RULES_VERSION = os.getenv("LEGAL_RULES_VERSION", "2026-06-16-v1")
+LEGAL_PRIVACY_VERSION = os.getenv("LEGAL_PRIVACY_VERSION", "2026-06-16-v1")
+templates.env.globals["legal_terms_version"] = LEGAL_TERMS_VERSION
+templates.env.globals["legal_rules_version"] = LEGAL_RULES_VERSION
+templates.env.globals["legal_privacy_version"] = LEGAL_PRIVACY_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
@@ -3658,6 +3674,12 @@ def ensure_columns() -> None:
                 "verified_at": "TIMESTAMP NULL",
                 "terms_accepted_at": "TIMESTAMP NULL",
                 "privacy_accepted_at": "TIMESTAMP NULL",
+                "accepted_legal_at": "TIMESTAMP NULL",
+                "accepted_legal_ip": "VARCHAR(80) DEFAULT ''",
+                "accepted_legal_user_agent": "VARCHAR(600) DEFAULT ''",
+                "accepted_terms_version": "VARCHAR(40) DEFAULT ''",
+                "accepted_rules_version": "VARCHAR(40) DEFAULT ''",
+                "accepted_privacy_version": "VARCHAR(40) DEFAULT ''",
                 "email_verified": "BOOLEAN DEFAULT FALSE",
                 "email_verified_at": "TIMESTAMP NULL",
                 "email_verification_token": "VARCHAR(120) DEFAULT ''",
@@ -4433,6 +4455,7 @@ def vote_product_suggestion(request: Request, product_key: str = Form(...)):
         db.close()
 
 @app.get("/termos-de-uso", response_class=HTMLResponse)
+@app.get("/contrato-de-servico", response_class=HTMLResponse)
 def terms_page(request: Request):
     db = SessionLocal()
     try:
@@ -4451,6 +4474,7 @@ def privacy_page(request: Request):
 
 
 @app.get("/regras-do-leilao", response_class=HTMLResponse)
+@app.get("/regras-de-participacao", response_class=HTMLResponse)
 def auction_rules_page(request: Request):
     db = SessionLocal()
     try:
@@ -4483,9 +4507,7 @@ async def register(
     city: str = Form(""),
     state: str = Form(""),
     referral_code: str = Form(""),
-    accept_terms: str = Form(""),
-    accept_privacy: str = Form(""),
-    accept_truth: str = Form(""),
+    accept_legal: str = Form(""),
 ):
     db = SessionLocal()
     try:
@@ -4516,9 +4538,7 @@ async def register(
                 "city": (city or "").strip(),
                 "state": (state or "").strip().upper()[:2],
                 "referral_code": (referral_code or "").strip(),
-                "accept_terms": accept_terms == "on",
-                "accept_privacy": accept_privacy == "on",
-                "accept_truth": accept_truth == "on",
+                "accept_legal": accept_legal == "on",
             }
 
         def fail(message: str, focus_field: str = ""):
@@ -4532,8 +4552,8 @@ async def register(
                 context["password_error"] = message
             return templates.TemplateResponse("register.html", context, status_code=400)
 
-        if accept_terms != "on" or accept_privacy != "on" or accept_truth != "on":
-            return fail("Para criar a conta, aceite os Termos de Uso, a Política de Privacidade e confirme que os dados são verdadeiros.", "accept_terms")
+        if accept_legal != "on":
+            return fail("Para criar a conta, aceite o Contrato de Serviço, as Regras de Participação e a Política de Privacidade.", "accept_legal")
         if len((full_name or "").strip().split()) < 2:
             return fail("Informe seu nome completo.", "full_name")
         if not re.fullmatch(r"[A-Za-z0-9._-]{3,24}", raw_public_name or ""):
@@ -4600,6 +4620,12 @@ async def register(
             identity_note="Conta criada. Verificação de identidade ainda não enviada.",
             terms_accepted_at=datetime.utcnow(),
             privacy_accepted_at=datetime.utcnow(),
+            accepted_legal_at=datetime.utcnow(),
+            accepted_legal_ip=client_ip(request),
+            accepted_legal_user_agent=(request.headers.get("user-agent") or "")[:600],
+            accepted_terms_version=LEGAL_TERMS_VERSION,
+            accepted_rules_version=LEGAL_RULES_VERSION,
+            accepted_privacy_version=LEGAL_PRIVACY_VERSION,
             wallet_balance=0.0,
             referred_by_user_id=referrer.id if referrer else None,
             signup_ip=client_ip(request),
@@ -4614,7 +4640,7 @@ async def register(
             db.add(ReferralReward(referrer_user_id=referrer.id, referred_user_id=user.id, amount_credits=REFERRAL_BONUS_CREDITS, status="pending", reason="Aguardando primeira compra válida de Créditos LC e validação antifraude."))
         sent = send_verification_code_email(user, request)
         referral_detail = f" | Indicação: {referrer.id}" if referrer else ""
-        audit_event(db, request, "user.register", user, "user", user.id, f"Cadastro criado. Código de confirmação de e-mail enviado e KYC pendente.{referral_detail}")
+        audit_event(db, request, "user.register", user, "user", user.id, f"Cadastro criado. Aceite legal registrado ({LEGAL_TERMS_VERSION}/{LEGAL_RULES_VERSION}/{LEGAL_PRIVACY_VERSION}). Código de confirmação de e-mail enviado e KYC pendente.{referral_detail}")
         db.commit()
         suffix = "&email_sent=1" if sent else "&email_dev=1"
         return RedirectResponse(f"/cadastro/confirmar-email?email={clean_email}{suffix}", status_code=303)
