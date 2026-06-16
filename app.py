@@ -1516,6 +1516,65 @@ def can_apply_invite_code(db: Session, user: Optional["User"]) -> bool:
     return True
 
 
+def apply_invite_code_for_user(db: Session, request: Request, user: "User", invite_code: str, *, require_code: bool = False) -> tuple[bool, str]:
+    """Aplica código de convite antes da primeira compra aprovada de Créditos LC.
+
+    Retorna (ok, mensagem). Quando o código é elegível, o bônus do indicador
+    continua sendo liberado apenas após a primeira compra aprovada e a validação antifraude.
+    """
+    ensure_user_referral_code(db, user)
+    code = normalize_referral_code(invite_code)
+    if not code:
+        if require_code:
+            return False, "Informe um código de convite válido."
+        return True, ""
+
+    if not can_apply_invite_code(db, user):
+        return False, "O código de convite só pode ser informado antes da primeira compra aprovada de Créditos LC."
+
+    referrer = db.query(User).filter(func.lower(User.referral_code) == code.lower()).first()
+    if not referrer:
+        return False, "Código de convite não encontrado."
+    if referrer.id == user.id:
+        return False, "Você não pode usar o próprio código de convite."
+
+    reasons = []
+    if (referrer.email or "").strip().lower() and (referrer.email or "").strip().lower() == (user.email or "").strip().lower():
+        reasons.append("mesmo e-mail")
+    if (referrer.cpf or "").strip() and (referrer.cpf or "").strip() == (user.cpf or "").strip():
+        reasons.append("mesmo CPF")
+    if (referrer.phone or "").strip() and (referrer.phone or "").strip() == (user.phone or "").strip():
+        reasons.append("mesmo telefone")
+    if (referrer.document_number or "").strip() and (referrer.document_number or "").strip() == (user.document_number or "").strip():
+        reasons.append("mesmo documento")
+    if (referrer.signup_ip or "").strip() and (user.signup_ip or "").strip() and referrer.signup_ip == user.signup_ip:
+        reasons.append("IP de cadastro igual/suspeito")
+    if (referrer.signup_device_hash or "").strip() and (user.signup_device_hash or "").strip() and referrer.signup_device_hash == user.signup_device_hash:
+        reasons.append("dispositivo igual/suspeito")
+
+    reward_status = "pending"
+    reward_reason = "Aguardando primeira compra válida de Créditos LC e validação antifraude."
+    user_message = f"Convite aplicado. Após a primeira compra aprovada, o bônus de {REFERRAL_BONUS_CREDITS:.0f} LC será validado."
+    if reasons:
+        reward_status = "blocked"
+        reward_reason = "; ".join(reasons)
+        user.fraud_risk_score = max(int(user.fraud_risk_score or 0), 70)
+        user_message = "Convite recebido, mas ficou em análise de segurança."
+
+    user.referred_by_user_id = referrer.id
+    reward = ReferralReward(
+        referrer_user_id=referrer.id,
+        referred_user_id=user.id,
+        amount_credits=REFERRAL_BONUS_CREDITS,
+        status=reward_status,
+        reason=reward_reason,
+    )
+    db.add(user)
+    db.add(reward)
+    audit_event(db, request, "referral.code_applied", user, "referral_reward", None, f"Código {code} | Indicador #{referrer.id} | Status {reward_status} | {reward_reason}")
+    return True, user_message
+
+
 def get_referral_wallet_context(db: Session, user: "User") -> dict:
     ensure_user_referral_code(db, user)
     rewards_given = db.query(ReferralReward).options(selectinload(ReferralReward.referred)).filter(ReferralReward.referrer_user_id == user.id).order_by(desc(ReferralReward.created_at)).limit(10).all()
@@ -5801,72 +5860,15 @@ def account_apply_invite_code(request: Request, invite_code: str = Form(...)):
     db = SessionLocal()
     try:
         user = require_user(request, db)
-        ensure_user_referral_code(db, user)
-        if not can_apply_invite_code(db, user):
+        ok, msg = apply_invite_code_for_user(db, request, user, invite_code, require_code=True)
+        if not ok:
             return templates.TemplateResponse(
                 "account_pages.html",
-                wallet_context(db, request, user, error="O código de convite só pode ser informado antes da primeira compra aprovada de Créditos LC."),
+                wallet_context(db, request, user, error=msg),
                 status_code=400,
             )
-        code = normalize_referral_code(invite_code)
-        if not code:
-            return templates.TemplateResponse(
-                "account_pages.html",
-                wallet_context(db, request, user, error="Informe um código de convite válido."),
-                status_code=400,
-            )
-        referrer = db.query(User).filter(func.lower(User.referral_code) == code.lower()).first()
-        if not referrer:
-            return templates.TemplateResponse(
-                "account_pages.html",
-                wallet_context(db, request, user, error="Código de convite não encontrado."),
-                status_code=400,
-            )
-        if referrer.id == user.id:
-            return templates.TemplateResponse(
-                "account_pages.html",
-                wallet_context(db, request, user, error="Você não pode usar o próprio código de convite."),
-                status_code=400,
-            )
-
-        reasons = []
-        if (referrer.email or "").strip().lower() and (referrer.email or "").strip().lower() == (user.email or "").strip().lower():
-            reasons.append("mesmo e-mail")
-        if (referrer.cpf or "").strip() and (referrer.cpf or "").strip() == (user.cpf or "").strip():
-            reasons.append("mesmo CPF")
-        if (referrer.phone or "").strip() and (referrer.phone or "").strip() == (user.phone or "").strip():
-            reasons.append("mesmo telefone")
-        if (referrer.document_number or "").strip() and (referrer.document_number or "").strip() == (user.document_number or "").strip():
-            reasons.append("mesmo documento")
-        if (referrer.signup_ip or "").strip() and (user.signup_ip or "").strip() and referrer.signup_ip == user.signup_ip:
-            reasons.append("IP de cadastro igual/suspeito")
-        if (referrer.signup_device_hash or "").strip() and (user.signup_device_hash or "").strip() and referrer.signup_device_hash == user.signup_device_hash:
-            reasons.append("dispositivo igual/suspeito")
-
-        reward_status = "pending"
-        reward_reason = "Aguardando primeira compra válida de Créditos LC e validação antifraude."
-        if reasons:
-            reward_status = "blocked"
-            reward_reason = "; ".join(reasons)
-            user.fraud_risk_score = max(int(user.fraud_risk_score or 0), 70)
-
-        user.referred_by_user_id = referrer.id
-        reward = ReferralReward(
-            referrer_user_id=referrer.id,
-            referred_user_id=user.id,
-            amount_credits=REFERRAL_BONUS_CREDITS,
-            status=reward_status,
-            reason=reward_reason,
-        )
-        db.add(user)
-        db.add(reward)
-        audit_event(db, request, "referral.code_applied", user, "referral_reward", None, f"Código {code} | Indicador #{referrer.id} | Status {reward_status} | {reward_reason}")
         db.commit()
         db.refresh(user)
-        if reward_status == "blocked":
-            msg = "Código recebido, mas a indicação ficou bloqueada para análise de segurança."
-        else:
-            msg = f"Código aplicado com sucesso. Após sua primeira compra aprovada de Créditos LC, o indicador receberá {REFERRAL_BONUS_CREDITS:.0f} LC promocionais, se tudo estiver regular."
         return templates.TemplateResponse("account_pages.html", wallet_context(db, request, user, success=msg))
     finally:
         db.close()
@@ -5874,7 +5876,7 @@ def account_apply_invite_code(request: Request, invite_code: str = Form(...)):
 
 @app.post("/minha-conta/saldo")
 @app.post("/minha-conta/saldo/pix")
-def account_add_balance_pix(request: Request, amount: float = Form(...)):
+def account_add_balance_pix(request: Request, amount: float = Form(...), invite_code: str = Form("")):
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -5885,6 +5887,16 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
                 wallet_context(db, request, user, error=f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."),
                 status_code=400,
             )
+
+        invite_notice = ""
+        if (invite_code or "").strip():
+            ok, invite_notice = apply_invite_code_for_user(db, request, user, invite_code, require_code=True)
+            if not ok:
+                return templates.TemplateResponse(
+                    "account_pages.html",
+                    wallet_context(db, request, user, error=invite_notice),
+                    status_code=400,
+                )
 
         try:
             mp = create_mp_pix_payment(
@@ -5923,14 +5935,14 @@ def account_add_balance_pix(request: Request, amount: float = Form(...)):
 
         return templates.TemplateResponse(
             "account_pages.html",
-            wallet_context(db, request, user, pix_payment=build_pix_payment_view(payment)),
+            wallet_context(db, request, user, pix_payment=build_pix_payment_view(payment), success=invite_notice or None),
         )
     finally:
         db.close()
 
 
 @app.post("/minha-conta/saldo/cartao")
-def account_add_balance_card(request: Request, amount: float = Form(...)):
+def account_add_balance_card(request: Request, amount: float = Form(...), invite_code: str = Form("")):
     db = SessionLocal()
     try:
         user = require_user(request, db)
@@ -5941,6 +5953,15 @@ def account_add_balance_card(request: Request, amount: float = Form(...)):
                 wallet_context(db, request, user, error=f"A compra mínima é de R$ {fmt_money(LC_MIN_CREDIT_PURCHASE_AMOUNT)} em Créditos LC."),
                 status_code=400,
             )
+        if (invite_code or "").strip():
+            ok, invite_notice = apply_invite_code_for_user(db, request, user, invite_code, require_code=True)
+            if not ok:
+                return templates.TemplateResponse(
+                    "account_pages.html",
+                    wallet_context(db, request, user, error=invite_notice),
+                    status_code=400,
+                )
+
         try:
             checkout = create_mp_card_checkout(
                 request=request,

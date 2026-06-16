@@ -183,63 +183,16 @@
     <div class="alert success">{{ success }}</div>
   {% endif %}
 
-  <div class="invite-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:16px 0">
-    <div class="wallet-card invite-card">
-      <h3>Meu código de convite</h3>
-      <p class="muted">Crie um código fixo para indicar pessoas. Você escolhe 4 letras e o sistema completa com 6 números.</p>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0">
-        <input id="my-invite-code" value="{{ user.referral_code or '' }}" readonly style="max-width:220px;font-weight:950;letter-spacing:.08em;text-transform:uppercase">
-        {% if user.referral_code %}<button class="btn small ghost" type="button" data-copy-input="my-invite-code">Copiar</button>{% endif %}
-      </div>
-      {% if can_customize_invite_code %}
-        <form method="post" action="/minha-conta/convite/gerar" class="compact-form">
-          <label>Escolha 4 letras do código
-            <input name="code_prefix" maxlength="4" minlength="4" pattern="[A-Za-z]{4}" placeholder="Ex: VINI" required style="text-transform:uppercase">
-            <small>Use somente 4 letras, sem espaço e sem acento. Depois disso o código fica fixo na sua conta.</small>
-          </label>
-          <button class="btn full" type="submit">Criar código fixo</button>
-        </form>
-      {% else %}
-        <p class="muted"><strong>Código fixo:</strong> este é o código da sua conta para repassar aos convidados.</p>
-      {% endif %}
-      <p class="muted">Quando uma pessoa elegível usar seu código e fizer a primeira compra válida de Créditos LC, você recebe <strong>5 LC promocionais</strong> após validação antifraude.</p>
-    </div>
-
-    <div class="wallet-card invite-card">
-      <h3>Usar código de convite</h3>
-      {% if can_apply_invite_code %}
-        <p class="muted">Se alguém indicou você, informe o código antes da sua primeira compra aprovada de Créditos LC.</p>
-        <form method="post" action="/minha-conta/convite/aplicar" class="compact-form">
-          <label>Código de convite
-            <input name="invite_code" maxlength="24" placeholder="Ex: VINI123456" required style="text-transform:uppercase">
-            <small>O código só pode ser usado uma vez e não pode ser da própria conta.</small>
-          </label>
-          <button class="btn full ghost" type="submit">Aplicar código</button>
-        </form>
-      {% elif referrer_user %}
-        <p class="muted">Você já informou um código de convite.</p>
-        <p><strong>Indicador:</strong> {{ referrer_user.public_name or referrer_user.full_name }}</p>
-        {% if referral_reward_received %}<p class="muted"><strong>Status:</strong> {{ referral_reward_received.status }} — {{ referral_reward_received.reason or 'Aguardando validação.' }}</p>{% endif %}
-      {% else %}
-        <p class="muted">Código de convite disponível apenas antes da primeira compra aprovada de Créditos LC.</p>
-      {% endif %}
-    </div>
-  </div>
-
-  <div class="wallet-action-tabs">
-    <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Comprar créditos</button>
-  </div>
-
-  <div id="wallet-deposit-panel" class="wallet-mode-panel active">
+  <div id="wallet-deposit-panel" class="wallet-mode-panel active wallet-checkout-first">
     <div class="wallet-choice-row">
       <button class="wallet-choice-btn active" type="button" data-deposit-target="deposit-pix-panel">PIX</button>
       <button class="wallet-choice-btn" type="button" data-deposit-target="deposit-card-panel">Cartão</button>
     </div>
 
-    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active" novalidate>
+    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active wallet-pay-card" novalidate>
       <div id="deposit-pix-alert" class="wallet-error" aria-live="polite"></div>
 
-      <label>Valor da compra de Créditos LC
+      <label>Valor da compra
         <input
           type="number"
           step="0.01"
@@ -249,15 +202,24 @@
           placeholder="Mínimo R$ 5,00"
           inputmode="decimal"
           required>
-        <small>Após a confirmação, o valor vira Créditos LC de uso interno. Créditos LC não são sacáveis nem conversíveis em dinheiro.</small>
       </label>
 
-      <button class="btn full" type="submit">Gerar PIX para Créditos LC</button>
+      {% if can_apply_invite_code %}
+      <details class="invite-during-payment">
+        <summary>Tenho código de convite</summary>
+        <input name="invite_code" maxlength="24" placeholder="EX: ABCD123456" style="text-transform:uppercase">
+        <small>Use antes da primeira compra aprovada.</small>
+      </details>
+      {% elif referrer_user %}
+      <div class="invite-mini-ok">Convite aplicado: <strong>{{ referrer_user.public_name or referrer_user.full_name }}</strong></div>
+      {% endif %}
+
+      <button class="btn full" type="submit">Gerar PIX</button>
 
       {% if pix_payment and pix_payment.qr_code_base64 %}
       <div class="pix-payment-box" data-pix-payment="deposit" data-payment-id="{{ pix_payment.payment_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
-        <h3>Pix para Créditos LC gerado</h3>
-        <p>Valor/Créditos LC: <strong>{{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }} LC</strong></p>
+        <h3>Pix gerado</h3>
+        <p><strong>{{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }} Créditos LC</strong></p>
         <p class="pix-expire-note">Tempo para pagar: <strong data-pix-countdown>15:00</strong></p>
         <div class="pix-qr-wrap">
           <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
@@ -268,15 +230,15 @@
             <button class="btn full ghost" type="button" data-copy-pix="deposit-pix-code">Copiar código Pix</button>
           </div>
         </div>
-        <div class="pix-status-line" id="deposit-pix-status">Aguardando confirmação do Mercado Pago...</div>
+        <div class="pix-status-line" id="deposit-pix-status">Aguardando confirmação...</div>
       </div>
       {% endif %}
     </form>
 
-    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel" novalidate>
+    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel wallet-pay-card" novalidate>
       <div id="deposit-card-alert" class="wallet-error" aria-live="polite"></div>
 
-      <label>Valor da compra de Créditos LC
+      <label>Valor da compra
         <input
           type="number"
           step="0.01"
@@ -286,35 +248,79 @@
           placeholder="Mínimo R$ 5,00"
           inputmode="decimal"
           required>
-        <small>Compra mínima de R$ 5,00. Os créditos comprados são de uso exclusivo dentro do site.</small>
       </label>
 
-      <small class="payment-note">Para maior segurança você será direcionado para o Mercado Pago.</small>
-      <button class="btn full" type="submit">Comprar Créditos LC</button>
+      {% if can_apply_invite_code %}
+      <details class="invite-during-payment">
+        <summary>Tenho código de convite</summary>
+        <input name="invite_code" maxlength="24" placeholder="EX: ABCD123456" style="text-transform:uppercase">
+        <small>Use antes da primeira compra aprovada.</small>
+      </details>
+      {% elif referrer_user %}
+      <div class="invite-mini-ok">Convite aplicado: <strong>{{ referrer_user.public_name or referrer_user.full_name }}</strong></div>
+      {% endif %}
+
+      <button class="btn full" type="submit">Pagar com cartão</button>
+      <small class="payment-note">Pagamento seguro pelo Mercado Pago.</small>
     </form>
   </div>
-  <div class="wallet-card" style="margin-top:14px">
-    <h3>Regra dos Créditos LC</h3>
-    <p class="muted">Créditos LC funcionam como crédito pré-pago: depois de comprados, eles só podem ser usados dentro do Lancei o Certo. Eles não podem ser sacados, transferidos ou convertidos novamente em dinheiro.</p>
-    <p class="muted"><strong>Convite:</strong> o bônus de convite é liberado em Créditos LC promocionais somente após primeira compra válida do indicado e validação antifraude.</p>
-    {% if referral_rewards_given %}
-      <div class="table-wrap" style="margin-top:12px">
-        <table>
-          <thead><tr><th>Indicação</th><th>Status</th><th>Bônus</th><th>Observação</th></tr></thead>
-          <tbody>
-          {% for rw in referral_rewards_given %}
-            <tr>
-              <td>{{ rw.referred.public_name if rw.referred else 'Usuário #' ~ rw.referred_user_id }}</td>
-              <td>{{ rw.status }}</td>
-              <td>{{ '%.2f'|format(rw.amount_credits or 0)|replace('.', ',') }} LC</td>
-              <td>{{ rw.reason or '—' }}</td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
+
+  <div class="invite-grid invite-below-payment" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:16px 0">
+    <div class="wallet-card invite-card compact-invite-card">
+      <h3>Meu código de convite</h3>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0">
+        <input id="my-invite-code" value="{% if user.referral_code_customized_at %}{{ user.referral_code or '' }}{% endif %}" placeholder="Ainda não definido" readonly style="max-width:220px;font-weight:950;letter-spacing:.08em;text-transform:uppercase">
+        {% if user.referral_code_customized_at and user.referral_code %}<button class="btn small ghost" type="button" data-copy-input="my-invite-code">Copiar</button>{% endif %}
       </div>
-    {% endif %}
+
+      {% if can_customize_invite_code %}
+        <form method="post" action="/minha-conta/convite/gerar" class="compact-form">
+          <label>Escolha 4 letras
+            <input name="code_prefix" maxlength="4" minlength="4" pattern="[A-Za-z]{4}" placeholder="EX: AZUL" required style="text-transform:uppercase">
+          </label>
+          <button class="btn full" type="submit">Criar código</button>
+        </form>
+      {% else %}
+        <p class="muted">Compartilhe esse código com seus convidados.</p>
+      {% endif %}
+      <div class="invite-bonus-chip">Bônus: 5 LC após primeira compra válida</div>
+    </div>
+
+    <details class="wallet-card lc-rules-quick">
+      <summary>Regras rápidas</summary>
+      <ul>
+        <li>Compra mínima: R$ 5,00.</li>
+        <li>Créditos LC são de uso interno.</li>
+        <li>Não são sacáveis nem transferíveis.</li>
+        <li>Convite vale antes da primeira compra aprovada.</li>
+      </ul>
+    </details>
   </div>
+
+  {% if referral_rewards_given %}
+  <details class="wallet-card" style="margin-top:14px">
+    <summary>Minhas indicações</summary>
+    <div class="table-wrap" style="margin-top:12px">
+      <table>
+        <thead><tr><th>Indicação</th><th>Status</th><th>Bônus</th><th>Observação</th></tr></thead>
+        <tbody>
+        {% for rw in referral_rewards_given %}
+          <tr>
+            <td>{{ rw.referred.public_name if rw.referred else 'Usuário #' ~ rw.referred_user_id }}</td>
+            <td>{{ rw.status }}</td>
+            <td>{{ '%.2f'|format(rw.amount_credits or 0)|replace('.', ',') }} LC</td>
+            <td>{{ rw.reason or '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
+  <style>
+    .wallet-checkout-first{margin-top:16px}.wallet-pay-card{max-width:560px}.invite-during-payment{border:1px solid rgba(96,165,250,.22);background:rgba(37,99,235,.08);border-radius:16px;padding:12px;margin:12px 0}.invite-during-payment summary{cursor:pointer;font-weight:950;color:#bfdbfe}.invite-during-payment input{margin-top:10px}.invite-during-payment small{display:block;margin-top:6px;color:#b7c6e6;font-weight:800}.invite-mini-ok{padding:10px 12px;border-radius:14px;background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.25);color:#bbf7d0;font-weight:850;margin:10px 0}.compact-invite-card p{margin:8px 0}.invite-bonus-chip{display:inline-flex;margin-top:10px;padding:8px 11px;border-radius:999px;background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.24);color:#bbf7d0;font-weight:950;font-size:13px}.lc-rules-quick summary{cursor:pointer;font-weight:950;font-size:18px}.lc-rules-quick ul{margin:12px 0 0;padding-left:18px;color:#dbeafe;line-height:1.8}.invite-below-payment{align-items:start}
+  </style>
 </div>
 
 
