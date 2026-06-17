@@ -48,7 +48,7 @@
 
   <div class="lc-toolbar">
     <div>
-      <h2>Leilões disponíveis</h2>
+      <h2>Disponíveis</h2>
       <p>Escolha uma disputa ativa, acompanhe os próximos produtos ou consulte resultados encerrados.</p>
     </div>
 
@@ -67,7 +67,7 @@
       <div class="lane-head">
         <div>
           <h3>Ao vivo</h3>
-          <p>Leilões abertos agora.</p>
+          
         </div>
         <span class="lane-count live">{{ live_items|length }}</span>
       </div>
@@ -104,7 +104,7 @@
         </article>
         {% else %}
         <div class="empty-state">
-          <strong>Nenhum leilão ao vivo no momento.</strong>
+          <strong>Nenhuma disputa ao vivo no momento.</strong>
           <span>Volte em breve para novas disputas.</span>
         </div>
         {% endfor %}
@@ -114,8 +114,7 @@
     <section class="auction-lane">
       <div class="lane-head">
         <div>
-          <h3>Próximos</h3>
-          <p>Produtos cadastrados para novas disputas.</p>
+          <h3>Próximos</h3>          
         </div>
         <span class="lane-count scheduled">{{ upcoming_items|length }}</span>
       </div>
@@ -157,7 +156,7 @@
         </article>
         {% else %}
         <div class="empty-state">
-          <strong>Nenhum próximo leilão cadastrado.</strong>
+          <strong>Nenhuma disputa cadastrada.</strong>
           <span>Novos produtos aparecerão aqui.</span>
         </div>
         {% endfor %}
@@ -319,7 +318,7 @@
       {% else %}
         <div class="empty-state suggestion-message">
           <strong>Entre na conta para indicar e votar.</strong>
-          <span>A votação é pública, mas a participação exige login para evitar duplicidade.</span>
+          
         </div>
       {% endif %}
     </section>
