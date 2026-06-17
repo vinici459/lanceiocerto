@@ -183,16 +183,63 @@
     <div class="alert success">{{ success }}</div>
   {% endif %}
 
-  <div id="wallet-deposit-panel" class="wallet-mode-panel active wallet-checkout-first">
+  <div class="invite-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:16px 0">
+    <div class="wallet-card invite-card">
+      <h3>Meu código de convite</h3>
+      <p class="muted">Crie um código fixo para indicar pessoas. Você escolhe 4 letras e o sistema completa com 6 números.</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0">
+        <input id="my-invite-code" value="{{ user.referral_code or '' }}" readonly style="max-width:220px;font-weight:950;letter-spacing:.08em;text-transform:uppercase">
+        {% if user.referral_code %}<button class="btn small ghost" type="button" data-copy-input="my-invite-code">Copiar</button>{% endif %}
+      </div>
+      {% if can_customize_invite_code %}
+        <form method="post" action="/minha-conta/convite/gerar" class="compact-form">
+          <label>Escolha 4 letras do código
+            <input name="code_prefix" maxlength="4" minlength="4" pattern="[A-Za-z]{4}" placeholder="Ex: VINI" required style="text-transform:uppercase">
+            <small>Use somente 4 letras, sem espaço e sem acento. Depois disso o código fica fixo na sua conta.</small>
+          </label>
+          <button class="btn full" type="submit">Criar código fixo</button>
+        </form>
+      {% else %}
+        <p class="muted"><strong>Código fixo:</strong> este é o código da sua conta para repassar aos convidados.</p>
+      {% endif %}
+      <p class="muted">Quando uma pessoa elegível usar seu código e fizer a primeira compra válida de Créditos LC, você recebe <strong>5 LC promocionais</strong> após validação antifraude.</p>
+    </div>
+
+    <div class="wallet-card invite-card">
+      <h3>Usar código de convite</h3>
+      {% if can_apply_invite_code %}
+        <p class="muted">Se alguém indicou você, informe o código antes da sua primeira compra aprovada de Créditos LC.</p>
+        <form method="post" action="/minha-conta/convite/aplicar" class="compact-form">
+          <label>Código de convite
+            <input name="invite_code" maxlength="24" placeholder="Ex: VINI123456" required style="text-transform:uppercase">
+            <small>O código só pode ser usado uma vez e não pode ser da própria conta.</small>
+          </label>
+          <button class="btn full ghost" type="submit">Aplicar código</button>
+        </form>
+      {% elif referrer_user %}
+        <p class="muted">Você já informou um código de convite.</p>
+        <p><strong>Indicador:</strong> {{ referrer_user.public_name or referrer_user.full_name }}</p>
+        {% if referral_reward_received %}<p class="muted"><strong>Status:</strong> {{ referral_reward_received.status }} — {{ referral_reward_received.reason or 'Aguardando validação.' }}</p>{% endif %}
+      {% else %}
+        <p class="muted">Código de convite disponível apenas antes da primeira compra aprovada de Créditos LC.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="wallet-action-tabs">
+    <button class="wallet-action-btn active" type="button" data-wallet-mode="wallet-deposit-panel">Comprar créditos</button>
+  </div>
+
+  <div id="wallet-deposit-panel" class="wallet-mode-panel active">
     <div class="wallet-choice-row">
       <button class="wallet-choice-btn active" type="button" data-deposit-target="deposit-pix-panel">PIX</button>
       <button class="wallet-choice-btn" type="button" data-deposit-target="deposit-card-panel">Cartão</button>
     </div>
 
-    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active wallet-pay-card" novalidate>
+    <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active" novalidate>
       <div id="deposit-pix-alert" class="wallet-error" aria-live="polite"></div>
 
-      <label>Valor da compra
+      <label>Valor da compra de Créditos LC
         <input
           type="number"
           step="0.01"
@@ -202,24 +249,15 @@
           placeholder="Mínimo R$ 5,00"
           inputmode="decimal"
           required>
+        <small>Após a confirmação, o valor vira Créditos LC de uso interno. Créditos LC não são sacáveis nem conversíveis em dinheiro.</small>
       </label>
 
-      {% if can_apply_invite_code %}
-      <details class="invite-during-payment">
-        <summary>Tenho código de convite</summary>
-        <input name="invite_code" maxlength="24" placeholder="EX: ABCD123456" style="text-transform:uppercase">
-        <small>Use antes da primeira compra aprovada.</small>
-      </details>
-      {% elif referrer_user %}
-      <div class="invite-mini-ok">Convite aplicado: <strong>{{ referrer_user.public_name or referrer_user.full_name }}</strong></div>
-      {% endif %}
-
-      <button class="btn full" type="submit">Gerar PIX</button>
+      <button class="btn full" type="submit">Gerar PIX para Créditos LC</button>
 
       {% if pix_payment and pix_payment.qr_code_base64 %}
       <div class="pix-payment-box" data-pix-payment="deposit" data-payment-id="{{ pix_payment.payment_id }}" data-expires-iso="{{ pix_payment.expires_iso }}">
-        <h3>Pix gerado</h3>
-        <p><strong>{{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }} Créditos LC</strong></p>
+        <h3>Pix para Créditos LC gerado</h3>
+        <p>Valor/Créditos LC: <strong>{{ '%.2f'|format(pix_payment.amount)|replace('.', ',') }} LC</strong></p>
         <p class="pix-expire-note">Tempo para pagar: <strong data-pix-countdown>15:00</strong></p>
         <div class="pix-qr-wrap">
           <img src="data:image/png;base64,{{ pix_payment.qr_code_base64 }}" alt="QR Code Pix">
@@ -230,15 +268,15 @@
             <button class="btn full ghost" type="button" data-copy-pix="deposit-pix-code">Copiar código Pix</button>
           </div>
         </div>
-        <div class="pix-status-line" id="deposit-pix-status">Aguardando confirmação...</div>
+        <div class="pix-status-line" id="deposit-pix-status">Aguardando confirmação do Mercado Pago...</div>
       </div>
       {% endif %}
     </form>
 
-    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel wallet-pay-card" novalidate>
+    <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel" novalidate>
       <div id="deposit-card-alert" class="wallet-error" aria-live="polite"></div>
 
-      <label>Valor da compra
+      <label>Valor da compra de Créditos LC
         <input
           type="number"
           step="0.01"
@@ -248,79 +286,35 @@
           placeholder="Mínimo R$ 5,00"
           inputmode="decimal"
           required>
+        <small>Compra mínima de R$ 5,00. Os créditos comprados são de uso exclusivo dentro do site.</small>
       </label>
 
-      {% if can_apply_invite_code %}
-      <details class="invite-during-payment">
-        <summary>Tenho código de convite</summary>
-        <input name="invite_code" maxlength="24" placeholder="EX: ABCD123456" style="text-transform:uppercase">
-        <small>Use antes da primeira compra aprovada.</small>
-      </details>
-      {% elif referrer_user %}
-      <div class="invite-mini-ok">Convite aplicado: <strong>{{ referrer_user.public_name or referrer_user.full_name }}</strong></div>
-      {% endif %}
-
-      <button class="btn full" type="submit">Pagar com cartão</button>
-      <small class="payment-note">Pagamento seguro pelo Mercado Pago.</small>
+      <small class="payment-note">Para maior segurança você será direcionado para o Mercado Pago.</small>
+      <button class="btn full" type="submit">Comprar Créditos LC</button>
     </form>
   </div>
-
-  <div class="invite-grid invite-below-payment" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin:16px 0">
-    <div class="wallet-card invite-card compact-invite-card">
-      <h3>Meu código de convite</h3>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0">
-        <input id="my-invite-code" value="{% if user.referral_code_customized_at %}{{ user.referral_code or '' }}{% endif %}" placeholder="Ainda não definido" readonly style="max-width:220px;font-weight:950;letter-spacing:.08em;text-transform:uppercase">
-        {% if user.referral_code_customized_at and user.referral_code %}<button class="btn small ghost" type="button" data-copy-input="my-invite-code">Copiar</button>{% endif %}
+  <div class="wallet-card" style="margin-top:14px">
+    <h3>Regra dos Créditos LC</h3>
+    <p class="muted">Créditos LC funcionam como crédito pré-pago: depois de comprados, eles só podem ser usados dentro do Lancei o Certo. Eles não podem ser sacados, transferidos ou convertidos novamente em dinheiro.</p>
+    <p class="muted"><strong>Convite:</strong> o bônus de convite é liberado em Créditos LC promocionais somente após primeira compra válida do indicado e validação antifraude.</p>
+    {% if referral_rewards_given %}
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead><tr><th>Indicação</th><th>Status</th><th>Bônus</th><th>Observação</th></tr></thead>
+          <tbody>
+          {% for rw in referral_rewards_given %}
+            <tr>
+              <td>{{ rw.referred.public_name if rw.referred else 'Usuário #' ~ rw.referred_user_id }}</td>
+              <td>{{ rw.status }}</td>
+              <td>{{ '%.2f'|format(rw.amount_credits or 0)|replace('.', ',') }} LC</td>
+              <td>{{ rw.reason or '—' }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
       </div>
-
-      {% if can_customize_invite_code %}
-        <form method="post" action="/minha-conta/convite/gerar" class="compact-form">
-          <label>Escolha 4 letras
-            <input name="code_prefix" maxlength="4" minlength="4" pattern="[A-Za-z]{4}" placeholder="EX: AZUL" required style="text-transform:uppercase">
-          </label>
-          <button class="btn full" type="submit">Criar código</button>
-        </form>
-      {% else %}
-        <p class="muted">Compartilhe esse código com seus convidados.</p>
-      {% endif %}
-      <div class="invite-bonus-chip">Bônus: 5 LC após primeira compra válida</div>
-    </div>
-
-    <details class="wallet-card lc-rules-quick">
-      <summary>Regras rápidas</summary>
-      <ul>
-        <li>Compra mínima: R$ 5,00.</li>
-        <li>Créditos LC são de uso interno.</li>
-        <li>Não são sacáveis nem transferíveis.</li>
-        <li>Convite vale antes da primeira compra aprovada.</li>
-      </ul>
-    </details>
+    {% endif %}
   </div>
-
-  {% if referral_rewards_given %}
-  <details class="wallet-card" style="margin-top:14px">
-    <summary>Minhas indicações</summary>
-    <div class="table-wrap" style="margin-top:12px">
-      <table>
-        <thead><tr><th>Indicação</th><th>Status</th><th>Bônus</th><th>Observação</th></tr></thead>
-        <tbody>
-        {% for rw in referral_rewards_given %}
-          <tr>
-            <td>{{ rw.referred.public_name if rw.referred else 'Usuário #' ~ rw.referred_user_id }}</td>
-            <td>{{ rw.status }}</td>
-            <td>{{ '%.2f'|format(rw.amount_credits or 0)|replace('.', ',') }} LC</td>
-            <td>{{ rw.reason or '—' }}</td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
-  {% endif %}
-
-  <style>
-    .wallet-checkout-first{margin-top:16px}.wallet-pay-card{max-width:560px}.invite-during-payment{border:1px solid rgba(96,165,250,.22);background:rgba(37,99,235,.08);border-radius:16px;padding:12px;margin:12px 0}.invite-during-payment summary{cursor:pointer;font-weight:950;color:#bfdbfe}.invite-during-payment input{margin-top:10px}.invite-during-payment small{display:block;margin-top:6px;color:#b7c6e6;font-weight:800}.invite-mini-ok{padding:10px 12px;border-radius:14px;background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.25);color:#bbf7d0;font-weight:850;margin:10px 0}.compact-invite-card p{margin:8px 0}.invite-bonus-chip{display:inline-flex;margin-top:10px;padding:8px 11px;border-radius:999px;background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.24);color:#bbf7d0;font-weight:950;font-size:13px}.lc-rules-quick summary{cursor:pointer;font-weight:950;font-size:18px}.lc-rules-quick ul{margin:12px 0 0;padding-left:18px;color:#dbeafe;line-height:1.8}.invite-below-payment{align-items:start}
-  </style>
 </div>
 
 
@@ -478,31 +472,113 @@
   </aside>
 
   <div class="support-main-stack">
+    <div class="panel-card support-consumer-intro">
+      <div class="card-title-row">
+        <h2>Problema com produto, devolução ou reembolso?</h2>
+        <span class="pill-soft">Compra assistida</span>
+      </div>
+      <p>Use a categoria <strong>Problema com produto / Devolução / Reembolso</strong> quando o produto comprado no fluxo de compra assistida apresentar defeito, divergência, cancelamento, devolução ou estorno.</p>
+      <div class="support-process-grid">
+        <div><strong>1</strong><span>Abra o chamado com o pedido relacionado.</span></div>
+        <div><strong>2</strong><span>Envie fotos, vídeos, rastreio e protocolos da loja.</span></div>
+        <div><strong>3</strong><span>O suporte confere loja, devolução e estorno.</span></div>
+        <div><strong>4</strong><span>Se tudo for confirmado, o reembolso é analisado.</span></div>
+      </div>
+      <p class="support-policy-note">O reembolso só é repassado após confirmação segura da devolução/estorno. A política completa está em <a href="/consumidor-rules" target="_blank" rel="noopener">Política do Consumidor e Reembolso</a>.</p>
+    </div>
+
     <div class="panel-card">
       <div class="card-title-row"><h2>Abrir novo chamado</h2><span class="pill-soft">Protocolo</span></div>
-      <form method="post" action="/minha-conta/suporte/novo" enctype="multipart/form-data" class="support-open-form">
+      <form method="post" action="/minha-conta/suporte/novo" enctype="multipart/form-data" class="support-open-form" data-consumer-category="{{ support_consumer_category or 'produto_devolucao_reembolso' }}">
         <label>Categoria
-          <select name="category" required>
+          <select name="category" required data-support-category-select>
             {% for key,label in support_categories.items() %}
               <option value="{{ key }}">{{ label }}</option>
             {% endfor %}
           </select>
         </label>
-        <label>Pedido relacionado <small>(opcional)</small>
-          <select name="order_id">
+        <label>Pedido relacionado <small>(obrigatório em problema com produto/devolução)</small>
+          <select name="order_id" data-consumer-order-select>
             <option value="0">Nenhum pedido específico</option>
             {% for o in support_orders %}
               <option value="{{ o.id }}">Pedido #{{ o.id }} · {{ o.auction.title if o.auction else 'Produto' }} · {{ o.status }}</option>
             {% endfor %}
           </select>
         </label>
+
+        <div class="consumer-support-flow" data-consumer-fields hidden>
+          <div class="consumer-flow-head">
+            <strong>Processo de devolução/reembolso da compra assistida</strong>
+            <span>Preencha com calma. Isso evita idas e voltas no atendimento.</span>
+          </div>
+          <div class="support-process-grid compact">
+            <div><strong>A</strong><span>Comprove o problema ou solicitação de devolução.</span></div>
+            <div><strong>B</strong><span>Informe rastreio/protocolo se já devolveu.</span></div>
+            <div><strong>C</strong><span>Aguarde a confirmação da loja/parceiro.</span></div>
+            <div><strong>D</strong><span>O suporte valida o estorno antes do repasse.</span></div>
+          </div>
+          <label>Tipo de problema
+            <select name="consumer_issue_type" data-consumer-required>
+              <option value="">Selecione</option>
+              <option value="defeito">Produto com defeito</option>
+              <option value="divergente">Produto diferente do anunciado/pedido</option>
+              <option value="avaria_transporte">Avaria no transporte</option>
+              <option value="arrependimento">Arrependimento/cancelamento</option>
+              <option value="devolucao_estorno">Devolução/estorno aprovado pela loja</option>
+              <option value="produto_nao_recebido">Produto não recebido</option>
+              <option value="outro">Outro problema</option>
+            </select>
+          </label>
+          <label>Loja, parceiro ou marketplace
+            <input name="consumer_store_name" maxlength="160" placeholder="Ex: Mercado Livre, Amazon, loja parceira, hotel/parque parceiro">
+          </label>
+          <label>Situação atual da devolução/estorno
+            <select name="consumer_return_status">
+              <option value="">Selecione se já souber</option>
+              <option value="nao_solicitei">Ainda não solicitei devolução</option>
+              <option value="solicitada">Devolução solicitada na loja/parceiro</option>
+              <option value="postado_coletado">Produto postado/coletado para devolução</option>
+              <option value="recebido_pela_loja">Loja/parceiro confirmou recebimento</option>
+              <option value="estorno_aprovado">Estorno aprovado pela loja/parceiro</option>
+              <option value="estorno_recebido_plataforma">Estorno informado como devolvido ao Lancei o Certo</option>
+              <option value="negado_pela_loja">Loja/parceiro negou a devolução</option>
+            </select>
+          </label>
+          <label>Código de rastreio, protocolo ou autorização de devolução
+            <input name="consumer_return_tracking_code" maxlength="120" placeholder="Ex: rastreio dos Correios, protocolo da loja ou código de coleta">
+          </label>
+          <div class="grid-2">
+            <label>Valor que você solicita analisar <small>(opcional)</small>
+              <input name="consumer_refund_amount_claimed" inputmode="decimal" placeholder="Ex: 100,00">
+            </label>
+            <label>Valor que a loja informou como estornado <small>(opcional)</small>
+              <input name="consumer_refund_amount_received" inputmode="decimal" placeholder="Ex: 100,00">
+            </label>
+          </div>
+          <div class="consumer-checklist">
+            <strong>Comprovantes recomendados</strong>
+            <ul>
+              <li>fotos/vídeos do produto e da embalagem;</li>
+              <li>comprovante de solicitação de devolução;</li>
+              <li>rastreio, postagem, coleta ou protocolo;</li>
+              <li>mensagens da loja/parceiro e confirmação de estorno.</li>
+            </ul>
+          </div>
+          <label class="terms-check consumer-declaration">
+            <input type="checkbox" name="consumer_declaration_accepted" value="1" data-consumer-required>
+            <span>
+              Declaro que as informações e comprovantes enviados são verdadeiros. Estou ciente de que o Lancei o Certo poderá verificar dados com loja, parceiro, transportadora ou meio de pagamento, e que fraude, documento adulterado, simulação de devolução ou pedido indevido de reembolso pode gerar bloqueio, banimento permanente e medidas legais cabíveis. Li a <a href="/consumidor-rules" target="_blank" rel="noopener">Política do Consumidor e Reembolso</a>.
+            </span>
+          </label>
+        </div>
+
         <label>Assunto
-          <input name="subject" maxlength="160" placeholder="Ex: Pix aprovado mas os Créditos LC não apareceram">
+          <input name="subject" maxlength="160" placeholder="Ex: Produto devolvido e estorno voltou para o Lancei o Certo">
         </label>
         <label>Descreva o problema
-          <textarea name="message" required placeholder="Explique o que aconteceu. Informe valor, data, produto, pedido ou código de indicação quando existir."></textarea>
+          <textarea name="message" required placeholder="Explique o que aconteceu. Informe valor, data, produto, pedido, loja, prazos e protocolos quando existir."></textarea>
         </label>
-        <label>Anexo/comprovante <small>(opcional)</small>
+        <label>Anexo/comprovante <small>(opcional, mas recomendado em devolução/reembolso)</small>
           <input type="file" name="proof_file" accept="image/*,.pdf">
         </label>
         <button class="btn" type="submit">Abrir chamado</button>
@@ -518,6 +594,20 @@
         <div><span>Aberto em</span><strong>{{ fmt_br_datetime(support_ticket.created_at) if fmt_br_datetime is defined else support_ticket.created_at }}</strong></div>
         <div><span>Pedido</span><strong>{% if support_ticket.order_id %}#{{ support_ticket.order_id }}{% else %}—{% endif %}</strong></div>
       </div>
+      {% if support_ticket.category == (support_consumer_category or 'produto_devolucao_reembolso') %}
+      <div class="consumer-ticket-summary">
+        <strong>Resumo da devolução/reembolso</strong>
+        <div class="support-meta-grid">
+          <div><span>Tipo</span><strong>{{ support_ticket.consumer_issue_type or '—' }}</strong></div>
+          <div><span>Loja/parceiro</span><strong>{{ support_ticket.consumer_store_name or '—' }}</strong></div>
+          <div><span>Situação</span><strong>{{ support_ticket.consumer_return_status or '—' }}</strong></div>
+          <div><span>Rastreio/protocolo</span><strong>{{ support_ticket.consumer_return_tracking_code or '—' }}</strong></div>
+          <div><span>Valor solicitado</span><strong>R$ {{ '%.2f'|format(support_ticket.consumer_refund_amount_claimed or 0)|replace('.', ',') }}</strong></div>
+          <div><span>Valor estornado informado</span><strong>R$ {{ '%.2f'|format(support_ticket.consumer_refund_amount_received or 0)|replace('.', ',') }}</strong></div>
+        </div>
+        <p>Política aceita: {{ support_ticket.consumer_policy_version or consumer_rules_version }} · Declaração de veracidade: {{ 'sim' if support_ticket.consumer_declaration_accepted else 'não registrada' }}</p>
+      </div>
+      {% endif %}
       <div class="support-chat">
         {% for m in support_messages %}
           {% if m.message_type != 'internal' %}
@@ -546,6 +636,31 @@
     {% endif %}
   </div>
 </div>
+
+
+<style>
+.support-consumer-intro{border-color:rgba(96,165,250,.24);background:linear-gradient(135deg,rgba(37,99,235,.13),rgba(15,23,42,.92))}.support-consumer-intro p{color:#cbd5e1;line-height:1.55}.support-policy-note{margin-top:12px}.support-policy-note a{color:#93c5fd;font-weight:900}.support-process-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}.support-process-grid div{display:flex;gap:9px;align-items:flex-start;padding:11px;border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.045);border-radius:15px}.support-process-grid strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(59,130,246,.18);color:#bfdbfe;flex:0 0 auto}.support-process-grid span{color:#dbeafe;font-size:13px;line-height:1.35}.consumer-support-flow{display:grid;gap:12px;padding:14px;border-radius:18px;border:1px solid rgba(251,191,36,.30);background:rgba(251,191,36,.08)}.consumer-support-flow[hidden]{display:none!important}.consumer-flow-head{display:grid;gap:4px}.consumer-flow-head strong{color:#fde68a}.consumer-flow-head span{color:#dbeafe;font-size:13px}.support-process-grid.compact{grid-template-columns:repeat(2,minmax(0,1fr));margin:2px 0}.consumer-checklist{padding:12px;border-radius:15px;border:1px solid rgba(148,163,184,.16);background:rgba(15,23,42,.58)}.consumer-checklist strong{display:block;margin-bottom:6px}.consumer-checklist ul{margin:0;padding-left:18px;color:#cbd5e1}.consumer-declaration{align-items:flex-start}.consumer-declaration span{line-height:1.45}.consumer-ticket-summary{margin:12px 0;padding:13px;border:1px solid rgba(251,191,36,.26);border-radius:16px;background:rgba(251,191,36,.07)}.consumer-ticket-summary>strong{display:block;margin-bottom:10px;color:#fde68a}.consumer-ticket-summary p{margin:8px 0 0;color:#cbd5e1;font-size:13px}@media(max-width:760px){.support-process-grid,.support-process-grid.compact{grid-template-columns:1fr}.consumer-support-flow{padding:12px}}
+</style>
+
+<script>
+(function(){
+  const form = document.querySelector('.support-open-form[data-consumer-category]');
+  if(!form) return;
+  const select = form.querySelector('[data-support-category-select]');
+  const panel = form.querySelector('[data-consumer-fields]');
+  const orderSelect = form.querySelector('[data-consumer-order-select]');
+  const consumerCategory = form.dataset.consumerCategory || 'produto_devolucao_reembolso';
+  const requiredFields = Array.from(form.querySelectorAll('[data-consumer-required]'));
+  function updateConsumerFields(){
+    const active = select && select.value === consumerCategory;
+    if(panel){ panel.hidden = !active; }
+    if(orderSelect){ orderSelect.required = !!active; }
+    requiredFields.forEach((el) => { el.required = !!active; });
+  }
+  if(select){ select.addEventListener('change', updateConsumerFields); }
+  updateConsumerFields();
+})();
+</script>
 
 
 {% elif section == 'participations' %}

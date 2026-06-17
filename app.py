@@ -382,6 +382,18 @@ class SupportTicket(Base):
     subject: Mapped[str] = mapped_column(String(160), default="")
     message: Mapped[str] = mapped_column(Text, default="")
     proof_url: Mapped[str] = mapped_column(String(600), default="")
+    # Campos estruturados para chamados de problema com produto, devolução, estorno e reembolso
+    # da compra assistida. Mantém o suporte escalável: o admin não precisa garimpar tudo em texto livre.
+    consumer_issue_type: Mapped[str] = mapped_column(String(60), default="")
+    consumer_store_name: Mapped[str] = mapped_column(String(160), default="")
+    consumer_return_status: Mapped[str] = mapped_column(String(60), default="")
+    consumer_return_tracking_code: Mapped[str] = mapped_column(String(120), default="")
+    consumer_refund_amount_claimed: Mapped[float] = mapped_column(Float, default=0.0)
+    consumer_refund_amount_received: Mapped[float] = mapped_column(Float, default=0.0)
+    consumer_policy_version: Mapped[str] = mapped_column(String(40), default="")
+    consumer_declaration_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
+    consumer_declaration_ip: Mapped[str] = mapped_column(String(80), default="")
+    consumer_declaration_user_agent: Mapped[str] = mapped_column(String(600), default="")
     status: Mapped[str] = mapped_column(String(30), default="open", index=True)  # open/in_review/awaiting_customer/dispute/resolved/closed
     result: Mapped[str] = mapped_column(String(30), default="")  # client/site/agreement/manual_adjustment
     assigned_admin_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
@@ -680,9 +692,11 @@ templates.env.globals["asset_version"] = ASSET_VERSION
 LEGAL_TERMS_VERSION = os.getenv("LEGAL_TERMS_VERSION", "2026-06-16-v1")
 LEGAL_RULES_VERSION = os.getenv("LEGAL_RULES_VERSION", "2026-06-16-v1")
 LEGAL_PRIVACY_VERSION = os.getenv("LEGAL_PRIVACY_VERSION", "2026-06-16-v1")
+CONSUMER_RULES_VERSION = os.getenv("CONSUMER_RULES_VERSION", "2026-06-17-v1")
 templates.env.globals["legal_terms_version"] = LEGAL_TERMS_VERSION
 templates.env.globals["legal_rules_version"] = LEGAL_RULES_VERSION
 templates.env.globals["legal_privacy_version"] = LEGAL_PRIVACY_VERSION
+templates.env.globals["consumer_rules_version"] = CONSUMER_RULES_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
@@ -945,6 +959,7 @@ LC_MIN_CREDIT_PURCHASE_AMOUNT = float(os.getenv("LC_MIN_CREDIT_PURCHASE_AMOUNT",
 REFERRAL_BONUS_CREDITS = float(os.getenv("REFERRAL_BONUS_CREDITS", "5"))
 REFERRAL_MIN_FIRST_PURCHASE_AMOUNT = float(os.getenv("REFERRAL_MIN_FIRST_PURCHASE_AMOUNT", "5"))
 SUPPORT_ADMIN_ADJUST_LIMIT = float(os.getenv("SUPPORT_ADMIN_ADJUST_LIMIT", "20"))
+SUPPORT_CONSUMER_CATEGORY = "produto_devolucao_reembolso"
 
 SUPPORT_CATEGORIES = {
     "pagamento_creditos": "Pagamento de Créditos LC não caiu",
@@ -955,6 +970,7 @@ SUPPORT_CATEGORIES = {
     "compra_assistida": "Compra assistida / link do pedido",
     "produto_entrega": "Entrega, atraso ou rastreio",
     "produto_defeito": "Produto com defeito ou divergente",
+    "produto_devolucao_reembolso": "Problema com produto / Devolução / Reembolso",
     "documentos_conta": "Documentos, cadastro ou conta",
     "antifraude_bloqueio": "Conta em análise ou bloqueada",
     "cancelamento": "Cancelamento, estorno ou encerramento",
@@ -4136,6 +4152,16 @@ def ensure_columns() -> None:
                 "last_admin_response_at": "TIMESTAMP NULL",
                 "sla_due_at": "TIMESTAMP NULL",
                 "closed_at": "TIMESTAMP NULL",
+                "consumer_issue_type": "VARCHAR(60) DEFAULT ''",
+                "consumer_store_name": "VARCHAR(160) DEFAULT ''",
+                "consumer_return_status": "VARCHAR(60) DEFAULT ''",
+                "consumer_return_tracking_code": "VARCHAR(120) DEFAULT ''",
+                "consumer_refund_amount_claimed": "FLOAT DEFAULT 0",
+                "consumer_refund_amount_received": "FLOAT DEFAULT 0",
+                "consumer_policy_version": "VARCHAR(40) DEFAULT ''",
+                "consumer_declaration_accepted": "BOOLEAN DEFAULT FALSE",
+                "consumer_declaration_ip": "VARCHAR(80) DEFAULT ''",
+                "consumer_declaration_user_agent": "VARCHAR(600) DEFAULT ''",
             }.items():
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE support_tickets ADD COLUMN {name} {ddl}"))
@@ -5102,6 +5128,17 @@ def auction_rules_page(request: Request):
     db = SessionLocal()
     try:
         return templates.TemplateResponse("legal_rules.html", {"request": request, "user": current_user(request, db)})
+    finally:
+        db.close()
+
+
+@app.get("/consumidor-rules", response_class=HTMLResponse)
+@app.get("/politica-do-consumidor", response_class=HTMLResponse)
+@app.get("/problemas-produto-reembolso", response_class=HTMLResponse)
+def consumer_rules_page(request: Request):
+    db = SessionLocal()
+    try:
+        return templates.TemplateResponse("consumidor_rules.html", {"request": request, "user": current_user(request, db)})
     finally:
         db.close()
 
@@ -6876,13 +6913,28 @@ def my_support(request: Request):
 
 
 @app.post("/minha-conta/suporte/novo")
-async def my_support_create(request: Request, category: str = Form("duvida_geral"), subject: str = Form(""), message: str = Form(""), order_id: int = Form(0), proof_file: UploadFile | None = File(None)):
+async def my_support_create(
+    request: Request,
+    category: str = Form("duvida_geral"),
+    subject: str = Form(""),
+    message: str = Form(""),
+    order_id: int = Form(0),
+    consumer_issue_type: str = Form(""),
+    consumer_store_name: str = Form(""),
+    consumer_return_status: str = Form(""),
+    consumer_return_tracking_code: str = Form(""),
+    consumer_refund_amount_claimed: str = Form(""),
+    consumer_refund_amount_received: str = Form(""),
+    consumer_declaration_accepted: str = Form(""),
+    proof_file: UploadFile | None = File(None),
+):
     db = SessionLocal()
     try:
         user = require_user(request, db)
         category = category if category in SUPPORT_CATEGORIES else "duvida_geral"
         subject = (subject or "").strip()[:160]
         message = (message or "").strip()
+        is_consumer_case = category == SUPPORT_CONSUMER_CATEGORY
         if len(message) < 10:
             ctx = support_context_for_user(db, user, error="Descreva o problema com pelo menos 10 caracteres.")
             return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
@@ -6892,12 +6944,87 @@ async def my_support_create(request: Request, category: str = Form("duvida_geral
             order = db.query(WinnerOrder).filter(WinnerOrder.id == order_id, WinnerOrder.user_id == user.id).first()
             if order:
                 valid_order_id = order.id
+
+        def parse_money(value: str) -> float:
+            raw = (value or "").strip().replace("R$", "").replace(" ", "")
+            if not raw:
+                return 0.0
+            raw = raw.replace(".", "").replace(",", ".")
+            try:
+                return BR(float(raw))
+            except Exception:
+                return 0.0
+
+        consumer_issue_type = (consumer_issue_type or "").strip()[:60]
+        consumer_store_name = (consumer_store_name or "").strip()[:160]
+        consumer_return_status = (consumer_return_status or "").strip()[:60]
+        consumer_return_tracking_code = (consumer_return_tracking_code or "").strip()[:120]
+        refund_claimed = parse_money(consumer_refund_amount_claimed)
+        refund_received = parse_money(consumer_refund_amount_received)
+        declaration_ok = str(consumer_declaration_accepted or "").strip().lower() in {"1", "true", "on", "yes", "sim"}
+
+        if is_consumer_case:
+            if not valid_order_id:
+                ctx = support_context_for_user(db, user, error="Para problema com produto, devolução ou reembolso, selecione o pedido relacionado.")
+                return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
+            if not consumer_issue_type:
+                ctx = support_context_for_user(db, user, error="Informe o tipo de problema para abrir este chamado.")
+                return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
+            if not declaration_ok:
+                ctx = support_context_for_user(db, user, error="Para este tipo de chamado, é obrigatório aceitar a declaração de veracidade e ciência da política de devolução/reembolso.")
+                return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
+
         priority = support_category_priority(category)
-        ticket = SupportTicket(user_id=user.id, order_id=valid_order_id, category=category, priority=priority, subject=subject or support_category_label(category), message=message, proof_url=proof_url, status="open", last_customer_message_at=datetime.utcnow(), sla_due_at=support_sla_due(category, priority))
+        ticket = SupportTicket(
+            user_id=user.id,
+            order_id=valid_order_id,
+            category=category,
+            priority=priority,
+            subject=subject or support_category_label(category),
+            message=message,
+            proof_url=proof_url,
+            consumer_issue_type=consumer_issue_type if is_consumer_case else "",
+            consumer_store_name=consumer_store_name if is_consumer_case else "",
+            consumer_return_status=consumer_return_status if is_consumer_case else "",
+            consumer_return_tracking_code=consumer_return_tracking_code if is_consumer_case else "",
+            consumer_refund_amount_claimed=refund_claimed if is_consumer_case else 0.0,
+            consumer_refund_amount_received=refund_received if is_consumer_case else 0.0,
+            consumer_policy_version=CONSUMER_RULES_VERSION if is_consumer_case else "",
+            consumer_declaration_accepted=bool(declaration_ok) if is_consumer_case else False,
+            consumer_declaration_ip=client_ip(request) if is_consumer_case else "",
+            consumer_declaration_user_agent=(request.headers.get("user-agent") or "")[:600] if is_consumer_case else "",
+            status="open",
+            last_customer_message_at=datetime.utcnow(),
+            sla_due_at=support_sla_due(category, priority),
+        )
         db.add(ticket)
         db.flush()
-        support_add_message(db, ticket, message, user_id=user.id, message_type="customer", proof_url=proof_url)
-        audit_event(db, request, "support.ticket_created", user, "support_ticket", ticket.id, f"Categoria: {category} | Prioridade: {priority}")
+
+        initial_body = message
+        if is_consumer_case:
+            structured = [
+                "",
+                "---",
+                "Dados estruturados do chamado de problema com produto/devolução/reembolso:",
+                f"Tipo de problema: {consumer_issue_type or 'não informado'}",
+                f"Loja/parceiro: {consumer_store_name or 'não informado'}",
+                f"Situação da devolução: {consumer_return_status or 'não informado'}",
+                f"Rastreio/código de devolução: {consumer_return_tracking_code or 'não informado'}",
+                f"Valor solicitado pelo cliente: R$ {refund_claimed:.2f}",
+                f"Valor informado como estornado/confirmado: R$ {refund_received:.2f}",
+                f"Política aceita: {CONSUMER_RULES_VERSION}",
+                "Declaração de veracidade: aceita pelo cliente no envio do chamado.",
+            ]
+            initial_body = (message + "\n" + "\n".join(structured)).strip()
+            support_add_message(
+                db,
+                ticket,
+                "Checklist interno: antes de qualquer reembolso, confirmar devolução, recebimento pela loja/parceiro, aprovação do estorno, valor efetivamente retornado ao Lancei o Certo e ausência de indícios de fraude ou recebimento duplicado.",
+                message_type="internal",
+            )
+
+        support_add_message(db, ticket, initial_body, user_id=user.id, message_type="customer", proof_url=proof_url)
+        audit_event(db, request, "support.ticket_created", user, "support_ticket", ticket.id, f"Categoria: {category} | Prioridade: {priority} | Consumidor: {is_consumer_case}")
         nav_cache_clear()
         db.commit()
         return RedirectResponse(f"/minha-conta/suporte?ticket={ticket.id}", status_code=303)
@@ -7743,7 +7870,7 @@ def user_audit_map(db: Session, users: list) -> dict[int, dict]:
 def support_sla_due(category: str, priority: str) -> datetime:
     category = (category or "duvida_geral").strip()
     priority = (priority or "media").strip()
-    if priority == "urgente" or category in {"pagamento_creditos", "creditos_descontados", "produto_defeito", "antifraude_bloqueio"}:
+    if priority == "urgente" or category in {"pagamento_creditos", "creditos_descontados", "produto_defeito", "produto_devolucao_reembolso", "antifraude_bloqueio"}:
         hours = 2
     elif priority == "alta" or category in {"lance_leilao", "arremate_pagamento", "compra_assistida"}:
         hours = 4
@@ -7780,7 +7907,7 @@ def support_add_message(db: Session, ticket: SupportTicket, body: str, *, user_i
 
 def support_category_priority(category: str) -> str:
     category = (category or "duvida_geral").strip()
-    if category in {"pagamento_creditos", "creditos_descontados", "produto_defeito", "antifraude_bloqueio", "lance_leilao", "arremate_pagamento", "compra_assistida"}:
+    if category in {"pagamento_creditos", "creditos_descontados", "produto_defeito", "produto_devolucao_reembolso", "antifraude_bloqueio", "lance_leilao", "arremate_pagamento", "compra_assistida"}:
         return "alta"
     if category in {"indicacao_bonus", "documentos_conta", "duvida_geral"}:
         return "baixa"
@@ -7827,7 +7954,7 @@ def support_context_for_user(db: Session, user: User, ticket_id: Optional[int] =
     if active_ticket:
         active_ticket.customer_last_seen_at = datetime.utcnow()
         messages = db.query(SupportTicketMessage).filter(SupportTicketMessage.ticket_id == active_ticket.id).order_by(SupportTicketMessage.created_at.asc()).limit(200).all()
-    return {"section": "support", "support_tickets": tickets, "support_orders": orders, "support_ticket": active_ticket, "support_messages": messages, "support_categories": SUPPORT_CATEGORIES, "support_priorities": SUPPORT_PRIORITIES, "support_statuses": SUPPORT_STATUSES, "support_error": error, "support_success": success}
+    return {"section": "support", "support_tickets": tickets, "support_orders": orders, "support_ticket": active_ticket, "support_messages": messages, "support_categories": SUPPORT_CATEGORIES, "support_priorities": SUPPORT_PRIORITIES, "support_statuses": SUPPORT_STATUSES, "support_error": error, "support_success": success, "support_consumer_category": SUPPORT_CONSUMER_CATEGORY, "consumer_rules_version": CONSUMER_RULES_VERSION}
 
 
 def admin_support_context(db: Session, request: Request, search: str, is_super_admin: bool) -> dict:
@@ -7864,7 +7991,9 @@ def admin_support_context(db: Session, request: Request, search: str, is_super_a
           (SELECT COUNT(*) FROM support_tickets WHERE status = 'dispute') AS dispute_count,
           (SELECT COUNT(*) FROM support_tickets WHERE sla_due_at IS NOT NULL AND sla_due_at < CURRENT_TIMESTAMP AND status IN ('open','in_review','awaiting_customer','dispute')) AS late_count
     """)).mappings().first()
-    return {"support_tickets": tickets, "support_ticket_detail": detail, "support_messages": messages, "support_dossier": dossier, "support_categories": SUPPORT_CATEGORIES, "support_priorities": SUPPORT_PRIORITIES, "support_statuses": SUPPORT_STATUSES, "support_status_filter": status_filter, "support_category_filter": category_filter, "support_user_results": support_user_search(db, search, limit=8), "support_counters": dict(counters_row or {}), "support_admin_adjust_limit": SUPPORT_ADMIN_ADJUST_LIMIT}
+    return {"support_tickets": tickets, "support_ticket_detail": detail, "support_messages": messages, "support_dossier": dossier, "support_categories": SUPPORT_CATEGORIES, "support_priorities": SUPPORT_PRIORITIES, "support_statuses": SUPPORT_STATUSES, "support_status_filter": status_filter, "support_category_filter": category_filter, "support_user_results": support_user_search(db, search, limit=8), "support_counters": dict(counters_row or {}), "support_admin_adjust_limit": SUPPORT_ADMIN_ADJUST_LIMIT,
+        "support_consumer_category": SUPPORT_CONSUMER_CATEGORY,
+        "consumer_rules_version": CONSUMER_RULES_VERSION}
 
 
 def blank_admin_context() -> dict:

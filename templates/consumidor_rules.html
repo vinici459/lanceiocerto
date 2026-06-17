@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="container legal-page consumer-rules-page">
+  <div class="legal-hero">
+    <span class="legal-kicker">Lancei o Certo</span>
+    <h1>Política de Problemas com Produto, Devolução, Estorno e Reembolso da Compra Assistida</h1>
+    <p>Regras aplicáveis quando houver problema com produto, entrega, devolução, estorno ou reembolso em pedido realizado por compra assistida.</p>
+    <small>Versão: {{ consumer_rules_version or '2026-06-17-v1' }}</small>
+  </div>
+
+  <div class="legal-card">
+    <h2>1. Finalidade desta política</h2>
+    <p>Esta política estabelece as regras aplicáveis quando o cliente vencedor de um leilão tiver problema com produto, entrega, devolução, cancelamento, arrependimento, estorno ou reembolso relacionado à compra assistida realizada por meio do Lancei o Certo.</p>
+    <p>A compra assistida é o procedimento em que o Lancei o Certo auxilia, intermedeia, orienta ou efetua o pagamento do produto junto a loja terceira, fornecedor, marketplace, parceiro comercial ou prestador aprovado, conforme as regras do leilão, do pedido, da plataforma e da legislação aplicável.</p>
+    <p>Esta política tem três objetivos principais:</p>
+    <ol>
+      <li>proteger o cliente honesto;</li>
+      <li>garantir análise justa e documentada dos problemas;</li>
+      <li>prevenir fraudes, abusos, informações falsas e pedidos indevidos de reembolso.</li>
+    </ol>
+  </div>
+  <div class="legal-card">
+    <h2>2. Natureza da compra assistida</h2>
+    <p>O Lancei o Certo não substitui automaticamente a loja, fabricante, transportadora ou parceiro responsável pelo produto, salvo nas situações em que a legislação aplicável atribuir responsabilidade à plataforma ou quando a própria plataforma assumir obrigação específica no pedido.</p>
+    <p>Na compra assistida, a plataforma atua como intermediadora operacional, podendo efetuar o pagamento do produto, acompanhar o pedido, orientar o cliente, receber informações da loja e auxiliar na resolução de problemas.</p>
+    <p>Quando o pagamento for realizado pelo Lancei o Certo junto à loja terceira, eventual estorno, cancelamento ou devolução de valores poderá ser recebido inicialmente pela plataforma, por ter sido ela a responsável pelo pagamento perante a loja ou parceiro.</p>
+    <p>Nessa situação, se a devolução for legítima, confirmada e sem indício de fraude, o Lancei o Certo analisará o repasse do valor devido ao cliente conforme esta política.</p>
+  </div>
+  <div class="legal-card">
+    <h2>3. Base legal e princípios aplicáveis</h2>
+    <p>Esta política observa, entre outras normas:</p>
+    <ul>
+      <li>a Constituição Federal, que prevê a defesa do consumidor e assegura acesso à justiça, contraditório, ampla defesa, proteção à honra, imagem e patrimônio;</li>
+      <li>o Código de Defesa do Consumidor, que garante informação clara, atendimento adequado, proteção contra práticas abusivas, reparação de danos, direito de arrependimento quando aplicável e solução para vícios ou defeitos de produto ou serviço;</li>
+      <li>o Decreto nº 7.962/2013, que regulamenta regras de comércio eletrônico, atendimento facilitado e direito de arrependimento;</li>
+      <li>o Código Civil, especialmente os princípios de boa-fé, função social dos contratos, vedação ao abuso de direito e proibição de enriquecimento sem causa;</li>
+      <li>a Lei Geral de Proteção de Dados, para tratamento de dados pessoais, comprovantes e documentos necessários à análise do chamado;</li>
+      <li>o Código Penal, quando houver indícios de fraude, falsidade documental, falsa identidade, uso de documento falso ou tentativa de obtenção de vantagem indevida.</li>
+    </ul>
+    <p>A plataforma buscará aplicar esta política de forma equilibrada, respeitando os direitos do cliente e, ao mesmo tempo, protegendo a operação contra fraudes e abusos.</p>
+  </div>
+  <div class="legal-card">
+    <h2>4. Direitos do cliente</h2>
+    <p>O cliente tem direito a:</p>
+    <ol>
+      <li>receber informações claras sobre o leilão, produto, compra assistida, prazos e regras;</li>
+      <li>abrir chamado quando houver problema com produto, entrega, devolução, cancelamento, arrependimento ou estorno;</li>
+      <li>ter seu caso analisado de forma organizada e documentada;</li>
+      <li>receber orientação sobre quais comprovantes deve apresentar;</li>
+      <li>acompanhar o andamento do chamado;</li>
+      <li>apresentar esclarecimentos adicionais quando solicitado;</li>
+      <li>receber solução adequada quando a devolução ou estorno for legítimo e confirmado;</li>
+      <li>receber reembolso quando todos os requisitos desta política forem cumpridos;</li>
+      <li>ter seus dados e documentos tratados conforme a finalidade do suporte, segurança, prevenção à fraude, cumprimento de contrato e exercício regular de direitos.</li>
+    </ol>
+    <p>O Lancei o Certo se compromete a tratar chamados legítimos com seriedade, respeito e boa-fé.</p>
+  </div>
+  <div class="legal-card">
+    <h2>5. Deveres do cliente</h2>
+    <p>O cliente também possui deveres dentro da plataforma.</p>
+    <p>Ao abrir chamado de problema com produto, devolução ou reembolso, o cliente deverá:</p>
+    <ol>
+      <li>agir de boa-fé;</li>
+      <li>relatar os fatos de forma verdadeira;</li>
+      <li>informar corretamente o número do pedido;</li>
+      <li>apresentar documentos e comprovantes legítimos;</li>
+      <li>preservar o produto, embalagem, acessórios, nota fiscal, manuais, etiquetas e demais itens recebidos;</li>
+      <li>respeitar os prazos da loja, parceiro, transportadora e plataforma;</li>
+      <li>devolver o produto somente pelos meios indicados pela loja, parceiro ou suporte;</li>
+      <li>não alterar, manipular ou falsificar comprovantes;</li>
+      <li>não omitir informação relevante;</li>
+      <li>não solicitar reembolso sem ter realizado a devolução;</li>
+      <li>não tentar receber valor duplicado da loja e do Lancei o Certo;</li>
+      <li>informar imediatamente se receber reembolso direto da loja, parceiro, marketplace ou meio de pagamento.</li>
+    </ol>
+    <p>O descumprimento desses deveres poderá suspender a análise, impedir o reembolso ou gerar medidas administrativas e legais.</p>
+  </div>
+  <div class="legal-card">
+    <h2>6. Documentos e comprovantes necessários</h2>
+    <p>Para análise do chamado, o cliente deverá anexar, sempre que aplicável:</p>
+    <ul>
+      <li>número do pedido;</li>
+      <li>nome da loja, parceiro ou marketplace;</li>
+      <li>link do produto;</li>
+      <li>nota fiscal ou comprovante de compra, quando disponível;</li>
+      <li>motivo da devolução ou reclamação;</li>
+      <li>fotos ou vídeos do produto recebido;</li>
+      <li>fotos da embalagem;</li>
+      <li>fotos de avarias, defeitos ou divergências;</li>
+      <li>protocolo de atendimento da loja;</li>
+      <li>comprovante de solicitação de devolução;</li>
+      <li>autorização de postagem ou etiqueta reversa;</li>
+      <li>código de rastreio da devolução;</li>
+      <li>comprovante de postagem, coleta ou entrega;</li>
+      <li>confirmação de recebimento pela loja ou parceiro;</li>
+      <li>comprovante de aprovação do estorno;</li>
+      <li>comprovante de valor estornado;</li>
+      <li>mensagens trocadas com a loja, parceiro, marketplace ou transportadora;</li>
+      <li>qualquer outro documento solicitado pelo suporte.</li>
+    </ul>
+    <p>A ausência de documentos essenciais poderá impedir ou atrasar a análise.</p>
+  </div>
+  <div class="legal-card">
+    <h2>7. Declaração de veracidade</h2>
+    <p>Ao abrir chamado de devolução, estorno ou reembolso, o cliente declara que:</p>
+    <ol>
+      <li>as informações enviadas são verdadeiras;</li>
+      <li>os documentos anexados são autênticos;</li>
+      <li>os comprovantes não foram adulterados;</li>
+      <li>o produto foi ou será devolvido conforme as regras aplicáveis;</li>
+      <li>não está tentando obter vantagem indevida;</li>
+      <li>está ciente de que a plataforma poderá verificar as informações com a loja, parceiro, marketplace, transportadora ou meio de pagamento;</li>
+      <li>está ciente de que fraude, má-fé ou tentativa de golpe poderá resultar em bloqueio da conta, cancelamento do reembolso, banimento permanente e medidas legais cabíveis.</li>
+    </ol>
+    <p>Essa declaração não tem o objetivo de intimidar clientes honestos, mas sim proteger a plataforma, parceiros e usuários contra abusos.</p>
+  </div>
+  <div class="legal-card">
+    <h2>8. Direito de arrependimento</h2>
+    <p>Quando aplicável, em compras realizadas fora do estabelecimento comercial, especialmente pela internet, o cliente poderá exercer o direito de arrependimento dentro do prazo legal.</p>
+    <p>O exercício desse direito dependerá da comunicação dentro do prazo, da observância das regras da loja ou parceiro, da preservação do produto e da devolução correta dos itens recebidos.</p>
+    <p>O Lancei o Certo poderá auxiliar no fluxo de arrependimento quando a compra tiver sido realizada por meio da compra assistida, mas o reembolso ao cliente dependerá da confirmação da devolução, aprovação da loja ou parceiro e recebimento efetivo do estorno pela plataforma, quando o pagamento tiver sido feito pelo Lancei o Certo.</p>
+  </div>
+  <div class="legal-card">
+    <h2>9. Problema, defeito, vício ou divergência no produto</h2>
+    <p>Quando o produto apresentar defeito, vício, divergência, avaria, item faltante ou qualquer problema de entrega, o cliente deverá abrir chamado e apresentar os comprovantes disponíveis.</p>
+    <p>A análise poderá envolver:</p>
+    <ul>
+      <li>verificação das fotos e vídeos;</li>
+      <li>contato com a loja;</li>
+      <li>contato com transportadora;</li>
+      <li>análise da nota fiscal;</li>
+      <li>verificação de prazo;</li>
+      <li>confirmação de recebimento e devolução;</li>
+      <li>avaliação sobre mau uso, avaria de transporte ou defeito de fabricação;</li>
+      <li>confirmação de estorno, troca ou reparo.</li>
+    </ul>
+    <p>Quando a responsabilidade for da loja, fabricante, marketplace, parceiro ou transportadora, o Lancei o Certo poderá acompanhar o caso e auxiliar o cliente, sem prejuízo das regras legais aplicáveis.</p>
+  </div>
+  <div class="legal-card">
+    <h2>10. Quando haverá reembolso ao cliente</h2>
+    <p>O Lancei o Certo poderá reembolsar o cliente quando todas as condições abaixo forem cumpridas:</p>
+    <ol>
+      <li>o cliente abrir chamado dentro do prazo aplicável;</li>
+      <li>o cliente apresentar documentos e comprovantes suficientes;</li>
+      <li>o produto tiver sido devolvido corretamente, quando a devolução for necessária;</li>
+      <li>a loja, parceiro, marketplace ou transportadora confirmar o recebimento do produto;</li>
+      <li>a loja ou parceiro aprovar a devolução, cancelamento, estorno ou reembolso;</li>
+      <li>o valor for efetivamente recebido pelo Lancei o Certo ou confirmado de forma segura;</li>
+      <li>não houver indício de fraude, má-fé, adulteração de comprovantes, abuso de direito ou dano causado pelo próprio cliente;</li>
+      <li>o cliente não tiver recebido o mesmo valor por outro meio sem informar à plataforma.</li>
+    </ol>
+    <p>O reembolso não será automático. Ele dependerá de análise documental e confirmação do fluxo de devolução.</p>
+  </div>
+  <div class="legal-card">
+    <h2>11. Valor do reembolso</h2>
+    <p>Quando o reembolso integral da compra assistida for confirmado e o valor integral for recebido pelo Lancei o Certo, o cliente poderá receber a recomposição integral do valor econômico do pedido, incluindo:</p>
+    <ul>
+      <li>o valor pago pelo cliente no arremate;</li>
+      <li>o benefício operacional conquistado no leilão, quando este tiver sido efetivamente recuperado pela plataforma;</li>
+      <li>eventuais valores pagos pelo cliente no fluxo do pedido, conforme análise do caso.</li>
+    </ul>
+    <p>Exemplo: se o produto custava R$ 100,00, o cliente pagou R$ 55,00 no arremate e o Lancei o Certo completou R$ 45,00 na compra assistida, caso a loja devolva integralmente R$ 100,00 ao Lancei o Certo e não haja irregularidade, o cliente poderá receber R$ 100,00.</p>
+    <p>Se o estorno recebido pelo Lancei o Certo for parcial, o valor a devolver ao cliente poderá ser proporcional ao valor efetivamente recuperado, após análise do suporte.</p>
+    <p>Se houver desconto legítimo aplicado pela loja, parceiro, transportadora ou meio de pagamento, o caso será analisado individualmente.</p>
+  </div>
+  <div class="legal-card">
+    <h2>12. Situações em que o reembolso pode ser suspenso, negado ou reduzido</h2>
+    <p>O reembolso poderá ser suspenso, negado ou reduzido quando houver:</p>
+    <ul>
+      <li>ausência de comprovante de devolução;</li>
+      <li>produto não devolvido;</li>
+      <li>produto devolvido fora do prazo;</li>
+      <li>produto diferente daquele recebido;</li>
+      <li>produto devolvido incompleto;</li>
+      <li>produto danificado por mau uso;</li>
+      <li>falta de acessórios, embalagem, nota, etiqueta, manual ou itens obrigatórios;</li>
+      <li>divergência entre o relato do cliente e os dados da loja;</li>
+      <li>comprovantes adulterados;</li>
+      <li>informações incompletas ou contraditórias;</li>
+      <li>tentativa de receber reembolso sem devolução real;</li>
+      <li>tentativa de receber reembolso duplicado;</li>
+      <li>uso indevido da política de suporte;</li>
+      <li>indício de simulação de devolução;</li>
+      <li>indício de fraude;</li>
+      <li>confirmação de que o problema foi causado pelo próprio cliente.</li>
+    </ul>
+    <p>A suspensão não significa acusação automática de fraude. Significa que o caso precisará de análise adicional.</p>
+  </div>
+  <div class="legal-card">
+    <h2>13. Reembolso recebido diretamente pelo cliente</h2>
+    <p>Se a loja, parceiro, marketplace, transportadora ou meio de pagamento devolver qualquer valor diretamente ao cliente, o cliente deverá informar imediatamente ao Lancei o Certo.</p>
+    <p>Caso o cliente receba valor diretamente e também solicite reembolso à plataforma sem informar o recebimento anterior, a plataforma poderá suspender o chamado e analisar possível tentativa de recebimento indevido.</p>
+    <p>Nenhum cliente poderá receber em duplicidade por um mesmo fato, pedido ou devolução.</p>
+  </div>
+  <div class="legal-card">
+    <h2>14. Estorno recebido pelo Lancei o Certo</h2>
+    <p>Quando o Lancei o Certo tiver feito o pagamento da compra assistida e o estorno for devolvido à plataforma, a plataforma reconhecerá internamente o valor recebido e analisará o repasse ao cliente.</p>
+    <p>O repasse ao cliente dependerá de:</p>
+    <ol>
+      <li>confirmação da origem do estorno;</li>
+      <li>identificação do pedido;</li>
+      <li>confirmação de que o cliente cumpriu os prazos e obrigações;</li>
+      <li>inexistência de fraude ou má-fé;</li>
+      <li>conferência de valores;</li>
+      <li>decisão administrativa registrada no chamado.</li>
+    </ol>
+    <p>Quando o cliente tiver agido corretamente e o estorno integral tiver retornado à plataforma, o Lancei o Certo buscará uma solução justa, incluindo a recomposição integral do valor econômico da compra assistida, conforme esta política.</p>
+  </div>
+  <div class="legal-card">
+    <h2>15. Fraude, má-fé e uso indevido da plataforma</h2>
+    <p>O Lancei o Certo possui política de tolerância zero contra fraude.</p>
+    <p>Poderão ser considerados indícios de fraude ou má-fé:</p>
+    <ul>
+      <li>declarar devolução que não ocorreu;</li>
+      <li>enviar comprovante falso ou adulterado;</li>
+      <li>alterar imagem, vídeo, recibo, rastreio ou conversa;</li>
+      <li>devolver produto diferente;</li>
+      <li>devolver produto danificado de propósito;</li>
+      <li>omitir que recebeu reembolso direto da loja;</li>
+      <li>tentar receber duas vezes pelo mesmo pedido;</li>
+      <li>usar dados de terceiros sem autorização;</li>
+      <li>criar conta falsa;</li>
+      <li>usar identidade falsa;</li>
+      <li>simular problema inexistente;</li>
+      <li>agir em combinação com terceiros para obter vantagem indevida.</li>
+    </ul>
+    <p>Quando houver suspeita, a plataforma poderá solicitar documentos adicionais, pausar o reembolso, bloquear temporariamente movimentações, registrar auditoria interna e encaminhar o caso para análise administrativa.</p>
+  </div>
+  <div class="legal-card">
+    <h2>16. Consequências em caso de fraude confirmada</h2>
+    <p>Se, após análise, for confirmada fraude, má-fé ou tentativa de obter vantagem indevida, o Lancei o Certo poderá aplicar uma ou mais das seguintes medidas:</p>
+    <ul>
+      <li>cancelamento do reembolso;</li>
+      <li>suspensão temporária da conta;</li>
+      <li>bloqueio de Créditos LC;</li>
+      <li>cancelamento de benefícios promocionais;</li>
+      <li>perda de bônus de indicação;</li>
+      <li>restrição de participação em novos leilões;</li>
+      <li>banimento permanente da plataforma;</li>
+      <li>registro interno de segurança;</li>
+      <li>comunicação a parceiros envolvidos, quando necessário;</li>
+      <li>adoção de medidas cíveis, administrativas ou judiciais cabíveis.</li>
+    </ul>
+    <p>A aplicação dessas medidas levará em conta a gravidade do caso, os documentos apresentados, o histórico da conta e o risco para a plataforma, clientes e parceiros.</p>
+  </div>
+  <div class="legal-card">
+    <h2>17. Possíveis consequências legais</h2>
+    <p>A tentativa de obter vantagem indevida por meio de informação falsa, comprovante adulterado, documento falso, falsa identidade ou simulação de devolução poderá, conforme o caso concreto, ser analisada à luz da legislação civil e penal brasileira.</p>
+    <p>Sem prejuízo de outras medidas, condutas dessa natureza podem envolver discussão sobre:</p>
+    <ul>
+      <li>enriquecimento sem causa;</li>
+      <li>abuso de direito;</li>
+      <li>violação da boa-fé contratual;</li>
+      <li>falsidade ideológica;</li>
+      <li>uso de documento falso;</li>
+      <li>falsa identidade;</li>
+      <li>estelionato ou tentativa de obtenção de vantagem indevida.</li>
+    </ul>
+    <p>O Lancei o Certo não fará acusação criminal automática. Qualquer medida legal dependerá de análise do caso concreto, preservação de provas e orientação jurídica adequada.</p>
+  </div>
+  <div class="legal-card">
+    <h2>18. Direito de resposta e revisão interna</h2>
+    <p>Antes de aplicar medidas graves, como banimento permanente, bloqueio definitivo ou cancelamento por fraude confirmada, o Lancei o Certo poderá solicitar esclarecimentos adicionais ao cliente.</p>
+    <p>O cliente poderá apresentar documentos, explicações e novas informações dentro do prazo informado pelo suporte.</p>
+    <p>A plataforma poderá revisar a decisão internamente quando houver fato novo, erro de análise ou documento relevante apresentado pelo cliente.</p>
+    <p>Essa regra busca garantir tratamento justo aos clientes honestos e evitar decisões precipitadas.</p>
+  </div>
+  <div class="legal-card">
+    <h2>19. Prazos de análise</h2>
+    <p>O prazo de análise poderá variar conforme:</p>
+    <ul>
+      <li>tempo de resposta da loja;</li>
+      <li>tempo de resposta do parceiro;</li>
+      <li>prazo da transportadora;</li>
+      <li>prazo do marketplace;</li>
+      <li>prazo do meio de pagamento;</li>
+      <li>complexidade do caso;</li>
+      <li>qualidade dos comprovantes enviados;</li>
+      <li>necessidade de análise antifraude.</li>
+    </ul>
+    <p>O Lancei o Certo poderá solicitar informações adicionais antes de decidir sobre reembolso, troca, cancelamento ou encerramento do chamado.</p>
+    <p>Enquanto a documentação estiver incompleta, o prazo de análise poderá ficar suspenso.</p>
+  </div>
+  <div class="legal-card">
+    <h2>20. Dados pessoais, documentos e comprovantes</h2>
+    <p>Ao abrir chamado, o cliente autoriza o tratamento dos dados e documentos necessários para análise do caso, execução do contrato, prevenção à fraude, cumprimento de obrigação legal, proteção da plataforma e exercício regular de direitos.</p>
+    <p>A plataforma poderá armazenar informações como protocolos, imagens, comprovantes, mensagens, rastreios, registros de pagamento, logs internos, IP, dispositivo e histórico do pedido, observando sua Política de Privacidade.</p>
+    <p>Os dados serão usados apenas para finalidades legítimas relacionadas ao suporte, segurança, auditoria, prevenção a fraude e defesa de direitos.</p>
+  </div>
+  <div class="legal-card">
+    <h2>21. Loja terceira, parceiro, marketplace ou transportadora</h2>
+    <p>Quando o produto for fornecido por loja terceira, parceiro, marketplace ou transportadora, algumas etapas dependerão das regras e prazos desses terceiros.</p>
+    <p>Isso inclui:</p>
+    <ul>
+      <li>aprovação de devolução;</li>
+      <li>autorização de postagem;</li>
+      <li>análise do produto devolvido;</li>
+      <li>troca;</li>
+      <li>reparo;</li>
+      <li>cancelamento;</li>
+      <li>estorno;</li>
+      <li>emissão de comprovantes;</li>
+      <li>prazo para devolução de valores.</li>
+    </ul>
+    <p>O Lancei o Certo acompanhará o caso dentro do fluxo de compra assistida, mas a conclusão poderá depender de confirmação externa.</p>
+  </div>
+  <div class="legal-card">
+    <h2>22. Produto danificado, incompleto ou divergente</h2>
+    <p>Se a loja, parceiro ou transportadora informar que o produto foi devolvido danificado, incompleto, sem acessórios, diferente do enviado ou com indício de mau uso, o reembolso poderá ser suspenso até apuração.</p>
+    <p>O cliente poderá apresentar defesa, fotos, vídeos, protocolo de envio e demais documentos para demonstrar sua boa-fé.</p>
+    <p>A decisão final dependerá da análise dos documentos, registros da loja, transportadora e suporte.</p>
+  </div>
+  <div class="legal-card">
+    <h2>23. Comunicação com o suporte</h2>
+    <p>Toda comunicação sobre devolução, estorno ou reembolso deverá ocorrer preferencialmente pelo canal oficial de suporte da plataforma.</p>
+    <p>Mensagens enviadas por canais externos poderão ser usadas apenas como apoio, mas o chamado oficial será o principal registro do caso.</p>
+    <p>O cliente deve acompanhar o chamado e responder às solicitações dentro do prazo informado.</p>
+  </div>
+  <div class="legal-card">
+    <h2>24. Compromisso com clientes honestos</h2>
+    <p>O Lancei o Certo reconhece que problemas com produtos podem acontecer e se compromete a tratar clientes honestos com respeito, transparência e seriedade.</p>
+    <p>Quando o cliente cumprir os prazos, agir de boa-fé, apresentar os comprovantes necessários e a devolução for confirmada, a plataforma buscará uma solução justa.</p>
+    <p>Esta política existe para proteger tanto o cliente quanto a plataforma, impedindo que práticas fraudulentas prejudiquem usuários corretos, parceiros comerciais e a sustentabilidade do serviço.</p>
+  </div>
+  <div class="legal-card">
+    <h2>25. Declaração obrigatória antes do envio do chamado</h2>
+    <p>Antes de enviar um chamado de problema com produto, devolução, estorno ou reembolso, o cliente deverá aceitar a seguinte declaração:</p>
+    <blockquote>“Declaro que as informações e comprovantes enviados são verdadeiros, completos e correspondem ao pedido informado. Declaro estar ciente de que o Lancei o Certo poderá verificar os dados com a loja, parceiro, marketplace, transportadora ou meio de pagamento. Declaro também estar ciente de que o envio de informações falsas, documentos adulterados, simulação de devolução, tentativa de reembolso indevido ou qualquer prática de fraude poderá resultar em suspensão da conta, bloqueio de Créditos LC, cancelamento do reembolso, banimento permanente da plataforma e adoção das medidas legais cabíveis.”</blockquote>
+  </div>
+</section>
+
+<style>
+.legal-page{max-width:980px;margin:32px auto 48px}
+.legal-hero{padding:28px;border:1px solid rgba(96,165,250,.22);border-radius:28px;background:linear-gradient(135deg,rgba(37,99,235,.18),rgba(15,23,42,.96));box-shadow:0 20px 60px rgba(0,0,0,.24)}
+.legal-kicker{display:inline-flex;margin-bottom:8px;color:#93c5fd;font-weight:950;text-transform:uppercase;letter-spacing:.08em;font-size:12px}
+.legal-hero h1{font-size:36px;line-height:1.08;margin:0 0 10px}
+.legal-hero p,.legal-card p{color:#cbd5e1;line-height:1.65}
+.legal-hero small{color:#bfdbfe;font-weight:900}
+.legal-card{margin-top:16px;padding:22px;border:1px solid rgba(148,163,184,.17);border-radius:22px;background:rgba(15,23,42,.88)}
+.legal-card h2{margin-top:0}
+.legal-card ul,.legal-card ol{color:#dbeafe;line-height:1.65;padding-left:22px}
+.legal-card li{margin:6px 0}
+.legal-card blockquote{margin:14px 0 0;padding:16px 18px;border-left:4px solid #60a5fa;border-radius:14px;background:rgba(59,130,246,.10);color:#e0f2fe;line-height:1.65;font-weight:800}
+@media(max-width:720px){.legal-page{margin-top:16px}.legal-hero h1{font-size:27px}.legal-card,.legal-hero{padding:18px;border-radius:20px}}
+</style>
+{% endblock %}
