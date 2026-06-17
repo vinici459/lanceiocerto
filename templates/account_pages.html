@@ -483,7 +483,6 @@
         <div><strong>3</strong><span>O suporte confere loja, devolução e estorno.</span></div>
         <div><strong>4</strong><span>Se tudo for confirmado, o reembolso é analisado.</span></div>
       </div>
-      <p class="support-policy-note"><a href="/consumidor-rules" target="_blank" rel="noopener">Política do Consumidor e Reembolso</a>.</p>
     </div>
 
     <div class="panel-card">
@@ -575,14 +574,12 @@
           <input type="file" name="proof_file" accept="image/*,.pdf">
         </label>
 
-        <div class="consumer-policy-confirm" data-consumer-policy-confirm hidden>
-          <label class="terms-check consumer-declaration">
-            <input type="checkbox" name="consumer_declaration_accepted" value="1" data-consumer-required>
-            <span>
-              Li e estou ciente da <a href="/consumidor-rules" target="_blank" rel="noopener">Política do Consumidor, Devolução e Reembolso da Compra Assistida</a>. Declaro que as informações e comprovantes enviados são verdadeiros e entendo que o Lancei o Certo poderá verificar dados com loja, parceiro, transportadora ou meio de pagamento. Estou ciente de que fraude, documento adulterado, simulação de devolução ou pedido indevido de reembolso pode gerar bloqueio da conta, banimento permanente e medidas legais cabíveis.
-            </span>
-          </label>
-        </div>
+        <label class="terms-check consumer-declaration support-submit-policy">
+          <input type="checkbox" name="consumer_declaration_accepted" value="1" required>
+          <span>
+            Li e estou ciente da <a href="/consumidor-rules" target="_blank" rel="noopener">Política do Consumidor e Reembolso</a> e das regras de suporte. Declaro que as informações e comprovantes enviados neste chamado são verdadeiros. Quando o chamado envolver produto, devolução, estorno ou reembolso, estou ciente de que a análise depende de comprovantes, confirmação da loja/parceiro e validação do suporte, e que fraude, documento adulterado, simulação de devolução ou pedido indevido pode gerar bloqueio, banimento permanente e medidas legais cabíveis.
+          </span>
+        </label>
 
         <button class="btn" type="submit">Abrir chamado</button>
       </form>
@@ -642,7 +639,7 @@
 
 
 <style>
-.support-consumer-intro{border-color:rgba(96,165,250,.24);background:linear-gradient(135deg,rgba(37,99,235,.13),rgba(15,23,42,.92))}.support-consumer-intro p{color:#cbd5e1;line-height:1.55}.support-policy-note{margin-top:12px}.support-policy-note a{color:#93c5fd;font-weight:900}.support-process-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}.support-process-grid div{display:flex;gap:9px;align-items:flex-start;padding:11px;border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.045);border-radius:15px}.support-process-grid strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(59,130,246,.18);color:#bfdbfe;flex:0 0 auto}.support-process-grid span{color:#dbeafe;font-size:13px;line-height:1.35}.consumer-support-flow{display:grid;gap:12px;padding:14px;border-radius:18px;border:1px solid rgba(251,191,36,.30);background:rgba(251,191,36,.08)}.consumer-support-flow[hidden]{display:none!important}.consumer-flow-head{display:grid;gap:4px}.consumer-flow-head strong{color:#fde68a}.consumer-flow-head span{color:#dbeafe;font-size:13px}.support-process-grid.compact{grid-template-columns:repeat(2,minmax(0,1fr));margin:2px 0}.consumer-checklist{padding:12px;border-radius:15px;border:1px solid rgba(148,163,184,.16);background:rgba(15,23,42,.58)}.consumer-checklist strong{display:block;margin-bottom:6px}.consumer-checklist ul{margin:0;padding-left:18px;color:#cbd5e1}.consumer-policy-confirm{padding:13px 14px;border-radius:16px;border:1px solid rgba(251,191,36,.36);background:linear-gradient(135deg,rgba(251,191,36,.12),rgba(15,23,42,.72));box-shadow:0 12px 30px rgba(0,0,0,.18)}.consumer-policy-confirm[hidden]{display:none!important}.consumer-declaration{align-items:flex-start}.consumer-declaration input{margin-top:4px;flex:0 0 auto}.consumer-declaration span{line-height:1.45}.consumer-declaration a{color:#93c5fd;font-weight:950}.consumer-ticket-summary{margin:12px 0;padding:13px;border:1px solid rgba(251,191,36,.26);border-radius:16px;background:rgba(251,191,36,.07)}.consumer-ticket-summary>strong{display:block;margin-bottom:10px;color:#fde68a}.consumer-ticket-summary p{margin:8px 0 0;color:#cbd5e1;font-size:13px}@media(max-width:760px){.support-process-grid,.support-process-grid.compact{grid-template-columns:1fr}.consumer-support-flow{padding:12px}}
+.support-consumer-intro{border-color:rgba(96,165,250,.24);background:linear-gradient(135deg,rgba(37,99,235,.13),rgba(15,23,42,.92))}.support-consumer-intro p{color:#cbd5e1;line-height:1.55}.support-process-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}.support-process-grid div{display:flex;gap:9px;align-items:flex-start;padding:11px;border:1px solid rgba(148,163,184,.16);background:rgba(255,255,255,.045);border-radius:15px}.support-process-grid strong{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:rgba(59,130,246,.18);color:#bfdbfe;flex:0 0 auto}.support-process-grid span{color:#dbeafe;font-size:13px;line-height:1.35}.consumer-support-flow{display:grid;gap:12px;padding:14px;border-radius:18px;border:1px solid rgba(251,191,36,.30);background:rgba(251,191,36,.08)}.consumer-support-flow[hidden]{display:none!important}.consumer-flow-head{display:grid;gap:4px}.consumer-flow-head strong{color:#fde68a}.consumer-flow-head span{color:#dbeafe;font-size:13px}.support-process-grid.compact{grid-template-columns:repeat(2,minmax(0,1fr));margin:2px 0}.consumer-checklist{padding:12px;border-radius:15px;border:1px solid rgba(148,163,184,.16);background:rgba(15,23,42,.58)}.consumer-checklist strong{display:block;margin-bottom:6px}.consumer-checklist ul{margin:0;padding-left:18px;color:#cbd5e1}.consumer-declaration{align-items:flex-start}.consumer-declaration span{line-height:1.45}.support-submit-policy{padding:13px;border-radius:16px;border:1px solid rgba(96,165,250,.24);background:rgba(59,130,246,.08)}.support-submit-policy a{color:#93c5fd;font-weight:950}.consumer-ticket-summary{margin:12px 0;padding:13px;border:1px solid rgba(251,191,36,.26);border-radius:16px;background:rgba(251,191,36,.07)}.consumer-ticket-summary>strong{display:block;margin-bottom:10px;color:#fde68a}.consumer-ticket-summary p{margin:8px 0 0;color:#cbd5e1;font-size:13px}@media(max-width:760px){.support-process-grid,.support-process-grid.compact{grid-template-columns:1fr}.consumer-support-flow{padding:12px}}
 </style>
 
 <script>
@@ -651,14 +648,12 @@
   if(!form) return;
   const select = form.querySelector('[data-support-category-select]');
   const panel = form.querySelector('[data-consumer-fields]');
-  const policyConfirm = form.querySelector('[data-consumer-policy-confirm]');
   const orderSelect = form.querySelector('[data-consumer-order-select]');
   const consumerCategory = form.dataset.consumerCategory || 'produto_devolucao_reembolso';
   const requiredFields = Array.from(form.querySelectorAll('[data-consumer-required]'));
   function updateConsumerFields(){
     const active = select && select.value === consumerCategory;
     if(panel){ panel.hidden = !active; }
-    if(policyConfirm){ policyConfirm.hidden = !active; }
     if(orderSelect){ orderSelect.required = !!active; }
     requiredFields.forEach((el) => { el.required = !!active; });
   }

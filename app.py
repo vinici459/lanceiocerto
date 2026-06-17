@@ -6963,15 +6963,16 @@ async def my_support_create(
         refund_received = parse_money(consumer_refund_amount_received)
         declaration_ok = str(consumer_declaration_accepted or "").strip().lower() in {"1", "true", "on", "yes", "sim"}
 
+        if not declaration_ok:
+            ctx = support_context_for_user(db, user, error="Para abrir um chamado, é obrigatório confirmar ciência da Política do Consumidor/Reembolso e declarar que as informações enviadas são verdadeiras.")
+            return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
+
         if is_consumer_case:
             if not valid_order_id:
                 ctx = support_context_for_user(db, user, error="Para problema com produto, devolução ou reembolso, selecione o pedido relacionado.")
                 return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
             if not consumer_issue_type:
                 ctx = support_context_for_user(db, user, error="Informe o tipo de problema para abrir este chamado.")
-                return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
-            if not declaration_ok:
-                ctx = support_context_for_user(db, user, error="Para este tipo de chamado, é obrigatório aceitar a declaração de veracidade e ciência da política de devolução/reembolso.")
                 return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
 
         priority = support_category_priority(category)
@@ -6989,10 +6990,10 @@ async def my_support_create(
             consumer_return_tracking_code=consumer_return_tracking_code if is_consumer_case else "",
             consumer_refund_amount_claimed=refund_claimed if is_consumer_case else 0.0,
             consumer_refund_amount_received=refund_received if is_consumer_case else 0.0,
-            consumer_policy_version=CONSUMER_RULES_VERSION if is_consumer_case else "",
-            consumer_declaration_accepted=bool(declaration_ok) if is_consumer_case else False,
-            consumer_declaration_ip=client_ip(request) if is_consumer_case else "",
-            consumer_declaration_user_agent=(request.headers.get("user-agent") or "")[:600] if is_consumer_case else "",
+            consumer_policy_version=CONSUMER_RULES_VERSION,
+            consumer_declaration_accepted=bool(declaration_ok),
+            consumer_declaration_ip=client_ip(request),
+            consumer_declaration_user_agent=(request.headers.get("user-agent") or "")[:600],
             status="open",
             last_customer_message_at=datetime.utcnow(),
             sla_due_at=support_sla_due(category, priority),
