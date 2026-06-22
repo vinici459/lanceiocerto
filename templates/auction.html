@@ -201,17 +201,20 @@
         <h2>Ações do admin</h2>
         <div class="inline-form">
           {% if entity.status in ['scheduled', 'relisted'] %}
-          <form method="post" action="/admin/item/{{ entity.id }}/start-now"><button class="btn small">Começar agora</button></form>
+          <form method="post" action="/admin/item/{{ entity.id }}/start-now">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small">Começar agora</button></form>
           {% endif %}
 
           {% if entity.status == 'live' %}
           <form method="post" action="/admin/item/{{ entity.id }}/toggle-chat">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
             <button class="btn small ghost">{% if entity.chat_paused %}Iniciar chat{% else %}Pausar chat{% endif %}</button>
           </form>
           {% endif %}
 
           {% if entity.status != 'live' %}
-          <form method="post" action="/admin/item/{{ entity.id }}/delete"><button class="btn small danger">Excluir disputa</button></form>
+          <form method="post" action="/admin/item/{{ entity.id }}/delete">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small danger">Excluir disputa</button></form>
           {% endif %}
         </div>
 

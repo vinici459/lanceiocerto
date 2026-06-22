@@ -8,6 +8,8 @@ import re
 import secrets
 import shutil
 import threading
+import socket
+import uuid
 import time
 import base64
 import hashlib
@@ -25,13 +27,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from types import SimpleNamespace
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import (
@@ -52,6 +54,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker, selectinload
 from sqlalchemy.exc import IntegrityError
 
+try:
+    from redis import Redis as RedisClient
+    from redis.asyncio import Redis as AsyncRedisClient
+except Exception:
+    RedisClient = None  # type: ignore
+    AsyncRedisClient = None  # type: ignore
+
 
 APP_NAME = "Lanceio Certo"
 APP_ENV = (os.getenv("APP_ENV") or os.getenv("ENV") or "development").strip().lower()
@@ -65,8 +74,33 @@ if IS_PRODUCTION and IS_SQLITE:
     )
 
 BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE_DIR / "static" / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+# Arquivos de identificação e anexos de suporte nunca podem ficar em /static.
+# O diretório legado só existe para migrar arquivos antigos no primeiro deploy.
+LEGACY_PUBLIC_UPLOAD_DIR = BASE_DIR / "static" / "uploads"
+PRIVATE_STORAGE_BACKEND = (os.getenv("PRIVATE_STORAGE_BACKEND") or "local").strip().lower()
+PRIVATE_UPLOAD_DIR = Path(os.getenv("PRIVATE_UPLOAD_DIR") or (BASE_DIR / "private_uploads")).resolve()
+PRIVATE_S3_BUCKET = (os.getenv("PRIVATE_S3_BUCKET") or "").strip()
+PRIVATE_S3_REGION = (os.getenv("PRIVATE_S3_REGION") or "").strip()
+PRIVATE_S3_ENDPOINT_URL = (os.getenv("PRIVATE_S3_ENDPOINT_URL") or "").strip() or None
+PRIVATE_S3_PREFIX = (os.getenv("PRIVATE_S3_PREFIX") or "lanceiocerto/private").strip().strip("/")
+PRIVATE_S3_KMS_KEY_ID = (os.getenv("PRIVATE_S3_KMS_KEY_ID") or "").strip()
+ALLOW_LOCAL_PRIVATE_STORAGE_IN_PRODUCTION = os.getenv("ALLOW_LOCAL_PRIVATE_STORAGE_IN_PRODUCTION", "0").strip().lower() in {"1", "true", "yes", "on"}
+PRIVATE_REF_PREFIX = "private:"
+PRIVATE_FILE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{24,160}\.(?:jpg|jpeg|png|webp|pdf)$", re.I)
+PRIVATE_IMAGE_MAX_WIDTH = int(os.getenv("PRIVATE_IMAGE_MAX_WIDTH", "3200"))
+PRIVATE_IMAGE_WEBP_QUALITY = int(os.getenv("PRIVATE_IMAGE_WEBP_QUALITY", "90"))
+
+if PRIVATE_STORAGE_BACKEND not in {"local", "s3"}:
+    raise RuntimeError("PRIVATE_STORAGE_BACKEND deve ser 'local' ou 's3'.")
+if PRIVATE_STORAGE_BACKEND == "local":
+    if IS_PRODUCTION and not ALLOW_LOCAL_PRIVATE_STORAGE_IN_PRODUCTION:
+        raise RuntimeError(
+            "Produção exige armazenamento privado compartilhado. Configure PRIVATE_STORAGE_BACKEND=s3 "
+            "ou, apenas para beta de uma única réplica, defina ALLOW_LOCAL_PRIVATE_STORAGE_IN_PRODUCTION=1."
+        )
+    PRIVATE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+if PRIVATE_STORAGE_BACKEND == "s3" and not PRIVATE_S3_BUCKET:
+    raise RuntimeError("PRIVATE_S3_BUCKET é obrigatório quando PRIVATE_STORAGE_BACKEND=s3.")
 
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(8 * 1024 * 1024)))
 PRODUCT_IMAGE_MAX_WIDTH = int(os.getenv("PRODUCT_IMAGE_MAX_WIDTH", "1200"))
@@ -75,10 +109,9 @@ ALLOWED_UPLOAD_MIME_TYPES = {
     "image/jpeg",
     "image/png",
     "image/webp",
-    "image/gif",
     "application/pdf",
 }
-ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"}
+ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 
 
 if IS_SQLITE:
@@ -535,6 +568,48 @@ class CashbackEntry(Base):
     auction: Mapped[AuctionItem] = relationship(foreign_keys=[auction_id])
 
 
+class UserSession(Base):
+    """Sessão persistente e revogável, compartilhada por todas as réplicas."""
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    ip_address: Mapped[str] = mapped_column(String(80), default="")
+    user_agent: Mapped[str] = mapped_column(String(600), default="")
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
+class BackgroundJob(Base):
+    """Outbox persistente: tarefas lentas não bloqueiam requisições HTTP.
+
+    Jobs são criados na mesma transação do evento que os exige. O worker os
+    reivindica usando lock de banco (SKIP LOCKED no PostgreSQL), com retentativa
+    exponencial e chave de idempotência opcional.
+    """
+    __tablename__ = "background_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_type: Mapped[str] = mapped_column(String(80), index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(30), default="queued", index=True)  # queued/running/completed/failed
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=6)
+    available_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    locked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    locked_by: Mapped[str] = mapped_column(String(160), default="")
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(180), unique=True, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
@@ -544,6 +619,8 @@ class AuditLog(Base):
     entity_type: Mapped[str] = mapped_column(String(80), default="")
     entity_id: Mapped[str] = mapped_column(String(80), default="")
     ip_address: Mapped[str] = mapped_column(String(80), default="")
+    user_agent: Mapped[str] = mapped_column(String(600), default="")
+    request_id: Mapped[str] = mapped_column(String(80), default="")
     details: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -576,18 +653,19 @@ class ProductSuggestionNomination(Base):
 
 
 class ConnectionManager:
+    """Mantém sockets locais e replica eventos públicos entre réplicas via Redis.
+
+    Cada processo só escreve em seus próprios WebSockets. Eventos são publicados
+    no Redis para que as demais réplicas entreguem o mesmo payload aos clientes
+    conectados nelas. Dados privados nunca entram nesse canal.
+    """
     def __init__(self) -> None:
         self.connections: dict[int, dict[WebSocket, asyncio.Queue]] = defaultdict(dict)
         self.writer_tasks: dict[WebSocket, asyncio.Task] = {}
+        self.pubsub_task: Optional[asyncio.Task] = None
+        self._stop_pubsub = asyncio.Event()
 
     def _with_realtime_clock(self, payload: dict) -> dict:
-        """Carimba o horário real do envio pelo WebSocket.
-
-        O payload do lance é montado quando o banco confirma o lance. Se a rede ou
-        uma conexão lenta atrasar o envio, usar aquele horário antigo pode deixar o
-        cronômetro de alguns computadores alguns segundos para trás. Por isso o
-        relógio é atualizado no último instante antes do send_json.
-        """
         try:
             cloned = dict(payload or {})
             auction_payload = cloned.get("auction")
@@ -615,9 +693,6 @@ class ConnectionManager:
         except asyncio.CancelledError:
             raise
         except Exception:
-            # Se uma conexão quebra no envio, remove e fecha de verdade.
-            # Antes removia do manager, mas o receive_text podia ficar preso,
-            # mantendo tarefa e socket vivos em pico.
             self.disconnect(auction_id, websocket)
             await self._safe_close(websocket)
 
@@ -647,20 +722,88 @@ class ConnectionManager:
             self.disconnect(auction_id, websocket)
             asyncio.create_task(self._safe_close(websocket))
 
-    async def broadcast(self, auction_id: int, payload: dict) -> None:
-        # Caminho quente dos lances: não espera rede de usuário nenhum.
-        # Cada conexão tem sua própria fila, preservando a ordem dos eventos e
-        # evitando send_json simultâneo no mesmo WebSocket. Conexão lenta demais
-        # é cortada e fechada para não acumular tarefas/zumbis.
+    async def _broadcast_local(self, auction_id: int, payload: dict) -> None:
         sockets = list(self.connections.get(auction_id, {}).items())
-        if not sockets:
-            return
         for ws, queue in sockets:
             try:
                 queue.put_nowait(payload)
             except asyncio.QueueFull:
                 self.disconnect(auction_id, ws)
                 asyncio.create_task(self._safe_close(ws))
+
+    async def _publish_shared(self, auction_id: int, payload: dict) -> None:
+        if not redis_async_client:
+            return
+        event = {
+            "origin": APP_INSTANCE_ID,
+            "auction_id": int(auction_id),
+            "payload": payload,
+            "sent_at_ms": int(time.time() * 1000),
+        }
+        try:
+            await redis_async_client.publish(REDIS_AUCTION_CHANNEL, json.dumps(event, separators=(",", ":"), default=str))
+        except Exception as exc:
+            print(f"[REDIS-PUB-ERROR] {type(exc).__name__}: {exc}")
+
+    async def broadcast(self, auction_id: int, payload: dict) -> None:
+        # Mantém o estado público compartilhado antes de avisar os clientes.
+        auction_payload = (payload or {}).get("auction") if isinstance(payload, dict) else None
+        if (payload or {}).get("type") == "auction_update" and isinstance(auction_payload, dict):
+            _auction_public_memory_set(auction_id, auction_payload)
+        await self._broadcast_local(auction_id, payload)
+        await self._publish_shared(auction_id, payload)
+
+    async def _redis_listener(self) -> None:
+        if not redis_async_client:
+            return
+        pubsub = redis_async_client.pubsub(ignore_subscribe_messages=True)
+        try:
+            await pubsub.subscribe(REDIS_AUCTION_CHANNEL)
+            while not self._stop_pubsub.is_set():
+                message = await pubsub.get_message(timeout=1.0)
+                if not message or message.get("type") != "message":
+                    await asyncio.sleep(0.02)
+                    continue
+                try:
+                    raw = message.get("data")
+                    event = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+                    if event.get("origin") == APP_INSTANCE_ID:
+                        continue
+                    auction_id = int(event.get("auction_id"))
+                    payload = event.get("payload") or {}
+                    auction_payload = payload.get("auction") if isinstance(payload, dict) else None
+                    if payload.get("type") == "auction_update" and isinstance(auction_payload, dict):
+                        _auction_public_memory_set(auction_id, auction_payload)
+                    await self._broadcast_local(auction_id, payload)
+                except Exception as exc:
+                    print(f"[REDIS-SUB-PARSE-ERROR] {type(exc).__name__}: {exc}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[REDIS-SUB-ERROR] {type(exc).__name__}: {exc}")
+        finally:
+            try:
+                await pubsub.unsubscribe(REDIS_AUCTION_CHANNEL)
+                await pubsub.close()
+            except Exception:
+                pass
+
+    async def start_shared_broker(self) -> None:
+        if redis_async_client and (not self.pubsub_task or self.pubsub_task.done()):
+            self._stop_pubsub.clear()
+            self.pubsub_task = asyncio.create_task(self._redis_listener())
+
+    async def stop_shared_broker(self) -> None:
+        self._stop_pubsub.set()
+        if self.pubsub_task and not self.pubsub_task.done():
+            self.pubsub_task.cancel()
+            try:
+                await self.pubsub_task
+            except asyncio.CancelledError:
+                pass
+
+    def local_connection_count(self) -> int:
+        return sum(len(items) for items in self.connections.values())
 
 
 # Configurações de produção/escala.
@@ -673,6 +816,176 @@ RATE_LIMIT_AUTH_PER_MINUTE = int(os.getenv("RATE_LIMIT_AUTH_PER_MINUTE", "20"))
 RATE_LIMIT_BID_PER_MINUTE = int(os.getenv("RATE_LIMIT_BID_PER_MINUTE", "40"))
 RATE_LIMIT_PAYMENT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PAYMENT_PER_MINUTE", "12"))
 SLOW_REQUEST_WARN_MS = float(os.getenv("SLOW_REQUEST_WARN_MS", "1500"))
+
+# Escala horizontal: Redis é a camada compartilhada para cache, limite de taxa,
+# cooldown, locks distribuídos e eventos WebSocket entre réplicas.
+REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
+REDIS_REQUIRED = os.getenv("REDIS_REQUIRED", "1" if IS_PRODUCTION else "0").strip().lower() in {"1", "true", "yes", "on"}
+REDIS_SOCKET_TIMEOUT_SECONDS = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "1.5"))
+REDIS_KEY_PREFIX = (os.getenv("REDIS_KEY_PREFIX") or "lc").strip().strip(":")
+APP_INSTANCE_ID = (os.getenv("APP_INSTANCE_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}").strip()[:160]
+REDIS_AUCTION_CHANNEL = f"{REDIS_KEY_PREFIX}:events:auction"
+REDIS_SESSION_PREFIX = f"{REDIS_KEY_PREFIX}:session"
+REDIS_PUBLIC_AUCTION_PREFIX = f"{REDIS_KEY_PREFIX}:auction:public"
+REDIS_API_CACHE_PREFIX = f"{REDIS_KEY_PREFIX}:cache:api"
+REDIS_WORKER_HEARTBEAT_KEY = f"{REDIS_KEY_PREFIX}:worker:heartbeat"
+
+redis_sync_client: Any = None
+redis_async_client: Any = None
+REDIS_READY = False
+
+
+def _redis_key(*parts: object) -> str:
+    return ":".join(str(p).strip(":") for p in parts)
+
+
+def _init_redis_clients() -> bool:
+    global redis_sync_client, redis_async_client, REDIS_READY
+    if not REDIS_URL:
+        if REDIS_REQUIRED:
+            raise RuntimeError("REDIS_URL é obrigatório para produção com o Bloco 2 de escala.")
+        REDIS_READY = False
+        return False
+    if RedisClient is None or AsyncRedisClient is None:
+        raise RuntimeError("Dependência redis ausente. Adicione redis>=5.0 ao requirements.txt.")
+    try:
+        redis_sync_client = RedisClient.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            health_check_interval=30,
+        )
+        redis_sync_client.ping()
+        redis_async_client = AsyncRedisClient.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            health_check_interval=30,
+        )
+        REDIS_READY = True
+        return True
+    except Exception as exc:
+        redis_sync_client = None
+        redis_async_client = None
+        REDIS_READY = False
+        if REDIS_REQUIRED:
+            raise RuntimeError(f"Redis indisponível: {type(exc).__name__}: {exc}") from exc
+        print(f"[REDIS-DISABLED] {type(exc).__name__}: {exc}")
+        return False
+
+
+def _redis_ping() -> bool:
+    global REDIS_READY
+    if not redis_sync_client:
+        return False
+    try:
+        redis_sync_client.ping()
+        REDIS_READY = True
+        return True
+    except Exception as exc:
+        REDIS_READY = False
+        print(f"[REDIS-HEALTH] erro={type(exc).__name__}: {exc}")
+        return False
+
+
+def _redis_get(key: str) -> Optional[str]:
+    if not redis_sync_client:
+        return None
+    try:
+        value = redis_sync_client.get(key)
+        return str(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def _redis_set(key: str, value: str, *, ex: Optional[int] = None, px: Optional[int] = None, nx: bool = False) -> bool:
+    if not redis_sync_client:
+        return False
+    try:
+        return bool(redis_sync_client.set(key, value, ex=ex, px=px, nx=nx))
+    except Exception:
+        return False
+
+
+def _redis_delete(*keys: str) -> None:
+    if not redis_sync_client or not keys:
+        return
+    try:
+        redis_sync_client.delete(*keys)
+    except Exception:
+        pass
+
+
+class DistributedLock:
+    """Lock por chave compartilhado entre réplicas, com liberação segura por token."""
+    _release_lua = """
+    if redis.call('get', KEYS[1]) == ARGV[1] then
+      return redis.call('del', KEYS[1])
+    end
+    return 0
+    """
+
+    def __init__(self, name: str, ttl_seconds: int = 15):
+        self.key = _redis_key(REDIS_KEY_PREFIX, "lock", name)
+        self.ttl_seconds = max(1, int(ttl_seconds))
+        self.token = secrets.token_urlsafe(24)
+        self.acquired = False
+
+    def acquire(self) -> bool:
+        if not redis_sync_client:
+            self.acquired = not REDIS_REQUIRED
+            return self.acquired
+        self.acquired = _redis_set(self.key, self.token, ex=self.ttl_seconds, nx=True)
+        return self.acquired
+
+    def release(self) -> None:
+        if not self.acquired:
+            return
+        try:
+            if redis_sync_client:
+                redis_sync_client.eval(self._release_lua, 1, self.key, self.token)
+        except Exception:
+            pass
+        finally:
+            self.acquired = False
+
+
+async def _acquire_distributed_lock(name: str, ttl_seconds: int, wait_seconds: float) -> Optional[DistributedLock]:
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+    while True:
+        lock = DistributedLock(name, ttl_seconds)
+        if await asyncio.to_thread(lock.acquire):
+            return lock
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(0.015)
+
+# CSRF: token de dupla submissão + validação de Origin/Sec-Fetch-Site.
+# O token não é dado sensível e precisa ser legível pelo navegador para que os
+# formulários e fetches de mesma origem possam reenviá-lo.
+CSRF_COOKIE_NAME = (os.getenv("CSRF_COOKIE_NAME") or "lc_csrf").strip()
+CSRF_TOKEN_BYTES = int(os.getenv("CSRF_TOKEN_BYTES", "32"))
+CSRF_COOKIE_SAMESITE = (os.getenv("CSRF_COOKIE_SAMESITE") or "strict").strip().lower()
+CSRF_PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+CSRF_EXEMPT_PATHS = {"/webhook/mercadopago"}
+
+# Sessões persistentes: o segredo nunca é salvo no banco junto com o token.
+SESSION_TOKEN_PEPPER = (os.getenv("SESSION_TOKEN_PEPPER") or os.getenv("APP_SECRET_KEY") or "").strip()
+if IS_PRODUCTION and not SESSION_TOKEN_PEPPER:
+    raise RuntimeError("Configure SESSION_TOKEN_PEPPER (ou APP_SECRET_KEY) antes de iniciar em produção.")
+if not SESSION_TOKEN_PEPPER:
+    SESSION_TOKEN_PEPPER = "development-only-session-pepper-change-before-production"
+SESSION_LOOKUP_CACHE_TTL_SECONDS = int(os.getenv("SESSION_LOOKUP_CACHE_TTL_SECONDS", "5"))
+SESSION_LOOKUP_CACHE: dict[str, tuple[int, datetime]] = {}
+
+# Webhook Mercado Pago: em produção, a assinatura é obrigatória e o endpoint
+# falha fechado quando a chave não está configurada.
+MP_WEBHOOK_SECRET = (os.getenv("MP_WEBHOOK_SECRET") or os.getenv("MERCADO_PAGO_WEBHOOK_SECRET") or "").strip()
+MP_WEBHOOK_SIGNATURE_REQUIRED = os.getenv(
+    "MP_WEBHOOK_SIGNATURE_REQUIRED", "1" if IS_PRODUCTION else "0"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 # Cache ultracurto para endpoints de estado.
 # Os logs de produção mostraram /api/home/state (~1.7s) e /api/auction/{id}/state
@@ -706,7 +1019,9 @@ def _rate_limit_key(request: Request) -> tuple[str, int]:
         return f"bid:{ip}", RATE_LIMIT_BID_PER_MINUTE
     if path.startswith("/login") or path.startswith("/register") or path.startswith("/forgot-password") or path.startswith("/reset-password"):
         return f"auth:{ip}", RATE_LIMIT_AUTH_PER_MINUTE
-    if path.startswith("/minha-conta/saldo") or path.startswith("/webhook/mercadopago"):
+    if path.startswith("/webhook/mercadopago"):
+        return "", 0
+    if path.startswith("/minha-conta/saldo"):
         return f"payment:{ip}", RATE_LIMIT_PAYMENT_PER_MINUTE
     return f"general:{ip}", RATE_LIMIT_GENERAL_PER_MINUTE
 
@@ -717,6 +1032,33 @@ def _rate_limit_allowed(request: Request) -> tuple[bool, int]:
     key, limit = _rate_limit_key(request)
     if not key or limit <= 0:
         return True, 0
+
+    # Janela deslizante em Redis: mesmo limite independente da réplica que
+    # recebeu a requisição. A transação Redis evita corrida entre processos.
+    if redis_sync_client:
+        try:
+            now = time.time()
+            redis_key = _redis_key(REDIS_KEY_PREFIX, "rate", key)
+            member = f"{now:.6f}:{secrets.token_hex(6)}"
+            cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+            pipe = redis_sync_client.pipeline(transaction=True)
+            pipe.zremrangebyscore(redis_key, 0, cutoff)
+            pipe.zadd(redis_key, {member: now})
+            pipe.zcard(redis_key)
+            pipe.expire(redis_key, RATE_LIMIT_WINDOW_SECONDS + 2)
+            _, _, count, _ = pipe.execute()
+            if int(count) > limit:
+                oldest = redis_sync_client.zrange(redis_key, 0, 0, withscores=True)
+                if oldest:
+                    retry_after = max(1, int(RATE_LIMIT_WINDOW_SECONDS - (now - float(oldest[0][1]))))
+                else:
+                    retry_after = 1
+                return False, retry_after
+            return True, 0
+        except Exception:
+            if REDIS_REQUIRED:
+                return False, 5
+
     now = time.time()
     bucket = RATE_LIMIT_BUCKETS[key]
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
@@ -727,7 +1069,6 @@ def _rate_limit_allowed(request: Request) -> tuple[bool, int]:
         return False, retry_after
     bucket.append(now)
     return True, 0
-
 
 def _apply_security_headers(response: Response) -> Response:
     if not SECURITY_HEADERS_ENABLED:
@@ -819,9 +1160,103 @@ def is_speculative_navigation_request(request: Request) -> bool:
     return False
 
 
+def _new_csrf_token() -> str:
+    return secrets.token_urlsafe(CSRF_TOKEN_BYTES)
+
+
+def _csrf_error_response(request: Request, request_id: str, detail: str) -> Response:
+    is_json = request.url.path.startswith("/api/") or "application/json" in (request.headers.get("accept") or "").lower()
+    if is_json:
+        return JSONResponse({"ok": False, "detail": detail}, status_code=403, headers={"X-Request-ID": request_id})
+    return HTMLResponse(
+        "<h1>Sessão de segurança atualizada</h1><p>Atualize a página e tente novamente.</p>",
+        status_code=403,
+        headers={"X-Request-ID": request_id, "Cache-Control": "no-store"},
+    )
+
+
+def _request_origin_is_trusted(request: Request) -> bool:
+    # Webhooks são tratados fora deste fluxo. Para browsers, Origin e
+    # Sec-Fetch-Site tornam o bloqueio de POST cross-site mais resistente.
+    origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site == "cross-site":
+        return False
+    if not origin:
+        return True
+    expected = public_base_url(request).rstrip("/")
+    return bool(expected and hmac.compare_digest(origin, expected))
+
+
+def _csrf_token_from_request(request: Request) -> str:
+    header_token = (request.headers.get("x-csrf-token") or "").strip()
+    if header_token:
+        return header_token
+    # FormData é cacheado pelo Starlette/FastAPI; a leitura aqui não impede a
+    # rota de receber os mesmos campos posteriormente.
+    return ""
+
+
+async def _csrf_validate_request(request: Request, request_id: str) -> Optional[Response]:
+    if request.method.upper() not in CSRF_PROTECTED_METHODS:
+        return None
+    if request.url.path in CSRF_EXEMPT_PATHS:
+        return None
+    if not _request_origin_is_trusted(request):
+        return _csrf_error_response(request, request_id, "Origem da requisição não permitida.")
+
+    cookie_token = (request.cookies.get(CSRF_COOKIE_NAME) or "").strip()
+    submitted_token = _csrf_token_from_request(request)
+    if not submitted_token:
+        try:
+            # Não usamos request.form() no middleware: em Starlette isso consome
+            # o stream multipart antes de FastAPI preencher os parâmetros Form/File.
+            # body() é cacheado e o endpoint recebe o mesmo corpo depois.
+            body = await request.body()
+            content_type = (request.headers.get("content-type") or "").lower()
+            if "application/x-www-form-urlencoded" in content_type:
+                submitted_token = (parse_qs(body.decode("utf-8", errors="ignore")).get("_csrf") or [""])[0].strip()
+            elif "multipart/form-data" in content_type:
+                match = re.search(
+                    rb'(?:^|\r\n)Content-Disposition: form-data;[^\r\n]*name="_csrf"[^\r\n]*\r\n(?:Content-Type:[^\r\n]*\r\n)?\r\n([^\r\n]+)',
+                    body,
+                    flags=re.I,
+                )
+                submitted_token = match.group(1).decode("utf-8", errors="ignore").strip() if match else ""
+        except Exception:
+            submitted_token = ""
+
+    if not cookie_token or not submitted_token or not hmac.compare_digest(cookie_token, submitted_token):
+        return _csrf_error_response(request, request_id, "Sessão de segurança inválida ou expirada. Atualize a página e tente novamente.")
+    return None
+
+
+def _attach_csrf_cookie(response: Response, request: Request) -> Response:
+    if not getattr(request.state, "csrf_cookie_needs_set", False):
+        return response
+    response.set_cookie(
+        CSRF_COOKIE_NAME,
+        getattr(request.state, "csrf_token", ""),
+        httponly=False,
+        samesite=CSRF_COOKIE_SAMESITE,
+        secure=SESSION_COOKIE_SECURE,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        path="/",
+    )
+    return response
+
+
 @app.middleware("http")
 async def production_guard_navigation_and_cache(request: Request, call_next):
     request_id = secrets.token_hex(8)
+    request.state.request_id = request_id
+    request.state.csrf_token = (request.cookies.get(CSRF_COOKIE_NAME) or "").strip() or _new_csrf_token()
+    request.state.csrf_cookie_needs_set = not bool(request.cookies.get(CSRF_COOKIE_NAME))
+
+    csrf_error = await _csrf_validate_request(request, request_id)
+    if csrf_error is not None:
+        return _apply_security_headers(_attach_csrf_cookie(csrf_error, request))
+
     allowed, retry_after = _rate_limit_allowed(request)
     if not allowed:
         return _apply_security_headers(JSONResponse(
@@ -883,32 +1318,118 @@ async def production_guard_navigation_and_cache(request: Request, call_next):
             f"mode={request.headers.get('sec-fetch-mode') or '-'} "
             f"dest={request.headers.get('sec-fetch-dest') or '-'}"
         )
+    response = _attach_csrf_cookie(response, request)
     return _apply_security_headers(response)
 SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(60 * 60 * 24 * 7)))
 _session_secure_env = os.getenv("SESSION_COOKIE_SECURE", "auto").strip().lower()
 SESSION_COOKIE_SECURE = IS_PRODUCTION if _session_secure_env == "auto" else _session_secure_env in {"1", "true", "yes", "on"}
-SESSIONS: dict[str, tuple[int, datetime]] = {}
 
 
-def _session_user_id(token: str | None) -> Optional[int]:
+def _session_token_hash(token: str) -> str:
+    return hmac.new(
+        SESSION_TOKEN_PEPPER.encode("utf-8"),
+        (token or "").encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _session_cache_key(token_hash: str) -> str:
+    return _redis_key(REDIS_SESSION_PREFIX, token_hash)
+
+
+def _session_user_id(token: str | None, db: Optional[Session] = None, fresh: bool = False) -> Optional[int]:
+    """Resolve sessão no PostgreSQL; Redis só reduz leitura em rotas não críticas."""
     if not token:
         return None
-    value = SESSIONS.get(token)
-    if not value:
-        return None
-    # Compatibilidade com sessões criadas antes desta correção.
-    if isinstance(value, int):
-        return value
-    user_id, expires_at = value
-    if expires_at <= datetime.utcnow():
-        SESSIONS.pop(token, None)
-        return None
-    return user_id
+    token_hash = _session_token_hash(token)
+    now = datetime.utcnow()
+    if not fresh:
+        cached_redis = _redis_get(_session_cache_key(token_hash))
+        if cached_redis and cached_redis.isdigit():
+            return int(cached_redis)
+        cached = SESSION_LOOKUP_CACHE.get(token_hash)
+        if cached and cached[1] > now:
+            return cached[0]
+        SESSION_LOOKUP_CACHE.pop(token_hash, None)
+
+    own_db = db is None
+    session_db = db or SessionLocal()
+    try:
+        row = (
+            session_db.query(UserSession.user_id, UserSession.expires_at, UserSession.revoked_at)
+            .filter(UserSession.token_hash == token_hash)
+            .first()
+        )
+        if not row or row.revoked_at is not None or row.expires_at <= now:
+            SESSION_LOOKUP_CACHE.pop(token_hash, None)
+            _redis_delete(_session_cache_key(token_hash))
+            return None
+        user_id = int(row.user_id)
+        seconds = max(1, min(SESSION_LOOKUP_CACHE_TTL_SECONDS, int((row.expires_at - now).total_seconds())))
+        SESSION_LOOKUP_CACHE[token_hash] = (user_id, now + timedelta(seconds=seconds))
+        _redis_set(_session_cache_key(token_hash), str(user_id), ex=seconds)
+        return user_id
+    finally:
+        if own_db:
+            session_db.close()
 
 
-def _create_session_response(response: Response, user_id: int) -> Response:
-    token = secrets.token_urlsafe(32)
-    SESSIONS[token] = (user_id, datetime.utcnow() + timedelta(seconds=SESSION_MAX_AGE_SECONDS))
+def _revoke_session_token(token: str | None, db: Optional[Session] = None) -> None:
+    if not token:
+        return
+    token_hash = _session_token_hash(token)
+    own_db = db is None
+    session_db = db or SessionLocal()
+    try:
+        session_db.query(UserSession).filter(
+            UserSession.token_hash == token_hash,
+            UserSession.revoked_at.is_(None),
+        ).update({UserSession.revoked_at: datetime.utcnow()}, synchronize_session=False)
+        if own_db:
+            session_db.commit()
+        SESSION_LOOKUP_CACHE.pop(token_hash, None)
+        _redis_delete(_session_cache_key(token_hash))
+    finally:
+        if own_db:
+            session_db.close()
+
+
+def _revoke_all_user_sessions(db: Session, user_id: int) -> None:
+    hashes = [row[0] for row in db.query(UserSession.token_hash).filter(
+        UserSession.user_id == user_id,
+        UserSession.revoked_at.is_(None),
+    ).all()]
+    db.query(UserSession).filter(
+        UserSession.user_id == user_id,
+        UserSession.revoked_at.is_(None),
+    ).update({UserSession.revoked_at: datetime.utcnow()}, synchronize_session=False)
+    for token_hash in hashes:
+        SESSION_LOOKUP_CACHE.pop(token_hash, None)
+        _redis_delete(_session_cache_key(token_hash))
+
+
+def _create_session_response(response: Response, user_id: int, request: Request) -> Response:
+    token = secrets.token_urlsafe(48)
+    now = datetime.utcnow()
+    token_hash = _session_token_hash(token)
+    db = SessionLocal()
+    try:
+        db.add(UserSession(
+            user_id=user_id,
+            token_hash=token_hash,
+            created_at=now,
+            expires_at=now + timedelta(seconds=SESSION_MAX_AGE_SECONDS),
+            last_seen_at=now,
+            ip_address=client_ip(request),
+            user_agent=(request.headers.get("user-agent") or "")[:600],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    _redis_set(_session_cache_key(token_hash), str(user_id), ex=min(SESSION_LOOKUP_CACHE_TTL_SECONDS, SESSION_MAX_AGE_SECONDS))
+    request.state.csrf_token = _new_csrf_token()
+    request.state.csrf_cookie_needs_set = True
     response.set_cookie(
         "session_token",
         token,
@@ -916,8 +1437,10 @@ def _create_session_response(response: Response, user_id: int) -> Response:
         samesite="lax",
         secure=SESSION_COOKIE_SECURE,
         max_age=SESSION_MAX_AGE_SECONDS,
+        path="/",
     )
     return response
+
 BANNED_WORDS = {
     "idiota", "burro", "otario", "otário", "droga", "merda", "porra", "fdp", "puta",
     "imbecil", "lixo", "desgraça", "arrombado", "vagabundo"
@@ -2308,6 +2831,7 @@ def client_ip(request: Request) -> str:
 
 
 def audit_event(db: Session, request: Request, action: str, user: Optional[User] = None, entity_type: str = "", entity_id: str | int = "", details: str = "") -> None:
+    """Registro append-only no nível da aplicação para eventos sensíveis."""
     try:
         db.add(AuditLog(
             user_id=getattr(user, "id", None),
@@ -2315,10 +2839,13 @@ def audit_event(db: Session, request: Request, action: str, user: Optional[User]
             entity_type=entity_type[:80],
             entity_id=str(entity_id)[:80],
             ip_address=client_ip(request),
+            user_agent=(request.headers.get("user-agent") or "")[:600],
+            request_id=str(getattr(request.state, "request_id", ""))[:80],
             details=(details or "")[:2000],
         ))
-    except Exception:
-        pass
+    except Exception as exc:
+        # Não escondemos falha de auditoria: isso precisa aparecer nos logs de produção.
+        print(f"[AUDIT-ERROR] action={action} error={type(exc).__name__}: {exc}")
 
 
 AUDIT_FOLDERS = {
@@ -2509,6 +3036,84 @@ def public_base_url(request: Optional[Request] = None) -> str:
     return ""
 
 
+BACKGROUND_JOBS_ENABLED = os.getenv("BACKGROUND_JOBS_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+BACKGROUND_JOBS_REQUIRED = os.getenv("BACKGROUND_JOBS_REQUIRED", "1" if IS_PRODUCTION else "0").strip().lower() in {"1", "true", "yes", "on"}
+WORKER_HEARTBEAT_REQUIRED = os.getenv("WORKER_HEARTBEAT_REQUIRED", "1" if IS_PRODUCTION else "0").strip().lower() in {"1", "true", "yes", "on"}
+WORKER_HEARTBEAT_TTL_SECONDS = int(os.getenv("WORKER_HEARTBEAT_TTL_SECONDS", "45"))
+JOB_LOCK_TIMEOUT_SECONDS = int(os.getenv("JOB_LOCK_TIMEOUT_SECONDS", "180"))
+JOB_MAX_BATCH = int(os.getenv("JOB_MAX_BATCH", "20"))
+
+
+def enqueue_background_job(
+    db: Session,
+    job_type: str,
+    payload: dict,
+    *,
+    idempotency_key: Optional[str] = None,
+    max_attempts: int = 6,
+    available_at: Optional[datetime] = None,
+) -> bool:
+    """Registra trabalho na mesma transação da ação HTTP (padrão outbox)."""
+    if not BACKGROUND_JOBS_ENABLED:
+        return False
+    job_type = (job_type or "").strip()[:80]
+    if not job_type:
+        return False
+    key = (idempotency_key or "").strip()[:180] or None
+    if key:
+        existing = db.query(BackgroundJob.id).filter(BackgroundJob.idempotency_key == key).first()
+        if existing:
+            return True
+    try:
+        # SAVEPOINT evita que uma chave idempotente em duplicidade desfaça a
+        # transação principal (cadastro, pagamento, ticket etc.).
+        with db.begin_nested():
+            db.add(BackgroundJob(
+                job_type=job_type,
+                payload_json=json.dumps(payload or {}, separators=(",", ":"), default=str),
+                status="queued",
+                attempts=0,
+                max_attempts=max(1, int(max_attempts)),
+                available_at=available_at or datetime.utcnow(),
+                idempotency_key=key,
+            ))
+            db.flush()
+        return True
+    except IntegrityError:
+        # A chave única protege contra enfileiramento duplicado em dois processos.
+        return bool(key)
+
+
+def enqueue_email_job(db: Session, to_email: str, subject: str, body: str, log_prefix: str = "EMAIL") -> bool:
+    fingerprint = hashlib.sha256(f"{to_email}|{subject}|{body}".encode("utf-8")).hexdigest()[:40]
+    return enqueue_background_job(
+        db,
+        "email",
+        {"to_email": to_email, "subject": subject, "body": body, "log_prefix": log_prefix},
+        idempotency_key=f"email:{fingerprint}",
+        max_attempts=6,
+    )
+
+
+def enqueue_finished_auction_side_effects_job(auction_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        queued = enqueue_background_job(
+            db,
+            "auction_finalize",
+            {"auction_id": int(auction_id)},
+            idempotency_key=f"auction-finalize:{int(auction_id)}",
+            max_attempts=8,
+        )
+        db.commit()
+        return queued
+    except Exception:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
 def _smtp_settings() -> tuple[str, int, str, str, str, str]:
     """Lê as configurações SMTP do ambiente.
 
@@ -2526,7 +3131,28 @@ def _smtp_settings() -> tuple[str, int, str, str, str, str]:
     return smtp_host, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls
 
 
-def send_smtp_email(to_email: str, subject: str, body: str, log_prefix: str = "EMAIL") -> bool:
+def send_smtp_email(to_email: str, subject: str, body: str, log_prefix: str = "EMAIL", db: Optional[Session] = None) -> bool:
+    """Enfileira e-mail sem travar cadastro/login; worker faz a entrega."""
+    if not BACKGROUND_JOBS_ENABLED:
+        return _send_smtp_email_now(to_email, subject, body, log_prefix)
+    own_db = db is None
+    queue_db = db or SessionLocal()
+    try:
+        queued = enqueue_email_job(queue_db, to_email, subject, body, log_prefix)
+        if own_db:
+            queue_db.commit()
+        return queued
+    except Exception as exc:
+        if own_db:
+            queue_db.rollback()
+        print(f"[{log_prefix} QUEUE ERROR] {to_email}: {type(exc).__name__}: {exc}")
+        return False
+    finally:
+        if own_db:
+            queue_db.close()
+
+
+def _send_smtp_email_now(to_email: str, subject: str, body: str, log_prefix: str = "EMAIL") -> bool:
     """Envia e-mail transacional.
 
     Prioridade profissional:
@@ -2610,7 +3236,7 @@ def send_smtp_email(to_email: str, subject: str, body: str, log_prefix: str = "E
         return False
 
 
-def send_verification_code_email(user: User, request: Optional[Request] = None) -> bool:
+def send_verification_code_email(user: User, request: Optional[Request] = None, db: Optional[Session] = None) -> bool:
     code = (getattr(user, "email_verification_code", "") or "").strip()
     if not code:
         return False
@@ -2621,13 +3247,13 @@ def send_verification_code_email(user: User, request: Optional[Request] = None) 
         f"Código: {code}\n\n"
         "Este código expira em 15 minutos. Se você não criou essa conta, ignore esta mensagem.\n"
     )
-    ok = send_smtp_email(user.email, subject, body, "EMAIL CODE")
+    ok = send_smtp_email(user.email, subject, body, "EMAIL CODE", db=db)
     if not ok:
         print(f"[EMAIL CODE DEV] {user.email}: {code}")
     return ok
 
 
-def send_identity_rejection_email(user: User, note: str = "") -> bool:
+def send_identity_rejection_email(user: User, note: str = "", db: Optional[Session] = None) -> bool:
     subject = "Não foi possível concluir sua verificação — Lancei o Certo"
     reason = (note or "documentação ilegível ou incompatível com os dados informados").strip()
     body = (
@@ -2637,13 +3263,13 @@ def send_identity_rejection_email(user: User, note: str = "") -> bool:
         "Você pode acessar sua conta e enviar os documentos novamente com uma imagem legível, atual e compatível com os dados informados no cadastro.\n\n"
         "Equipe Lancei o Certo.\n"
     )
-    ok = send_smtp_email(user.email, subject, body, "IDENTITY REJECTION")
+    ok = send_smtp_email(user.email, subject, body, "IDENTITY REJECTION", db=db)
     if not ok:
         print(f"[IDENTITY REJECTION DEV] {user.email}: {reason}")
     return ok
 
 
-def send_verification_email(user: User, request: Optional[Request] = None) -> bool:
+def send_verification_email(user: User, request: Optional[Request] = None, db: Optional[Session] = None) -> bool:
     if not getattr(user, "email_verification_token", ""):
         return False
     base_url = public_base_url(request)
@@ -2655,13 +3281,13 @@ def send_verification_email(user: User, request: Optional[Request] = None) -> bo
         f"{link}\n\n"
         "Este link expira em 24 horas. Se você não criou essa conta, ignore esta mensagem.\n"
     )
-    ok = send_smtp_email(user.email, subject, body, "EMAIL VERIFICATION")
+    ok = send_smtp_email(user.email, subject, body, "EMAIL VERIFICATION", db=db)
     if not ok:
         print(f"[EMAIL VERIFICATION DEV] {user.email}: {link}")
     return ok
 
 
-def send_password_reset_email(user: User, token: str, request: Optional[Request] = None) -> bool:
+def send_password_reset_email(user: User, token: str, request: Optional[Request] = None, db: Optional[Session] = None) -> bool:
     """Envia link seguro de recuperação de senha."""
     if not token:
         return False
@@ -2677,10 +3303,160 @@ def send_password_reset_email(user: User, token: str, request: Optional[Request]
         "Se você não solicitou esta alteração, ignore este e-mail.\n\n"
         "Equipe Lancei o Certo.\n"
     )
-    ok = send_smtp_email(user.email, subject, body, "PASSWORD RESET")
+    ok = send_smtp_email(user.email, subject, body, "PASSWORD RESET", db=db)
     if not ok:
         print(f"[PASSWORD RESET DEV] {user.email}: {reset_link}")
     return ok
+
+def _claim_background_jobs(worker_id: str, limit: int = JOB_MAX_BATCH) -> list[dict]:
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        stale_before = now - timedelta(seconds=max(30, JOB_LOCK_TIMEOUT_SECONDS))
+        # Recupera jobs de worker encerrado sem marcar como concluído.
+        db.query(BackgroundJob).filter(
+            BackgroundJob.status == "running",
+            BackgroundJob.locked_at.is_not(None),
+            BackgroundJob.locked_at < stale_before,
+        ).update({
+            BackgroundJob.status: "queued",
+            BackgroundJob.locked_at: None,
+            BackgroundJob.locked_by: "",
+            BackgroundJob.available_at: now,
+            BackgroundJob.updated_at: now,
+        }, synchronize_session=False)
+        query = (
+            db.query(BackgroundJob)
+            .filter(BackgroundJob.status == "queued", BackgroundJob.available_at <= now)
+            .order_by(BackgroundJob.available_at.asc(), BackgroundJob.id.asc())
+            .limit(max(1, min(100, int(limit))))
+        )
+        if not IS_SQLITE:
+            query = query.with_for_update(skip_locked=True)
+        rows = query.all()
+        claimed: list[dict] = []
+        for job in rows:
+            job.status = "running"
+            job.locked_at = now
+            job.locked_by = worker_id[:160]
+            job.attempts = int(job.attempts or 0) + 1
+            job.updated_at = now
+            claimed.append({
+                "id": job.id,
+                "job_type": job.job_type,
+                "payload_json": job.payload_json,
+                "attempts": job.attempts,
+                "max_attempts": job.max_attempts,
+            })
+        db.commit()
+        return claimed
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _complete_background_job(job_id: int) -> None:
+    db = SessionLocal()
+    try:
+        job = db.get(BackgroundJob, job_id)
+        if job:
+            now = datetime.utcnow()
+            job.status = "completed"
+            job.completed_at = now
+            job.updated_at = now
+            job.locked_at = None
+            job.locked_by = ""
+            job.last_error = ""
+            db.commit()
+    finally:
+        db.close()
+
+
+def _fail_background_job(job_id: int, error: Exception | str) -> None:
+    db = SessionLocal()
+    try:
+        job = db.get(BackgroundJob, job_id)
+        if not job:
+            return
+        now = datetime.utcnow()
+        job.last_error = f"{type(error).__name__}: {error}"[:4000]
+        job.updated_at = now
+        job.locked_at = None
+        job.locked_by = ""
+        if int(job.attempts or 0) >= int(job.max_attempts or 1):
+            job.status = "failed"
+        else:
+            delay_seconds = min(900, max(5, 2 ** min(8, int(job.attempts or 1))))
+            job.status = "queued"
+            job.available_at = now + timedelta(seconds=delay_seconds)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _execute_background_job(job_type: str, payload: dict) -> None:
+    if job_type == "email":
+        ok = _send_smtp_email_now(
+            str(payload.get("to_email") or ""),
+            str(payload.get("subject") or ""),
+            str(payload.get("body") or ""),
+            str(payload.get("log_prefix") or "EMAIL"),
+        )
+        if not ok:
+            raise RuntimeError("provedor de e-mail não aceitou a mensagem")
+        return
+    if job_type == "auction_finalize":
+        auction_id = int(payload.get("auction_id") or 0)
+        if not auction_id:
+            raise ValueError("auction_id ausente no job de finalização")
+        ensure_finished_auction_side_effects(auction_id)
+        return
+    raise ValueError(f"tipo de job não suportado: {job_type}")
+
+
+def _touch_worker_heartbeat(worker_id: str) -> None:
+    if redis_sync_client:
+        _redis_set(
+            REDIS_WORKER_HEARTBEAT_KEY,
+            json.dumps({"worker_id": worker_id, "at": datetime.utcnow().isoformat()}, separators=(",", ":")),
+            ex=max(15, WORKER_HEARTBEAT_TTL_SECONDS),
+        )
+
+
+def process_background_jobs_once(worker_id: str, limit: int = JOB_MAX_BATCH) -> int:
+    _touch_worker_heartbeat(worker_id)
+    jobs = _claim_background_jobs(worker_id, limit=limit)
+    for job in jobs:
+        try:
+            payload = json.loads(job.get("payload_json") or "{}")
+            if not isinstance(payload, dict):
+                raise ValueError("payload de job inválido")
+            _execute_background_job(str(job.get("job_type") or ""), payload)
+            _complete_background_job(int(job["id"]))
+        except Exception as exc:
+            print(f"[JOB-ERROR] id={job.get('id')} type={job.get('job_type')} {type(exc).__name__}: {exc}")
+            _fail_background_job(int(job["id"]), exc)
+    return len(jobs)
+
+
+def run_background_worker_forever() -> None:
+    _init_redis_clients()
+    worker_id = (os.getenv("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}")[:160]
+    poll_seconds = max(0.2, float(os.getenv("JOB_WORKER_POLL_SECONDS", "0.8")))
+    print(f"[WORKER-START] id={worker_id}")
+    while True:
+        try:
+            processed = process_background_jobs_once(worker_id)
+            if processed == 0:
+                time.sleep(poll_seconds)
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            print(f"[WORKER-LOOP-ERROR] {type(exc).__name__}: {exc}")
+            time.sleep(min(10, poll_seconds * 5))
+
 
 def fmt_deadline(dt: Optional[datetime]) -> str:
     if not dt:
@@ -2708,7 +3484,7 @@ def current_user(request: Request, db: Session) -> Optional[User]:
     token = request.cookies.get("session_token")
     if not token:
         return None
-    user_id = _session_user_id(token)
+    user_id = _session_user_id(token, db=db, fresh=True)
     if not user_id:
         return None
     user = db.get(User, user_id)
@@ -2728,7 +3504,7 @@ def admin_current_user_fast(request: Request, db: Session) -> Optional[SimpleNam
     if not token:
         return None
 
-    user_id = _session_user_id(token)
+    user_id = _session_user_id(token, db=db, fresh=True)
     if not user_id:
         return None
 
@@ -4537,6 +5313,15 @@ def ensure_columns() -> None:
             if "nickname" in cols:
                 conn.execute(text("UPDATE users SET nickname = COALESCE(NULLIF(nickname, ''), public_name, email, 'usuario') WHERE nickname IS NULL OR nickname = ''"))
 
+        if inspector.has_table("audit_logs"):
+            cols = {c["name"] for c in inspector.get_columns("audit_logs")}
+            for name, ddl in {
+                "user_agent": "VARCHAR(600) DEFAULT ''",
+                "request_id": "VARCHAR(80) DEFAULT ''",
+            }.items():
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE audit_logs ADD COLUMN {name} {ddl}"))
+
         if inspector.has_table("auction_items"):
             cols = {c["name"] for c in inspector.get_columns("auction_items")}
             # Produto usa data URL quando a imagem é enviada pelo admin.
@@ -4725,6 +5510,9 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_support_tickets_assigned_status ON support_tickets (assigned_admin_id, status, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_support_ticket_messages_ticket_created ON support_ticket_messages (ticket_id, created_at)",
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs (created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_audit_logs_entity_created ON audit_logs (entity_type, entity_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS ix_user_sessions_user_active ON user_sessions (user_id, revoked_at, expires_at)",
+            "CREATE INDEX IF NOT EXISTS ix_user_sessions_expiry ON user_sessions (expires_at)",
             "CREATE INDEX IF NOT EXISTS ix_suggestion_votes_key ON product_suggestion_votes (product_key)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_suggestion_vote_user_day ON product_suggestion_votes (user_id, date(created_at))",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_suggestion_nomination_week_user ON product_suggestion_nominations (week_start, user_id)",
@@ -4759,6 +5547,9 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_fiscal_pending_event_occurred ON fiscal_pending_records (event_type, occurred_at)",
             "CREATE INDEX IF NOT EXISTS ix_fiscal_pending_order ON fiscal_pending_records (order_id, occurred_at)",
             "CREATE INDEX IF NOT EXISTS ix_fiscal_pending_user ON fiscal_pending_records (user_id, occurred_at)",
+            "CREATE INDEX IF NOT EXISTS ix_background_jobs_claim ON background_jobs (status, available_at, id)",
+            "CREATE INDEX IF NOT EXISTS ix_background_jobs_locked ON background_jobs (status, locked_at)",
+            "CREATE INDEX IF NOT EXISTS ix_background_jobs_type_status ON background_jobs (job_type, status, created_at)",
         ]:
             try:
                 conn.execute(text(ddl))
@@ -4777,6 +5568,34 @@ def _db_ping() -> bool:
         return False
 
 
+def _worker_heartbeat_ok() -> bool:
+    if not BACKGROUND_JOBS_ENABLED:
+        return True
+    return bool(_redis_get(REDIS_WORKER_HEARTBEAT_KEY))
+
+
+def _background_job_counts() -> dict[str, int]:
+    db = SessionLocal()
+    try:
+        rows = db.query(BackgroundJob.status, func.count(BackgroundJob.id)).group_by(BackgroundJob.status).all()
+        result = {str(status): int(count) for status, count in rows}
+        for status in ("queued", "running", "completed", "failed"):
+            result.setdefault(status, 0)
+        return result
+    except Exception:
+        return {"queued": -1, "running": -1, "completed": -1, "failed": -1}
+    finally:
+        db.close()
+
+
+def _metrics_authorized(request: Request) -> bool:
+    token = (os.getenv("METRICS_TOKEN") or "").strip()
+    if not token:
+        return not IS_PRODUCTION
+    supplied = (request.headers.get("x-metrics-token") or request.query_params.get("token") or "").strip()
+    return bool(supplied and hmac.compare_digest(token, supplied))
+
+
 @app.get("/healthz")
 def healthz():
     return {
@@ -4785,71 +5604,342 @@ def healthz():
         "env": APP_ENV,
         "database": engine.dialect.name,
         "production": IS_PRODUCTION,
+        "instance": APP_INSTANCE_ID,
     }
 
 
 @app.get("/readyz")
 def readyz():
-    ready = _db_ping()
+    database_ready = _db_ping()
+    redis_ready = _redis_ping() if REDIS_URL else not REDIS_REQUIRED
+    worker_ready = _worker_heartbeat_ok() if WORKER_HEARTBEAT_REQUIRED else True
+    ready = bool(database_ready and redis_ready and worker_ready)
     return JSONResponse(
         {
             "ok": ready,
             "database": engine.dialect.name,
-            "database_ready": ready,
+            "database_ready": database_ready,
+            "redis_ready": redis_ready,
+            "worker_ready": worker_ready,
+            "websocket_broker_ready": bool(manager.pubsub_task and not manager.pubsub_task.done()) if REDIS_URL else not REDIS_REQUIRED,
             "production": IS_PRODUCTION,
         },
         status_code=200 if ready else 503,
     )
 
 
+@app.get("/internal/metrics")
+def internal_metrics(request: Request):
+    if not _metrics_authorized(request):
+        raise HTTPException(status_code=404, detail="Não encontrado.")
+    return {
+        "ok": True,
+        "instance": APP_INSTANCE_ID,
+        "database_ready": _db_ping(),
+        "redis_ready": _redis_ping() if REDIS_URL else False,
+        "worker_heartbeat": _worker_heartbeat_ok(),
+        "local_websocket_connections": manager.local_connection_count(),
+        "background_jobs": _background_job_counts(),
+        "state_cache": {
+            "home_local_entries": len(HOME_STATE_API_CACHE),
+            "auction_local_entries": len(AUCTION_STATE_API_CACHE),
+            "auction_public_local_entries": len(AUCTION_PUBLIC_STATE_MEMORY),
+        },
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+    }
 
-def save_uploaded_image(file: Optional[UploadFile]) -> str:
-    """Salva uploads com validação de extensão, MIME e tamanho.
 
-    A função é usada tanto para imagens de produto quanto para documentos de
-    identidade. Por isso aceita imagens e PDF, mas bloqueia arquivos grandes ou
-    extensões perigosas antes de gravar no disco.
-    """
+
+PRIVATE_FILE_MIME_BY_EXT = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".pdf": "application/pdf",
+}
+
+
+def _private_reference(key: str) -> str:
+    return f"{PRIVATE_REF_PREFIX}{key}"
+
+
+def _private_file_key(reference: str) -> str:
+    value = (reference or "").strip()
+    if not value.startswith(PRIVATE_REF_PREFIX):
+        return ""
+    key = value[len(PRIVATE_REF_PREFIX):]
+    return key if PRIVATE_FILE_KEY_RE.fullmatch(key or "") else ""
+
+
+def private_file_url(reference: str) -> str:
+    key = _private_file_key(reference)
+    return f"/arquivo-privado/{key}" if key else ""
+
+
+def private_file_is_pdf(reference: str) -> bool:
+    key = _private_file_key(reference)
+    return key.lower().endswith(".pdf") if key else False
+
+# Helpers só são registrados após as funções existirem; os templates são avaliados em request time.
+templates.env.globals["private_file_url"] = private_file_url
+templates.env.globals["private_file_is_pdf"] = private_file_is_pdf
+
+
+def _private_object_name(key: str) -> str:
+    return f"{PRIVATE_S3_PREFIX}/{key}" if PRIVATE_S3_PREFIX else key
+
+
+def _private_s3_client():
+    try:
+        import boto3
+    except Exception as exc:
+        raise RuntimeError("boto3 é obrigatório para PRIVATE_STORAGE_BACKEND=s3.") from exc
+    kwargs = {}
+    if PRIVATE_S3_REGION:
+        kwargs["region_name"] = PRIVATE_S3_REGION
+    if PRIVATE_S3_ENDPOINT_URL:
+        kwargs["endpoint_url"] = PRIVATE_S3_ENDPOINT_URL
+    return boto3.client("s3", **kwargs)
+
+
+def _private_storage_write(key: str, data: bytes, content_type: str) -> None:
+    if PRIVATE_STORAGE_BACKEND == "local":
+        target = (PRIVATE_UPLOAD_DIR / key).resolve()
+        if target.parent != PRIVATE_UPLOAD_DIR or not str(target).startswith(str(PRIVATE_UPLOAD_DIR)):
+            raise HTTPException(status_code=400, detail="Nome de arquivo privado inválido.")
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+        try:
+            os.chmod(target, 0o600)
+        except Exception:
+            pass
+        return
+
+    args = {
+        "Bucket": PRIVATE_S3_BUCKET,
+        "Key": _private_object_name(key),
+        "Body": data,
+        "ContentType": content_type,
+        "ServerSideEncryption": "aws:kms" if PRIVATE_S3_KMS_KEY_ID else "AES256",
+    }
+    if PRIVATE_S3_KMS_KEY_ID:
+        args["SSEKMSKeyId"] = PRIVATE_S3_KMS_KEY_ID
+    _private_s3_client().put_object(**args)
+
+
+def _private_storage_exists(key: str) -> bool:
+    if not key:
+        return False
+    if PRIVATE_STORAGE_BACKEND == "local":
+        path = (PRIVATE_UPLOAD_DIR / key).resolve()
+        return path.parent == PRIVATE_UPLOAD_DIR and path.is_file()
+    try:
+        _private_s3_client().head_object(Bucket=PRIVATE_S3_BUCKET, Key=_private_object_name(key))
+        return True
+    except Exception:
+        return False
+
+
+def _private_storage_response(key: str) -> Response:
+    ext = Path(key).suffix.lower()
+    media_type = PRIVATE_FILE_MIME_BY_EXT.get(ext, "application/octet-stream")
+    # PDFs são entregues como anexo; imagens só podem ser inline após a validação
+    # e re-encode feitos no upload. Não há HTML, SVG ou JS permitido nesse fluxo.
+    disposition = "attachment" if ext == ".pdf" else "inline"
+    filename = f"arquivo-{key[:18]}{ext}"
+    headers = {
+        "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+        "Pragma": "no-cache",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
+    }
+    if PRIVATE_STORAGE_BACKEND == "local":
+        path = (PRIVATE_UPLOAD_DIR / key).resolve()
+        if path.parent != PRIVATE_UPLOAD_DIR or not path.is_file():
+            raise HTTPException(status_code=404, detail="Arquivo privado não encontrado.")
+        return FileResponse(path, media_type=media_type, filename=filename, content_disposition_type=disposition, headers=headers)
+
+    try:
+        obj = _private_s3_client().get_object(Bucket=PRIVATE_S3_BUCKET, Key=_private_object_name(key))
+        body = obj["Body"]
+        return StreamingResponse(body.iter_chunks(chunk_size=1024 * 1024), media_type=media_type, headers={
+            **headers,
+            "Content-Disposition": f'{disposition}; filename="{filename}"',
+        })
+    except Exception:
+        raise HTTPException(status_code=404, detail="Arquivo privado não encontrado.")
+
+
+def _sniff_private_upload(data: bytes) -> tuple[str, str]:
+    if data.startswith(b"%PDF-"):
+        return ".pdf", "application/pdf"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg", "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png", "image/png"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp", "image/webp"
+    raise HTTPException(status_code=400, detail="O conteúdo do arquivo não corresponde a um documento ou imagem permitido.")
+
+
+def _sanitize_private_image(data: bytes) -> tuple[bytes, str, str]:
+    try:
+        from PIL import Image, ImageOps
+        source = Image.open(io.BytesIO(data))
+        source.verify()
+        source = Image.open(io.BytesIO(data))
+        image = ImageOps.exif_transpose(source)
+        if image.width < 80 or image.height < 80:
+            raise HTTPException(status_code=400, detail="Imagem muito pequena ou ilegível. Envie uma foto nítida.")
+        if image.width > PRIVATE_IMAGE_MAX_WIDTH:
+            ratio = PRIVATE_IMAGE_MAX_WIDTH / float(image.width)
+            image = image.resize((PRIVATE_IMAGE_MAX_WIDTH, max(1, int(image.height * ratio))), Image.Resampling.LANCZOS)
+        if image.mode not in {"RGB", "RGBA"}:
+            image = image.convert("RGB")
+        output = io.BytesIO()
+        image.save(output, format="WEBP", quality=PRIVATE_IMAGE_WEBP_QUALITY, method=6)
+        clean = output.getvalue()
+        if not clean:
+            raise HTTPException(status_code=400, detail="Não foi possível processar a imagem enviada.")
+        return clean, ".webp", "image/webp"
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Imagem inválida ou corrompida.") from exc
+
+
+def save_private_upload(file: Optional[UploadFile], *, purpose: str = "private") -> str:
+    """Valida pelo conteúdo, remove metadados de imagem e grava fora da web pública."""
     if not file or not file.filename:
         return ""
-
-    original_name = Path(file.filename).name
-    ext = Path(original_name).suffix.lower()
-    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Tipo de arquivo não permitido. Envie JPG, PNG, WEBP, GIF ou PDF.")
-
-    declared_type = (file.content_type or mimetypes.guess_type(original_name)[0] or "").lower()
-    if declared_type and declared_type not in ALLOWED_UPLOAD_MIME_TYPES:
-        raise HTTPException(status_code=400, detail="Formato de arquivo inválido para upload.")
-
-    safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", Path(original_name).stem).strip("_") or "upload"
-    final_name = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}_{secrets.token_hex(4)}_{safe_stem}{ext}"
-    target = UPLOAD_DIR / final_name
-
-    total = 0
+    original_ext = Path(Path(file.filename).name).suffix.lower()
+    if original_ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Tipo de arquivo não permitido. Envie JPG, PNG, WEBP ou PDF.")
     try:
         file.file.seek(0)
     except Exception:
         pass
-
-    with target.open("wb") as out:
-        while True:
-            chunk = file.file.read(1024 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > MAX_UPLOAD_BYTES:
-                out.close()
-                target.unlink(missing_ok=True)
-                raise HTTPException(status_code=413, detail="Arquivo muito grande. Envie um arquivo menor.")
-            out.write(chunk)
-
-    if total <= 0:
-        target.unlink(missing_ok=True)
+    data = file.file.read(MAX_UPLOAD_BYTES + 1)
+    if not data:
         raise HTTPException(status_code=400, detail="Arquivo vazio ou inválido.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Arquivo muito grande. Envie um arquivo menor.")
 
-    return f"/static/uploads/{final_name}"
+    ext, detected_type = _sniff_private_upload(data)
+    if ext == ".pdf":
+        # PDF não é convertido. Ele é fornecido apenas como attachment privado.
+        clean_data, final_ext, content_type = data, ext, detected_type
+    else:
+        clean_data, final_ext, content_type = _sanitize_private_image(data)
 
+    key = f"{secrets.token_urlsafe(32).replace('-', '_')}{final_ext}"
+    _private_storage_write(key, clean_data, content_type)
+    return _private_reference(key)
+
+
+def save_uploaded_image(file: Optional[UploadFile]) -> str:
+    """Compatibilidade: todo upload do usuário agora é privado por padrão."""
+    return save_private_upload(file, purpose="support")
+
+
+def _migrate_legacy_reference(value: str) -> str:
+    reference = (value or "").strip()
+    if not reference.startswith("/static/uploads/"):
+        return reference
+    filename = Path(reference).name
+    source = (LEGACY_PUBLIC_UPLOAD_DIR / filename).resolve()
+    if source.parent != LEGACY_PUBLIC_UPLOAD_DIR or not source.is_file():
+        return ""
+    data = source.read_bytes()
+    try:
+        ext, detected_type = _sniff_private_upload(data)
+        if ext != ".pdf":
+            data, ext, detected_type = _sanitize_private_image(data)
+        key = f"{secrets.token_urlsafe(32).replace('-', '_')}{ext}"
+        _private_storage_write(key, data, detected_type)
+        source.unlink(missing_ok=True)
+        return _private_reference(key)
+    except Exception as exc:
+        print(f"[PRIVATE-MIGRATION] Falha ao migrar {filename}: {type(exc).__name__}")
+        return ""
+
+
+def migrate_legacy_private_uploads(db: Session) -> int:
+    """Tira referências antigas de /static/uploads e move os arquivos para armazenamento privado."""
+    changed = 0
+    for user in db.query(User).filter(
+        or_(
+            User.document_file_url.like("/static/uploads/%"),
+            User.document_back_file_url.like("/static/uploads/%"),
+            User.selfie_file_url.like("/static/uploads/%"),
+            User.residence_proof_file_url.like("/static/uploads/%"),
+        )
+    ).all():
+        for field in ("document_file_url", "document_back_file_url", "selfie_file_url", "residence_proof_file_url"):
+            current = getattr(user, field, "") or ""
+            migrated = _migrate_legacy_reference(current)
+            if migrated != current:
+                setattr(user, field, migrated)
+                changed += 1
+
+    for model, field in ((SupportTicket, "proof_url"), (SupportTicketMessage, "proof_url"), (OrderProof, "file_url")):
+        for row in db.query(model).filter(getattr(model, field).like("/static/uploads/%")).all():
+            current = getattr(row, field, "") or ""
+            migrated = _migrate_legacy_reference(current)
+            if migrated != current:
+                setattr(row, field, migrated)
+                changed += 1
+    if changed:
+        print(f"[PRIVATE-MIGRATION] {changed} referência(s) privada(s) migrada(s) de /static/uploads.")
+    return changed
+
+
+def _private_file_owner(db: Session, reference: str):
+    # Documento KYC: usuário dono ou superadmin. Admin comum não recebe acesso.
+    owner = db.query(User).filter(or_(
+        User.document_file_url == reference,
+        User.document_back_file_url == reference,
+        User.selfie_file_url == reference,
+        User.residence_proof_file_url == reference,
+    )).first()
+    if owner:
+        return "identity_document", owner.id
+
+    ticket = db.query(SupportTicket).filter(SupportTicket.proof_url == reference).first()
+    if ticket:
+        return "support_ticket", ticket.user_id
+    message = db.query(SupportTicketMessage).filter(SupportTicketMessage.proof_url == reference).first()
+    if message:
+        ticket = db.get(SupportTicket, message.ticket_id)
+        return "support_message", ticket.user_id if ticket else None
+    proof = db.query(OrderProof).filter(OrderProof.file_url == reference).first()
+    if proof:
+        return "order_proof", proof.user_id
+    return "", None
+
+
+@app.get("/arquivo-privado/{file_key}")
+def private_file_download(request: Request, file_key: str):
+    if not PRIVATE_FILE_KEY_RE.fullmatch(file_key or ""):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    reference = _private_reference(file_key)
+    db = SessionLocal()
+    try:
+        actor = require_user(request, db)
+        entity_type, owner_id = _private_file_owner(db, reference)
+        # KYC é mais restrito: só o titular ou superadmin. Anexos de suporte e
+        # comprovantes de pedido podem ser acessados pelo titular ou admin que
+        # opera o atendimento, sempre deixando trilha de auditoria.
+        if entity_type == "identity_document":
+            allowed = bool(owner_id and (actor.id == owner_id or actor.is_superadmin))
+        else:
+            allowed = bool(owner_id and (actor.id == owner_id or actor.is_admin))
+        if not allowed:
+            audit_event(db, request, "private_file.access_denied", actor, entity_type or "private_file", file_key, "Acesso negado a arquivo privado.")
+            db.commit()
+            raise HTTPException(status_code=403, detail="Você não tem permissão para acessar este arquivo.")
+        audit_event(db, request, "private_file.opened", actor, entity_type, file_key, f"owner_user_id={owner_id}")
+        db.commit()
+        return _private_storage_response(file_key)
+    finally:
+        db.close()
 
 def save_product_image_data_url(file: Optional[UploadFile]) -> str:
     """Salva imagem do produto como data URL otimizada.
@@ -4988,6 +6078,9 @@ def seed() -> None:
                 db.add(admin)
                 db.flush()
 
+        # Migração automática de anexos/documentos criados nas versões antigas.
+        migrate_legacy_private_uploads(db)
+
         if db.query(AuctionItem).count() == 0:
             now = datetime.utcnow()
             db.add_all(
@@ -5025,10 +6118,60 @@ def seed() -> None:
         db.close()
 
 
+async def _run_seed_once_for_cluster() -> None:
+    if not redis_sync_client:
+        await asyncio.to_thread(seed)
+        return
+    lock = await _acquire_distributed_lock("startup-migrations", ttl_seconds=120, wait_seconds=8.0)
+    if lock:
+        try:
+            await asyncio.to_thread(seed)
+        finally:
+            await asyncio.to_thread(lock.release)
+        return
+    # Outra réplica está aplicando migrações. Aguarda as tabelas essenciais,
+    # não somente um SELECT 1, antes de aceitar tráfego.
+    def schema_ready() -> bool:
+        try:
+            inspector = inspect(engine)
+            return inspector.has_table("users") and inspector.has_table("background_jobs")
+        except Exception:
+            return False
+    for _ in range(30):
+        if await asyncio.to_thread(schema_ready):
+            return
+        await asyncio.sleep(1)
+    raise RuntimeError("Esquema não ficou pronto após aguardar a migração de outra réplica.")
+
+
 @app.on_event("startup")
 async def startup_event():
-    seed()
-    asyncio.create_task(auction_watcher())
+    _init_redis_clients()
+    await _run_seed_once_for_cluster()
+    await manager.start_shared_broker()
+    app.state.auction_watcher_task = asyncio.create_task(auction_watcher())
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    watcher = getattr(app.state, "auction_watcher_task", None)
+    if watcher and not watcher.done():
+        watcher.cancel()
+        try:
+            await watcher
+        except asyncio.CancelledError:
+            pass
+    await manager.stop_shared_broker()
+    if redis_async_client:
+        try:
+            await redis_async_client.close()
+        except Exception:
+            pass
+    if redis_sync_client:
+        try:
+            redis_sync_client.close()
+        except Exception:
+            pass
 
 
 def _auction_watcher_sync() -> list[tuple[int, dict]]:
@@ -5121,16 +6264,20 @@ def _auction_watcher_sync() -> list[tuple[int, dict]]:
 
 
 async def auction_watcher():
-    """Atualiza transições sem bloquear o event loop/WebSocket."""
+    """Apenas uma réplica por vez fecha/inicia eventos no banco."""
     while True:
         await asyncio.sleep(1)
+        leader_lock = await _acquire_distributed_lock("auction-watcher", ttl_seconds=4, wait_seconds=0.05)
+        if not leader_lock:
+            continue
         try:
             payloads = await asyncio.to_thread(_auction_watcher_sync)
             for auction_id, payload in payloads:
                 await manager.broadcast(auction_id, {"type": "auction_update", "auction": payload})
         except Exception as exc:
-            print(f"[WATCHER-ERROR] {exc}")
-
+            print(f"[WATCHER-ERROR] {type(exc).__name__}: {exc}")
+        finally:
+            await asyncio.to_thread(leader_lock.release)
 
 def cached_suggestion_vote_stats(db: Session, ttl_seconds: int = 45) -> list[dict]:
     """Ranking público com cache curto.
@@ -5263,32 +6410,58 @@ def home(request: Request):
 
 
 
+def _api_cache_redis_key(key: str) -> str:
+    return _redis_key(REDIS_API_CACHE_PREFIX, key.replace(" ", "_"))
+
+
 def _api_cache_get(cache: dict[str, tuple[float, dict]], key: str, ttl_ms: int) -> Optional[dict]:
     if not STATE_API_CACHE_ENABLED:
         return None
+    redis_payload = _redis_get(_api_cache_redis_key(key))
+    if redis_payload:
+        try:
+            parsed = json.loads(redis_payload)
+            if isinstance(parsed, dict):
+                return dict(parsed)
+        except Exception:
+            pass
     row = cache.get(key)
     if not row:
         return None
     created, payload = row
     if (time.monotonic() - created) * 1000 <= max(1, ttl_ms):
-        # Copia rasa para permitir ajustar server_time sem alterar o cache original.
         return dict(payload)
     return None
 
 
-def _api_cache_set(cache: dict[str, tuple[float, dict]], key: str, payload: dict, max_items: int = 0) -> dict:
+def _api_cache_set(cache: dict[str, tuple[float, dict]], key: str, payload: dict, max_items: int = 0, ttl_ms: Optional[int] = None) -> dict:
     if not STATE_API_CACHE_ENABLED:
         return payload
     if max_items and len(cache) > max_items:
-        # Limpeza simples e barata: remove os mais antigos quando houver muitos usuários/disputas.
         for old_key, _ in sorted(cache.items(), key=lambda item: item[1][0])[: max(1, len(cache) // 4)]:
             cache.pop(old_key, None)
     cache[key] = (time.monotonic(), dict(payload))
+    if redis_sync_client:
+        effective_ttl_ms = ttl_ms or (HOME_STATE_CACHE_TTL_MS if key.startswith("home:") else AUCTION_STATE_CACHE_TTL_MS)
+        try:
+            redis_sync_client.set(_api_cache_redis_key(key), json.dumps(payload, separators=(",", ":"), default=str), px=max(1, int(effective_ttl_ms)))
+        except Exception:
+            pass
     return payload
 
 
 def _clear_home_state_cache() -> None:
     HOME_STATE_API_CACHE.clear()
+    _redis_delete(_api_cache_redis_key("home:state"))
+
+
+def _auction_state_version_key(auction_id: int | str) -> str:
+    return _redis_key(REDIS_KEY_PREFIX, "auction", auction_id, "state_version")
+
+
+def _auction_state_version(auction_id: int | str) -> str:
+    value = _redis_get(_auction_state_version_key(auction_id))
+    return value or "0"
 
 
 def _clear_auction_state_cache(auction_id: int | str) -> None:
@@ -5296,7 +6469,12 @@ def _clear_auction_state_cache(auction_id: int | str) -> None:
     for key in list(AUCTION_STATE_API_CACHE.keys()):
         if key.startswith(prefix):
             AUCTION_STATE_API_CACHE.pop(key, None)
-
+    if redis_sync_client:
+        try:
+            redis_sync_client.incr(_auction_state_version_key(auction_id))
+            redis_sync_client.expire(_auction_state_version_key(auction_id), 86400)
+        except Exception:
+            pass
 
 def _is_home_state_critical(reason: str) -> bool:
     return (reason or "").strip().lower() in {
@@ -5321,8 +6499,8 @@ def _home_sync_allowed(critical: bool) -> bool:
     return True
 
 
-def _request_user_id(request: Request) -> Optional[int]:
-    return _session_user_id(request.cookies.get("session_token"))
+def _request_user_id(request: Request, db: Optional[Session] = None, fresh: bool = False) -> Optional[int]:
+    return _session_user_id(request.cookies.get("session_token"), db=db, fresh=fresh)
 
 
 # Estado público em memória por disputa: usado para /api/auction/{id}/state
@@ -5369,8 +6547,24 @@ def _refresh_payload_clock(payload: dict) -> dict:
     return data
 
 
+def _auction_public_redis_key(auction_id: int | str) -> str:
+    return _redis_key(REDIS_PUBLIC_AUCTION_PREFIX, auction_id)
+
+
 def _auction_public_memory_get(auction_id: int | str, max_age_ms: Optional[int] = None) -> Optional[dict]:
-    row = AUCTION_PUBLIC_STATE_MEMORY.get(int(auction_id)) if str(auction_id).isdigit() else None
+    if not str(auction_id).isdigit():
+        return None
+    # Redis é consultado primeiro para que uma réplica veja de imediato o lance
+    # confirmado por outra réplica. Nunca há dados privados nesse payload.
+    redis_payload = _redis_get(_auction_public_redis_key(auction_id))
+    if redis_payload:
+        try:
+            data = json.loads(redis_payload)
+            if isinstance(data, dict):
+                return _refresh_payload_clock(data)
+        except Exception:
+            pass
+    row = AUCTION_PUBLIC_STATE_MEMORY.get(int(auction_id))
     if not row:
         return None
     created, payload = row
@@ -5387,15 +6581,22 @@ def _auction_public_memory_set(auction_id: int | str, payload: Optional[dict]) -
         aid = int(auction_id)
     except Exception:
         return
-    # Nunca guarda dados privados no cache público.
     clean = _clone_jsonish(payload)
     clean.pop("wallet_balance", None)
     clean.pop("client_bid_id", None)
     AUCTION_PUBLIC_STATE_MEMORY[aid] = (time.monotonic(), clean)
+    if redis_sync_client:
+        try:
+            redis_sync_client.set(
+                _auction_public_redis_key(aid),
+                json.dumps(clean, separators=(",", ":"), default=str),
+                px=max(1000, AUCTION_PUBLIC_STATE_MEMORY_TTL_MS),
+            )
+        except Exception:
+            pass
     if len(AUCTION_PUBLIC_STATE_MEMORY) > 1000:
         for old_key, _ in sorted(AUCTION_PUBLIC_STATE_MEMORY.items(), key=lambda item: item[1][0])[:250]:
             AUCTION_PUBLIC_STATE_MEMORY.pop(old_key, None)
-
 
 def _home_card_from_public_payload(payload: dict) -> dict:
     data = _refresh_payload_clock(payload or {})
@@ -5821,7 +7022,7 @@ async def register(
         db.add(user)
         if referrer:
             db.add(ReferralReward(referrer_user_id=referrer.id, referred_user_id=user.id, amount_credits=REFERRAL_BONUS_CREDITS, status="pending", reason="Aguardando primeira compra válida de Créditos LC e validação antifraude."))
-        sent = send_verification_code_email(user, request)
+        sent = send_verification_code_email(user, request, db=db)
         referral_detail = f" | Indicação: {referrer.id}" if referrer else ""
         audit_event(db, request, "user.register", user, "user", user.id, f"Cadastro criado. Aceite legal registrado ({LEGAL_TERMS_VERSION}/{LEGAL_RULES_VERSION}/{LEGAL_PRIVACY_VERSION}). Código de confirmação de e-mail enviado e KYC pendente.{referral_detail}")
         db.commit()
@@ -5875,14 +7076,14 @@ def register_confirm_email_submit(request: Request, email: str = Form(...), code
             return render_error("Não foi possível localizar este cadastro. Verifique o e-mail informado.")
         if user.email_verified:
             response = RedirectResponse("/cadastro/documentos", status_code=303)
-            return _create_session_response(response, user.id)
+            return _create_session_response(response, user.id, request)
         if not clean_code or len(clean_code) != 6:
             return render_error("Digite o código de 6 dígitos enviado para seu e-mail.")
         if user.email_verification_expires_at and user.email_verification_expires_at < datetime.utcnow():
             user.email_verification_code = make_email_verification_code()
             user.email_verification_token = ""
             user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
-            sent = send_verification_code_email(user, request)
+            sent = send_verification_code_email(user, request, db=db)
             audit_event(db, request, "user.email_code_expired", user, "user", user.id, "Código expirado. Novo código enviado.")
             db.commit()
             suffix = "&email_sent=1" if sent else "&email_dev=1"
@@ -5900,7 +7101,7 @@ def register_confirm_email_submit(request: Request, email: str = Form(...), code
         audit_event(db, request, "user.email_verified", user, "user", user.id, "E-mail confirmado por código de 6 dígitos.")
         db.commit()
         response = RedirectResponse("/cadastro/documentos", status_code=303)
-        return _create_session_response(response, user.id)
+        return _create_session_response(response, user.id, request)
     finally:
         db.close()
 
@@ -5921,7 +7122,7 @@ def register_resend_confirmation_code(request: Request, email: str = Form(...)):
             user.email_verification_token = ""
             user.email_verification_code = make_email_verification_code()
             user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
-            email_dev = not send_verification_code_email(user, request)
+            email_dev = not send_verification_code_email(user, request, db=db)
             audit_event(db, request, "user.email_confirmation_resent", user, "user", user.id, "Código de confirmação reenviado após cadastro.")
             db.commit()
         suffix = "&email_dev=1" if email_dev else "&email_sent=1"
@@ -5948,11 +7149,11 @@ async def register_documents_submit(request: Request, document_front_file: Uploa
         if not document_front_file or not document_front_file.filename or not document_back_file or not document_back_file.filename or not selfie_file or not selfie_file.filename:
             return templates.TemplateResponse("register_documents.html", {"request": request, "user": user, "error": "Envie a frente do documento, o verso e uma selfie atual.", "success": None}, status_code=400)
         try:
-            user.document_file_url = save_uploaded_image(document_front_file)
-            user.document_back_file_url = save_uploaded_image(document_back_file)
-            user.selfie_file_url = save_uploaded_image(selfie_file)
+            user.document_file_url = save_private_upload(document_front_file, purpose="identity")
+            user.document_back_file_url = save_private_upload(document_back_file, purpose="identity")
+            user.selfie_file_url = save_private_upload(selfie_file, purpose="identity")
             if residence_proof_file and residence_proof_file.filename:
-                user.residence_proof_file_url = save_uploaded_image(residence_proof_file)
+                user.residence_proof_file_url = save_private_upload(residence_proof_file, purpose="identity")
         except HTTPException as exc:
             return templates.TemplateResponse("register_documents.html", {"request": request, "user": user, "error": str(exc.detail), "success": None}, status_code=exc.status_code)
         user.identity_status = "pending"
@@ -5996,7 +7197,7 @@ def confirm_email(request: Request, token: str = ""):
             user.email_verification_token = ""
             user.email_verification_code = make_email_verification_code()
             user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
-            send_verification_code_email(user, request)
+            send_verification_code_email(user, request, db=db)
             db.commit()
             return RedirectResponse(f"/cadastro/confirmar-email?email={user.email}&email_sent=1", status_code=303)
         user.email_verified = True
@@ -6007,7 +7208,7 @@ def confirm_email(request: Request, token: str = ""):
         audit_event(db, request, "user.email_verified", user, "user", user.id, "E-mail confirmado por link antigo ainda válido.")
         db.commit()
         response = RedirectResponse("/cadastro/documentos", status_code=303)
-        return _create_session_response(response, user.id)
+        return _create_session_response(response, user.id, request)
     finally:
         db.close()
 
@@ -6024,7 +7225,7 @@ def resend_email_confirmation(request: Request, login_identifier: str = Form("")
             user.email_verification_token = ""
             user.email_verification_code = make_email_verification_code()
             user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
-            send_verification_code_email(user, request)
+            send_verification_code_email(user, request, db=db)
             audit_event(db, request, "user.email_confirmation_resent", user, "user", user.id, "Reenvio de código de confirmação solicitado.")
             db.commit()
         return templates.TemplateResponse("login.html", {"request": request, "error": "Se a conta existir e ainda estiver pendente, um novo código de confirmação será enviado.", "created": 0, "email_pending": 1, "email_verified": 0})
@@ -6053,7 +7254,7 @@ def forgot_password_submit(request: Request, email: str = Form(...)):
             user.password_reset_token = token
             user.password_reset_expires_at = datetime.utcnow() + timedelta(hours=1)
             db.commit()
-            email_dev = not send_password_reset_email(user, token, request)
+            email_dev = not send_password_reset_email(user, token, request, db=db)
             audit_event(db, request, "user.password_reset_requested", user, "user", user.id, "Link de recuperação de senha solicitado.")
             db.commit()
         return templates.TemplateResponse(
@@ -6184,18 +7385,23 @@ def login(request: Request, login_identifier: str = Form(...), password: str = F
         else:
             response = RedirectResponse("/minha-conta", status_code=303)
 
-        return _create_session_response(response, user.id)
+        return _create_session_response(response, user.id, request)
     finally:
         db.close()
 
 
 @app.get("/logout")
+def logout_legacy_redirect():
+    # GET não pode encerrar sessão: evita logout forçado por link/imagem externa.
+    return RedirectResponse("/?login=1", status_code=303)
+
+
+@app.post("/logout")
 def logout(request: Request):
     response = RedirectResponse("/", status_code=303)
-    token = request.cookies.get("session_token")
-    if token and token in SESSIONS:
-        del SESSIONS[token]
-    response.delete_cookie("session_token")
+    _revoke_session_token(request.cookies.get("session_token"))
+    response.delete_cookie("session_token", path="/")
+    response.delete_cookie(CSRF_COOKIE_NAME, path="/")
     return response
 
 
@@ -6250,7 +7456,18 @@ def _bid_cooldown_key(auction_id: int, user_id: int, bid_value: float) -> str:
     return f"{auction_id}:{user_id}:{BR(bid_value):.2f}"
 
 
+def _cooldown_redis_key(auction_id: int, user_id: int, bid_value: float) -> str:
+    return _redis_key(REDIS_KEY_PREFIX, "cooldown", _bid_cooldown_key(auction_id, user_id, bid_value))
+
+
 def _get_fast_cooldown_remaining(auction_id: int, user_id: int, bid_value: float, now: datetime) -> int:
+    redis_value = _redis_get(_cooldown_redis_key(auction_id, user_id, bid_value))
+    if redis_value:
+        try:
+            until_epoch = float(redis_value)
+            return max(0, math.ceil(until_epoch - time.time()))
+        except Exception:
+            pass
     key = _bid_cooldown_key(auction_id, user_id, bid_value)
     until = BID_COOLDOWN_MEMORY.get(key)
     if not until:
@@ -6265,8 +7482,10 @@ def _get_fast_cooldown_remaining(auction_id: int, user_id: int, bid_value: float
 def _set_fast_cooldown(auction_id: int, user_id: int, bid_value: float, seconds: int, now: datetime) -> None:
     if seconds <= 0:
         return
-    BID_COOLDOWN_MEMORY[_bid_cooldown_key(auction_id, user_id, bid_value)] = now + timedelta(seconds=seconds)
-
+    key = _bid_cooldown_key(auction_id, user_id, bid_value)
+    until = now + timedelta(seconds=seconds)
+    BID_COOLDOWN_MEMORY[key] = until
+    _redis_set(_cooldown_redis_key(auction_id, user_id, bid_value), str(until.timestamp()), ex=max(1, seconds + 2))
 
 
 def _auction_row_to_namespace(row) -> SimpleNamespace:
@@ -6281,7 +7500,7 @@ def _auction_row_to_namespace(row) -> SimpleNamespace:
 
 
 def _light_user_for_bid(request: Request, db: Session) -> SimpleNamespace:
-    user_id = _request_user_id(request)
+    user_id = _request_user_id(request, db=db, fresh=True)
     if not user_id:
         raise HTTPException(status_code=401, detail="Faça login para continuar.")
     row = db.execute(text("""
@@ -6953,15 +8172,27 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
         # parados esperando o mesmo lock. O processamento continua serializado,
         # mas o servidor fica mais estável em pico.
         async with AUCTION_BID_ASYNC_LOCKS[auction_id]:
-            lock_entered = time.perf_counter()
-            private_payload, public_payload, button_cooldown = await asyncio.to_thread(
-                _place_bid_sync,
-                request,
-                auction_id,
-                bid_value,
-                client_bid_id,
+            distributed_lock = await _acquire_distributed_lock(
+                f"bid:{auction_id}",
+                ttl_seconds=int(os.getenv("BID_DISTRIBUTED_LOCK_TTL_SECONDS", "15")),
+                wait_seconds=float(os.getenv("BID_DISTRIBUTED_LOCK_WAIT_SECONDS", "3")),
             )
-            process_done = time.perf_counter()
+            if not distributed_lock:
+                status = 503 if REDIS_REQUIRED else 429
+                detail = "Serviço de tempo real temporariamente indisponível. Tente novamente." if REDIS_REQUIRED else "Muitos lances simultâneos. Aguarde um instante e tente novamente."
+                raise HTTPException(status_code=status, detail=detail)
+            try:
+                lock_entered = time.perf_counter()
+                private_payload, public_payload, button_cooldown = await asyncio.to_thread(
+                    _place_bid_sync,
+                    request,
+                    auction_id,
+                    bid_value,
+                    client_bid_id,
+                )
+                process_done = time.perf_counter()
+            finally:
+                await asyncio.to_thread(distributed_lock.release)
     except AuctionStateHTTPException as exc:
         body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
         if exc.retry_after:
@@ -7030,7 +8261,7 @@ def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Option
     reason = (request.query_params.get("reason") or "fallback").strip().lower()
     critical = _is_auction_state_critical(reason)
     user_id = _request_user_id(request)
-    cache_key = f"auction:{auction_id}:{user_id or 0}"
+    cache_key = f"auction:{auction_id}:v{_auction_state_version(auction_id)}:{user_id or 0}"
     ttl_ms = AUCTION_STATE_CRITICAL_TTL_MS if critical else AUCTION_STATE_CACHE_TTL_MS
 
     # Para checagens de rotina, responde do estado público em memória. Isso evita
@@ -7124,7 +8355,7 @@ async def auction_state(request: Request, auction_id: int):
     if public_payload:
         asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
     if finished_now:
-        asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
+        asyncio.create_task(asyncio.to_thread(enqueue_finished_auction_side_effects_job, auction_id))
     return JSONResponse(body)
 
 
@@ -7811,14 +9042,13 @@ def account_delete_submit(
         user.selfie_file_url = ""
         user.residence_proof_file_url = ""
 
+        _revoke_all_user_sessions(db, user.id)
         nav_cache_clear()
         db.commit()
 
-        token = request.cookies.get("session_token")
-        if token and token in SESSIONS:
-            del SESSIONS[token]
         response = RedirectResponse("/?account_deleted=1", status_code=303)
-        response.delete_cookie("session_token")
+        response.delete_cookie("session_token", path="/")
+        response.delete_cookie(CSRF_COOKIE_NAME, path="/")
         return response
     finally:
         db.close()
@@ -7842,12 +9072,12 @@ async def account_identity_submit(request: Request, document_front_file: UploadF
         front = document_front_file if document_front_file and document_front_file.filename else document_file
         if not front or not front.filename or not selfie_file or not selfie_file.filename:
             return templates.TemplateResponse("identity_verification.html", {"request": request, "user": user, "error": "Envie a frente do documento e a selfie para análise.", "success": None}, status_code=400)
-        user.document_file_url = save_uploaded_image(front)
+        user.document_file_url = save_private_upload(front, purpose="identity")
         if document_back_file and document_back_file.filename:
-            user.document_back_file_url = save_uploaded_image(document_back_file)
-        user.selfie_file_url = save_uploaded_image(selfie_file)
+            user.document_back_file_url = save_private_upload(document_back_file, purpose="identity")
+        user.selfie_file_url = save_private_upload(selfie_file, purpose="identity")
         if residence_proof_file and residence_proof_file.filename:
-            user.residence_proof_file_url = save_uploaded_image(residence_proof_file)
+            user.residence_proof_file_url = save_private_upload(residence_proof_file, purpose="identity")
         user.identity_status = "pending"
         user.identity_note = "Documentos enviados. Aguardando análise do administrador."
         audit_event(db, request, "user.identity_submitted", user, "user", user.id, "Documentos de identidade enviados para análise.")
@@ -8328,25 +9558,76 @@ def mercadopago_checkout_return(request: Request):
         db.close()
 
 
+def _mp_signature_parts(signature: str) -> dict[str, str]:
+    parts: dict[str, str] = {}
+    for pair in (signature or "").split(","):
+        if "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        parts[key.strip().lower()] = value.strip()
+    return parts
+
+
+def _mercadopago_webhook_signature_valid(request: Request, payment_id: str) -> bool:
+    signature = (request.headers.get("x-signature") or "").strip()
+    request_id = (request.headers.get("x-request-id") or "").strip()
+    if not MP_WEBHOOK_SECRET or not signature:
+        return False
+    parts = _mp_signature_parts(signature)
+    timestamp = parts.get("ts", "")
+    received = parts.get("v1", "")
+    if not received:
+        return False
+    manifest_parts = []
+    if payment_id:
+        # Mercado Pago exige id minúsculo no manifesto para IDs alfanuméricos.
+        manifest_parts.append(f"id:{payment_id.lower()}")
+    if request_id:
+        manifest_parts.append(f"request-id:{request_id}")
+    if timestamp:
+        manifest_parts.append(f"ts:{timestamp}")
+    manifest = ";".join(manifest_parts) + (";" if manifest_parts else "")
+    calculated = hmac.new(
+        MP_WEBHOOK_SECRET.encode("utf-8"),
+        manifest.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(calculated, received)
+
+
 @app.api_route("/webhook/mercadopago", methods=["GET", "POST"])
 async def mercadopago_webhook(request: Request):
+    # GET não muda estado. Ele existe somente para compatibilidade/diagnóstico.
+    if request.method == "GET":
+        return {"ok": True, "method": "GET"}
+
+    payload: dict = {}
+    try:
+        raw = await request.body()
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:
+        payload = {}
+
+    data = payload.get("data") if isinstance(payload, dict) else {}
     payment_id = (
         request.query_params.get("id")
         or request.query_params.get("data.id")
         or request.query_params.get("payment_id")
-        or ""
+        or (str(data.get("id") or "") if isinstance(data, dict) else "")
+        or str(payload.get("id") or payload.get("payment_id") or "")
     )
-    if request.method == "POST":
-        try:
-            payload = await request.json()
-            data = payload.get("data") if isinstance(payload, dict) else {}
-            if isinstance(data, dict):
-                payment_id = payment_id or str(data.get("id") or "")
-            payment_id = payment_id or str(payload.get("id") or payload.get("payment_id") or "")
-        except Exception:
-            pass
-
     payment_id = str(payment_id or "").strip()
+
+    if MP_WEBHOOK_SIGNATURE_REQUIRED and not MP_WEBHOOK_SECRET:
+        print("[MP WEBHOOK ERROR] MP_WEBHOOK_SECRET ausente em modo obrigatório.")
+        return JSONResponse({"ok": False, "detail": "Webhook não configurado."}, status_code=503)
+    if MP_WEBHOOK_SECRET and not _mercadopago_webhook_signature_valid(request, payment_id):
+        print(f"[MP WEBHOOK DENIED] assinatura inválida request_id={request.headers.get('x-request-id') or '-'}")
+        return JSONResponse({"ok": False, "detail": "Assinatura do webhook inválida."}, status_code=401)
+    if MP_WEBHOOK_SIGNATURE_REQUIRED and not payment_id:
+        return JSONResponse({"ok": False, "detail": "Notificação sem identificador de pagamento."}, status_code=400)
     if not payment_id:
         return {"ok": True, "ignored": "missing_payment_id"}
 
@@ -8354,12 +9635,12 @@ async def mercadopago_webhook(request: Request):
     try:
         row = db.query(MercadoPagoPayment).filter(MercadoPagoPayment.mp_payment_id == payment_id).first()
         try:
+            # A assinatura prova origem; a API é a fonte de verdade do status.
             mp_status = get_mp_payment_status(payment_id)
             external_reference = str((mp_status.get("raw") or {}).get("external_reference") or "").strip()
             if not row and external_reference:
                 row = db.query(MercadoPagoPayment).filter(MercadoPagoPayment.mp_payment_id == external_reference).first()
                 if row:
-                    # Troca a referência temporária pelo ID real do pagamento para evitar reaplicar.
                     row.mp_payment_id = payment_id
                     db.add(row)
                     db.flush()
@@ -8370,11 +9651,13 @@ async def mercadopago_webhook(request: Request):
             else:
                 row.status = mp_status["status"] or row.status
                 db.add(row)
+            audit_event(db, request, "payment.webhook_verified", row.user, "mercadopago_payment", payment_id, f"Status recebido: {mp_status['status'] or 'unknown'}")
             db.commit()
             db.refresh(row)
         except Exception as exc:
-            print(f"[MP WEBHOOK ERROR] payment_id={payment_id}: {exc}")
-            return {"ok": False, "error": str(exc)}
+            db.rollback()
+            print(f"[MP WEBHOOK ERROR] payment_id={payment_id} error={type(exc).__name__}: {exc}")
+            return JSONResponse({"ok": False, "detail": "Falha temporária ao processar a notificação."}, status_code=500)
         return {"ok": True, "status": row.status}
     finally:
         db.close()
@@ -9068,7 +10351,7 @@ def admin_dashboard(request: Request):
                 User.wallet_balance, User.identity_status, User.is_banned, User.chat_muted, User.is_admin,
                 User.is_superadmin, User.ban_count, User.banned_until, User.ban_reason, User.street, User.number, User.city, User.state, User.document_type,
                 User.document_number, User.identity_note, User.document_file_url, User.document_back_file_url,
-                User.selfie_file_url, User.created_at,
+                User.selfie_file_url, User.residence_proof_file_url, User.created_at,
             )
             if search:
                 like = f"%{search}%"
@@ -9081,9 +10364,9 @@ def admin_dashboard(request: Request):
                     identity_status=r.identity_status or "pending", is_banned=bool(r.is_banned), chat_muted=bool(r.chat_muted),
                     is_admin=bool(r.is_admin), is_superadmin=bool(r.is_superadmin), ban_count=int(r.ban_count or 0), banned_until=r.banned_until, ban_reason=r.ban_reason or "", street=r.street or "", number=r.number or "",
                     city=r.city or "", state=r.state or "", document_type=r.document_type or "CPF", document_number=r.document_number or "",
-                    identity_note=r.identity_note or "", document_file_url=safe_image_url(r.document_file_url or ""),
-                    document_back_file_url=safe_image_url(r.document_back_file_url or ""), selfie_file_url=safe_image_url(r.selfie_file_url or ""),
-                    created_at=r.created_at,
+                    identity_note=r.identity_note or "", document_file_url=r.document_file_url or "",
+                    document_back_file_url=r.document_back_file_url or "", selfie_file_url=r.selfie_file_url or "",
+                    residence_proof_file_url=getattr(r, "residence_proof_file_url", "") or "", created_at=r.created_at,
                 )
                 for r in user_rows
             ]
@@ -10061,13 +11344,18 @@ def _auction_ws_initial_payload_sync(auction_id: int) -> tuple[Optional[dict], b
 
 @app.websocket("/ws/auction/{auction_id}")
 async def auction_socket(websocket: WebSocket, auction_id: int):
+    origin = (websocket.headers.get("origin") or "").strip().rstrip("/")
+    expected_origin = public_base_url().rstrip("/")
+    if origin and expected_origin and not hmac.compare_digest(origin, expected_origin):
+        await websocket.close(code=1008)
+        return
     await manager.connect(auction_id, websocket)
     try:
         payload, finished_now = await asyncio.to_thread(_auction_ws_initial_payload_sync, auction_id)
         if payload:
             await manager.send_to(auction_id, websocket, {"type": "auction_update", "auction": payload})
         if finished_now:
-            asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
+            asyncio.create_task(asyncio.to_thread(enqueue_finished_auction_side_effects_job, auction_id))
 
         while True:
             message = await websocket.receive_text()

@@ -14,6 +14,7 @@
     {% if email_dev %}<div class="alert">E-mail temporariamente indisponível. O código foi registrado no console/log da aplicação.</div>{% endif %}
 
     <form method="post" action="/cadastro/confirmar-email" class="email-code-form" autocomplete="off">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <input type="hidden" name="email" value="{{ email }}">
 
       <label>Código de confirmação
@@ -35,6 +36,7 @@
     </form>
 
     <form method="post" action="/cadastro/reenviar-confirmacao" class="resend-code-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <input type="hidden" name="email" value="{{ email }}">
       <button type="submit" class="btn full ghost">Reenviar código</button>
     </form>

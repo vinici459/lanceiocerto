@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-csrf-token="{{ request.state.csrf_token }}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -91,7 +91,7 @@
           </span>
         </div>
 
-        <a href="/logout">Sair</a>
+        <form method="post" action="/logout" class="logout-form"><input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button type="submit" class="nav-logout">Sair</button></form>
       {% else %}
         <a href="/?login=1" data-login-open>Entrar</a>
         <a href="/register" class="btn small">Criar conta</a>
@@ -105,6 +105,41 @@
   {% block content %}{% endblock %}
 </main>
 
+<script>
+(function () {
+  "use strict";
+  const csrfToken = document.documentElement.dataset.csrfToken || "";
+  const unsafe = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+  function addCsrfField(form) {
+    if (!form || String(form.method || "GET").toUpperCase() !== "POST" || !csrfToken) return;
+    if (form.querySelector('input[name="_csrf"]')) return;
+    const field = document.createElement("input");
+    field.type = "hidden";
+    field.name = "_csrf";
+    field.value = csrfToken;
+    form.prepend(field);
+  }
+
+  document.querySelectorAll("form").forEach(addCsrfField);
+  document.addEventListener("submit", function (event) { addCsrfField(event.target); }, true);
+
+  const originalFetch = window.fetch;
+  window.fetch = function (input, init) {
+    const options = init ? { ...init } : {};
+    const method = String(options.method || (input && input.method) || "GET").toUpperCase();
+    let url;
+    try { url = new URL(typeof input === "string" ? input : input.url, window.location.href); } catch (_) { url = null; }
+    if (csrfToken && unsafe.has(method) && url && url.origin === window.location.origin) {
+      const headers = new Headers(options.headers || (input && input.headers) || {});
+      if (!headers.has("X-CSRF-Token")) headers.set("X-CSRF-Token", csrfToken);
+      options.headers = headers;
+      options.credentials = options.credentials || "same-origin";
+    }
+    return originalFetch.call(this, input, options);
+  };
+})();
+</script>
 <script src="/static/app.js?v={{ asset_version }}" defer></script>
 {% block extra_scripts %}{% endblock %}
 
@@ -119,6 +154,7 @@
     </div>
 
     <form class="auth-modal-form" id="auth-login-form" method="post" action="/login">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <div class="auth-modal-alert" id="auth-login-alert" hidden></div>
 
       <label>E-mail ou CPF
@@ -254,3 +290,5 @@
 </style>
 </body>
 </html>
+
+<style>.logout-form{margin:0}.nav-logout{border:0;background:transparent;color:#fff;font:inherit;font-weight:800;cursor:pointer;padding:0}.nav-logout:hover{text-decoration:underline}</style>

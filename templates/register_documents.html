@@ -34,6 +34,7 @@
     </div>
 
     <form method="post" action="/cadastro/documentos" enctype="multipart/form-data" id="documents-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <div class="docs-clean-grid">
         <div class="doc-clean-item" data-doc-upload data-required="1" data-min-width="700" data-min-height="450">
           <div class="doc-clean-title">
@@ -96,6 +97,7 @@
     </form>
 
     <form method="post" action="/cadastro/documentos/enviar-depois" class="skip-docs-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <button class="btn full ghost" type="submit">Enviar depois</button>
     </form>
   </div>

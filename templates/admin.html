@@ -32,7 +32,6 @@
           <span class="admin-menu-label">Usuários e suporte</span>
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-users' %}active{% endif %}" href="/admin?tab=admin-users" data-target="admin-users" data-no-prefetch="true">Usuários</a>{% endif %}
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}" href="/admin?tab=admin-identity-pending" data-target="admin-identity-pending" data-no-prefetch="true">Usuários pendentes</a>{% endif %}
-          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}" href="/admin?tab=admin-withdrawals" data-target="admin-withdrawals" data-no-prefetch="true">Saques Pendentes</a>{% endif %}
           <a class="side-link admin-link {% if admin_active_panel == 'admin-tickets' %}active{% endif %}" href="/admin?tab=admin-tickets" data-target="admin-tickets" data-no-prefetch="true">Chamados/Disputas</a>
         </div>
 
@@ -266,6 +265,7 @@
       <a class="btn secondary" href="/admin?tab=admin-fiscal-ledger" data-no-prefetch="true">Limpar</a>
     </form>
     <form method="post" action="/admin/fiscal/backfill" class="fiscal-toolbar" style="margin-top:14px;">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <label>Registros por processamento
         <input name="limit" type="number" min="1" max="3000" value="800">
       </label>
@@ -307,6 +307,7 @@
         {% if record.estimated_amount %} · Estimativa: R$ {{ '%.2f'|format(record.estimated_amount)|replace('.', ',') }}{% endif %}
       </div>
       <form method="post" action="/admin/fiscal/record/{{ record.id }}/review" class="form-card no-shadow">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
         <div class="fiscal-grid">
           <label>Status de revisão
             <select name="status">
@@ -382,6 +383,7 @@
 
         <div class="panel-card admin-card-pro">
           <form class="form-card no-shadow admin-advanced-form" method="post" action="/admin/item/create" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
             <div class="form-section-title"><h2>Dados principais</h2><p>Informações básicas do produto e origem de compra.</p></div>
             <div class="profile-grid admin-form-grid">
               <label>Título do produto<input name="title" required></label>
@@ -490,6 +492,7 @@
             </div>
 
             <form class="form-card no-shadow admin-advanced-form returned-product-form" method="post" action="/admin/item/{{ item.id }}/returned-update-relist" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
               <div class="profile-grid admin-form-grid">
                 <label>Título do produto<input name="title" value="{{ item.title }}" required></label>
                 <label>Preço original<input value="R$ {{ '%.2f'|format(item.source_price)|replace('.', ',') }}" readonly></label>
@@ -568,13 +571,16 @@
                   <td>{% if item.winner %}{{ item.winner.full_name }}{% else %}—{% endif %}</td>
                   <td>
                     <div class="admin-action-stack admin-action-grid-pro">
-                      <form method="post" action="/admin/item/{{ item.id }}/start-now" class="inline-form"><button class="btn small" type="submit">Começar</button></form>
+                      <form method="post" action="/admin/item/{{ item.id }}/start-now" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small" type="submit">Começar</button></form>
                       <form method="post" action="/admin/item/{{ item.id }}/relist" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                         <input type="number" name="start_in_minutes" value="60" min="0" required title="Começar em quantos minutos">
                         <input type="number" name="initial_duration_minutes" value="30" min="1" max="60" required title="Tempo inicial da disputa">
                         <button class="btn small ghost" type="submit">Relançar</button>
                       </form>
-                      {% if item.status != 'live' %}<form method="post" action="/admin/item/{{ item.id }}/delete" class="inline-form"><button class="btn small danger" type="submit">Excluir</button></form>{% endif %}
+                      {% if item.status != 'live' %}<form method="post" action="/admin/item/{{ item.id }}/delete" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small danger" type="submit">Excluir</button></form>{% endif %}
                       <a class="btn small ghost" href="/auction/{{ item.id }}">Abrir</a>
                     </div>
                   </td>
@@ -654,6 +660,7 @@
                   <td>
                     <a class="btn small ghost" href="/auction/{{ o.auction.id }}">Abrir</a>
                     <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                       <input type="number" name="extra_minutes" value="10" min="1" title="Minutos extras">
                       <button class="btn small" type="submit">Dar mais prazo</button>
                     </form>
@@ -754,6 +761,7 @@
               <div class="panel-card admin-card-pro">
                 <h3>Controle do pedido</h3>
                 <form method="post" action="/admin/order/{{ o.id }}/admin-update" class="order-admin-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                   <div class="profile-grid admin-form-grid">
                     <label>Link de compra/admin
                       <input name="purchase_link" value="{{ o.purchase_link or o.auction.source_url or '' }}" placeholder="https://...">
@@ -841,19 +849,23 @@
                         <div><span>Observação</span><strong>{{ u.identity_note or '—' }}</strong></div>
                       </div>
                       <div class="admin-user-docs">
-                        {% if u.document_file_url %}<a class="btn small ghost" href="{{ u.document_file_url }}" target="_blank">Abrir frente do documento</a>{% endif %}
-                        {% if u.document_back_file_url %}<a class="btn small ghost" href="{{ u.document_back_file_url }}" target="_blank">Abrir verso do documento</a>{% endif %}
-                        {% if u.selfie_file_url %}<a class="btn small ghost" href="{{ u.selfie_file_url }}" target="_blank">Abrir selfie</a>{% endif %}
+                        {% if u.document_file_url %}<a class="btn small ghost" href="{{ private_file_url(u.document_file_url) }}" target="_blank">Abrir frente do documento</a>{% endif %}
+                        {% if u.document_back_file_url %}<a class="btn small ghost" href="{{ private_file_url(u.document_back_file_url) }}" target="_blank">Abrir verso do documento</a>{% endif %}
+                        {% if u.selfie_file_url %}<a class="btn small ghost" href="{{ private_file_url(u.selfie_file_url) }}" target="_blank">Abrir selfie</a>{% endif %}
                       </div>
                       <div class="admin-user-actions">
-                        <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form"><input name="note" placeholder="Observação da conferência"><button class="btn small" type="submit">Dar selo confirmado</button></form>
-                        <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form"><input name="note" placeholder="Motivo da recusa"><button class="btn small danger" type="submit">Recusar documento</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><input name="note" placeholder="Observação da conferência"><button class="btn small" type="submit">Dar selo confirmado</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><input name="note" placeholder="Motivo da recusa"><button class="btn small danger" type="submit">Recusar documento</button></form>
                       </div>
                       <div class="admin-user-actions">
                        
                         {% if not u.is_superadmin %}
-                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">{% if u.is_banned %}Desbanir usuário{% else %}Banir usuário{% endif %}</button></form>
-                        <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small danger" type="submit">{% if u.is_banned %}Desbanir usuário{% else %}Banir usuário{% endif %}</button></form>
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
                         {% endif %}
                       </div>
                       <div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Valor</th><th>Descrição</th></tr></thead><tbody>{% for tx in user_audit[u.id].transactions if user_audit is defined and user_audit[u.id] is defined %}<tr><td>{{ tx.created_at.strftime('%d/%m/%Y %H:%M') }}</td><td>{{ tx.kind }}</td><td>R$ {{ '%.2f'|format(tx.amount)|replace('.', ',') }}</td><td>{{ tx.note }}</td></tr>{% else %}<tr><td colspan="4">Sem movimentações recentes.</td></tr>{% endfor %}</tbody></table></div>
@@ -928,32 +940,32 @@
                         <div>
                           <span>Frente do documento</span>
                           {% if u.document_file_url %}
-                            <a class="identity-doc-link" href="{{ u.document_file_url }}" target="_blank" rel="noopener">
-                              {% if u.document_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_file_url }}" alt="Frente do documento" loading="lazy">{% endif %}
+                            <a class="identity-doc-link" href="{{ private_file_url(u.document_file_url) }}" target="_blank" rel="noopener">
+                              {% if private_file_is_pdf(u.document_file_url) %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ private_file_url(u.document_file_url) }}" alt="Frente do documento" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviado.</p>{% endif %}
                         </div>
                         <div>
                           <span>Verso do documento</span>
                           {% if u.document_back_file_url %}
-                            <a class="identity-doc-link" href="{{ u.document_back_file_url }}" target="_blank" rel="noopener">
-                              {% if u.document_back_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ u.document_back_file_url }}" alt="Verso do documento" loading="lazy">{% endif %}
+                            <a class="identity-doc-link" href="{{ private_file_url(u.document_back_file_url) }}" target="_blank" rel="noopener">
+                              {% if private_file_is_pdf(u.document_back_file_url) %}<span class="identity-pdf-preview">PDF — abrir documento</span>{% else %}<img src="{{ private_file_url(u.document_back_file_url) }}" alt="Verso do documento" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviado.</p>{% endif %}
                         </div>
                         <div>
                           <span>Selfie atual</span>
                           {% if u.selfie_file_url %}
-                            <a class="identity-doc-link" href="{{ u.selfie_file_url }}" target="_blank" rel="noopener">
-                              {% if u.selfie_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir arquivo</span>{% else %}<img src="{{ u.selfie_file_url }}" alt="Selfie" loading="lazy">{% endif %}
+                            <a class="identity-doc-link" href="{{ private_file_url(u.selfie_file_url) }}" target="_blank" rel="noopener">
+                              {% if private_file_is_pdf(u.selfie_file_url) %}<span class="identity-pdf-preview">PDF — abrir arquivo</span>{% else %}<img src="{{ private_file_url(u.selfie_file_url) }}" alt="Selfie" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviada.</p>{% endif %}
                         </div>
                         <div>
                           <span>Comprovante de residência</span>
                           {% if u.residence_proof_file_url %}
-                            <a class="identity-doc-link" href="{{ u.residence_proof_file_url }}" target="_blank" rel="noopener">
-                              {% if u.residence_proof_file_url.lower().endswith('.pdf') %}<span class="identity-pdf-preview">PDF — abrir comprovante</span>{% else %}<img src="{{ u.residence_proof_file_url }}" alt="Comprovante de residência" loading="lazy">{% endif %}
+                            <a class="identity-doc-link" href="{{ private_file_url(u.residence_proof_file_url) }}" target="_blank" rel="noopener">
+                              {% if private_file_is_pdf(u.residence_proof_file_url) %}<span class="identity-pdf-preview">PDF — abrir comprovante</span>{% else %}<img src="{{ private_file_url(u.residence_proof_file_url) }}" alt="Comprovante de residência" loading="lazy">{% endif %}
                             </a>
                           {% else %}<p>Não enviado.</p>{% endif %}
                         </div>
@@ -961,11 +973,13 @@
 
                       <div class="identity-review-actions">
                         <form method="post" action="/admin/user/{{ u.id }}/verify" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                           <input name="note" value="Documentação conferida e aprovada." placeholder="Observação da aprovação">
                           <button class="btn small" type="submit">Validar usuário</button>
                         </form>
 
                         <form method="post" action="/admin/user/{{ u.id }}/reject" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                           <input name="note" value="Documentação ilegível ou incompatível com os dados informados." placeholder="Motivo da recusa">
                           <button class="btn small danger" type="submit">Enviar incompatibilidade</button>
                         </form>
@@ -1047,6 +1061,7 @@
                   <td><span class="status {{ w.status }}">{{ w.status }}</span></td>
                   <td>
                     <form method="post" action="/admin/withdrawal/{{ w.id }}/set-status" class="withdraw-admin-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                       <select name="status">
                         <option value="pending" {% if w.status == 'pending' %}selected{% endif %}>Pendente</option>
                         <option value="approved" {% if w.status == 'approved' %}selected{% endif %}>Aprovado</option>
@@ -1058,6 +1073,7 @@
                     </form>
                     {% if w.status in ['pending', 'approved'] %}
                     <form method="post" action="/admin/withdrawal/{{ w.id }}/set-status" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                       <input type="hidden" name="status" value="paid">
                       <input type="hidden" name="admin_note" value="Saque pago manualmente pelo administrador.">
                       <button class="btn small" type="submit">Concluir saque</button>
@@ -1100,6 +1116,7 @@
                   <td>{{ t.admin_note or '—' }}</td>
                   <td>
                     <form method="post" action="/admin/ticket/{{ t.id }}/set-status" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                       <select name="status">
                         <option value="open" {% if t.status == 'open' %}selected{% endif %}>Aberto</option>
                         <option value="in_review" {% if t.status == 'in_review' %}selected{% endif %}>Em análise</option>
@@ -1233,6 +1250,7 @@
                       <p><strong>Prazo:</strong> {{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</p>
                       {% if user.is_superadmin and (o.status == 'expired' or not o.paid_at) %}
                       <form method="post" action="/admin/order/{{ o.id }}/extend-payment" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                         <input type="number" name="extra_minutes" value="10" min="1">
                         <button class="btn small" type="submit">Dar mais prazo</button>
                       </form>
@@ -1253,6 +1271,7 @@
                   <div class="panel-card admin-card-pro">
                     <h3>Compra, envio e rastreio</h3>
                     <form method="post" action="/admin/order/{{ o.id }}/admin-update" class="order-admin-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                       <div class="profile-grid admin-form-grid">
                         <label>Link de compra do admin
                           <input name="purchase_link" value="{{ o.purchase_link or o.auction.source_url or '' }}" placeholder="https://...">
@@ -1278,6 +1297,7 @@
                       <button class="btn" type="submit">Salvar controle</button>
                       {% if o.status in ['delivered', 'resolved'] %}
                       <form method="post" action="/admin/order/{{ o.id }}/finalize-operation" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                         <input name="admin_note" placeholder="Observação final" value="Operação conferida e finalizada.">
                         <button class="btn small" type="submit">Finalizar operação agora</button>
                       </form>
@@ -1300,12 +1320,15 @@
                       {% endfor %}
                     </div>
                     <form method="post" action="/admin/order/{{ o.id }}/message">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                       <textarea name="message" placeholder="Escreva uma mensagem direta..." required></textarea>
                       <button class="btn small" type="submit">Enviar mensagem</button>
                     </form>
                     <div class="admin-toolbar-end">
-                      <form method="post" action="/admin/order/{{ o.id }}/close-chat" class="inline-form"><button class="btn small ghost" type="submit">Fechar atendimento</button></form>
-                      <form method="post" action="/admin/order/{{ o.id }}/reopen-chat" class="inline-form"><button class="btn small" type="submit">Reabrir atendimento</button></form>
+                      <form method="post" action="/admin/order/{{ o.id }}/close-chat" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small ghost" type="submit">Fechar atendimento</button></form>
+                      <form method="post" action="/admin/order/{{ o.id }}/reopen-chat" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small" type="submit">Reabrir atendimento</button></form>
                     </div>
                   </div>
                 </div>
@@ -1449,14 +1472,18 @@
                   <td>{% if u.chat_muted %}Chat mutado{% else %}Chat liberado{% endif %}{% if u.is_banned %}<br>Conta banida{% endif %}<br><small>Ocorrências: {{ u.ban_count if u.ban_count is defined else 0 }}{% if u.banned_until %} • até {{ fmt_br_datetime(u.banned_until) }}{% endif %}{% if u.ban_reason %}<br>{{ u.ban_reason }}{% endif %}</small></td>
                   <td>
                     {% if not u.is_superadmin %}
-                      <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
+                      <form method="post" action="/admin/user/{{ u.id }}/toggle-mute" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small ghost" type="submit">{% if u.chat_muted %}Desmutar chat{% else %}Mutar chat{% endif %}</button></form>
                       <form method="post" action="/admin/user/{{ u.id }}/ban-1-day" class="inline-form moderation-ban-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
                         <input name="reason" placeholder="Motivo da punição" value="Infração nas regras do chat">
                         <button class="btn small danger" type="submit">Banir 1 dia</button>
                       </form>
                       {% if user.is_superadmin %}
-                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form"><button class="btn small danger" type="submit">Banimento permanente</button></form>
-                        {% if u.is_banned %}<form method="post" action="/admin/user/{{ u.id }}/unban" class="inline-form"><button class="btn small ghost" type="submit">Liberar acesso</button></form>{% endif %}
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle-ban" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small danger" type="submit">Banimento permanente</button></form>
+                        {% if u.is_banned %}<form method="post" action="/admin/user/{{ u.id }}/unban" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}"><button class="btn small ghost" type="submit">Liberar acesso</button></form>{% endif %}
                       {% endif %}
                     {% else %}
                       —

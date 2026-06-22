@@ -256,6 +256,7 @@
         </div>
 
         <form method="post" action="/indicacao/indicar" class="suggestion-picker-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
           <div class="suggestion-picker-grid">
             <label>Categoria
               <select id="suggestionCategoryFilter">
@@ -301,6 +302,7 @@
             </div>
             <div class="suggestion-progress"><span style="width: {{ product.percent if product.percent <= 100 else 100 }}%"></span></div>
             <form method="post" action="/indicacao/votar">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
               <input type="hidden" name="product_key" value="{{ product.key }}">
               <button class="btn full" type="submit" {% if today_suggestion_vote or today_suggestion_nomination %}disabled{% endif %}>
                 {% if today_suggestion_vote %}Voto diário usado{% elif today_suggestion_nomination %}Você indicou hoje{% else %}Votar neste produto{% endif %}

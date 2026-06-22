@@ -193,6 +193,7 @@
       </div>
       {% if can_customize_invite_code %}
         <form method="post" action="/minha-conta/convite/gerar" class="compact-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
           <label>Escolha 4 letras do código
             <input name="code_prefix" maxlength="4" minlength="4" pattern="[A-Za-z]{4}" placeholder="Ex: ABCD" required style="text-transform:uppercase">
             <small>Use somente 4 letras, sem espaço e sem acento. Depois disso o código fica fixo na sua conta.</small>
@@ -218,6 +219,7 @@
     </div>
 
     <form id="deposit-pix-panel" method="post" action="/minha-conta/saldo/pix" class="wallet-card deposit-panel active" novalidate>
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <div id="deposit-pix-alert" class="wallet-error" aria-live="polite"></div>
 
       <label>Valor da compra de Créditos LC
@@ -255,6 +257,7 @@
     </form>
 
     <form id="deposit-card-panel" method="post" action="/minha-conta/saldo/cartao" class="wallet-card deposit-panel" novalidate>
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <div id="deposit-card-alert" class="wallet-error" aria-live="polite"></div>
 
       <label>Valor da compra de Créditos LC
@@ -280,6 +283,7 @@
     {% if can_apply_invite_code %}
       <p class="muted">Sua primeira compra de Créditos LC foi aprovada. Agora você pode informar um código de convite uma única vez.</p>
       <form method="post" action="/minha-conta/convite/aplicar" class="compact-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
         <label>Código de convite
           <input name="invite_code" maxlength="24" placeholder="Ex: ABCD123456" required style="text-transform:uppercase">
           <small>O código só pode ser usado uma vez e não pode ser da própria conta.</small>
@@ -493,6 +497,7 @@
     <div class="panel-card">
       <div class="card-title-row"><h2>Abrir novo chamado</h2><span class="pill-soft">Protocolo</span></div>
       <form method="post" action="/minha-conta/suporte/novo" enctype="multipart/form-data" class="support-open-form" data-consumer-category="{{ support_consumer_category or 'produto_devolucao_reembolso' }}">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
         <label>Categoria
           <select name="category" required data-support-category-select>
             {% for key,label in support_categories.items() %}
@@ -617,7 +622,7 @@
           <div class="support-msg {{ 'admin' if m.message_type == 'admin' else 'customer' }}">
             <div class="support-msg-head"><span>{{ 'Suporte Lancei o Certo' if m.message_type == 'admin' else 'Você' }}</span><span>{{ fmt_br_datetime(m.created_at) if fmt_br_datetime is defined else m.created_at }}</span></div>
             <p>{{ m.body }}</p>
-            {% if m.proof_url %}<a class="support-attach" href="{{ m.proof_url }}" target="_blank">Abrir anexo</a>{% endif %}
+            {% if m.proof_url %}<a class="support-attach" href="{{ private_file_url(m.proof_url) }}" target="_blank">Abrir anexo</a>{% endif %}
           </div>
           {% endif %}
         {% else %}
@@ -626,6 +631,7 @@
       </div>
       {% if support_ticket.status not in ['closed'] %}
       <form method="post" action="/minha-conta/suporte/{{ support_ticket.id }}/responder" enctype="multipart/form-data" class="support-reply-form" style="margin-top:14px;display:grid;gap:10px">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
         <label>Responder chamado
           <textarea name="message" placeholder="Escreva uma resposta ou envie mais informações."></textarea>
         </label>
@@ -813,6 +819,7 @@
     {% if o.status in ['paid','aguardando_escolha'] %}
       <div class="fulfillment-choice-grid">
         <form method="post" action="/minha-conta/pedido/{{ o.id }}/escolher-atendimento" class="wallet-card">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
           <input type="hidden" name="fulfillment_mode" value="site_purchase">
           <h3>Compra assistida pelo LanceioCerto</h3>
           <p class="muted">A equipe faz a compra e atualiza envio, rastreio e entrega dentro da sua conta.</p>
@@ -820,6 +827,7 @@
         </form>
 
         <form method="post" action="/minha-conta/pedido/{{ o.id }}/escolher-atendimento" class="wallet-card">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
           <input type="hidden" name="fulfillment_mode" value="customer_purchase">
           <h3>Quero fazer meu próprio pedido</h3>
           <p class="muted">Você abre o link original, faz o pedido em seu nome/endereço, escolhe Pix e envia o link/código para validação.</p>
@@ -844,6 +852,7 @@
             <div class="alert">{{ o.submitted_link_validation_note }}</div>
           {% endif %}
           <form method="post" action="/minha-conta/pedido/{{ o.id }}/enviar-link-pagamento" class="wallet-card">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
             <label>Link ou código de pagamento do pedido
               <input name="submitted_purchase_link" value="{{ o.submitted_purchase_link or '' }}" placeholder="Cole aqui o link/código Pix gerado no site original" required>
             </label>
@@ -950,6 +959,7 @@
         <a class="btn" href="{{ o.payment_link }}">Pagar agora</a>
       {% elif o.status == 'delivered' %}
         <form method="post" action="/minha-conta/pedido/{{ o.id }}/confirmar-recebimento">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
           <button class="btn" type="submit">Recebi meu produto</button>
         </form>
       {% elif o.status in ['finalized','completed'] %}
@@ -960,6 +970,7 @@
       <details class="account-dispute-box order-detail-dispute">
         <summary class="btn small ghost">Abrir disputa ou chamado</summary>
         <form method="post" action="/minha-conta/chamado" enctype="multipart/form-data" class="wallet-card">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
           <input type="hidden" name="order_id" value="{{ o.id }}">
           <input type="hidden" name="subject" value="Problema no pedido #{{ o.id }}">
           <label>Descreva o problema<textarea name="message" required placeholder="Explique o que aconteceu com seu pedido."></textarea></label>
@@ -1047,6 +1058,7 @@
 
     <!-- DIREITA -->
     <form id="checkoutForm" class="form-card checkout-form-pro" method="post" action="/minha-conta/pagamentos/{{ entity.auction_id }}/confirmar" data-checkout-initial-step="{{ 'payment' if checkout_payment_active else 'delivery' }}">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
 
       <!-- ETAPA 1 -->
       <div class="checkout-step {% if not checkout_payment_active %}active{% endif %}" data-checkout-step="delivery">
@@ -1290,6 +1302,7 @@
 
 
   <form method="post" action="/minha-conta/deletar" class="delete-account-form" id="delete-account-form">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
     <label>Motivo da exclusão
       <select name="delete_reason" required>
         <option value="">Selecione um motivo</option>

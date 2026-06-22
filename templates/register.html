@@ -27,6 +27,7 @@
     </aside>
 
     <form class="register-pro-form register-main-form" method="post" action="/register" autocomplete="on" id="register-form" data-focus-field="{{ focus }}">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
       <div class="form-title-row">
         <div>
           <h2>Dados de acesso</h2>

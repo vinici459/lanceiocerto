@@ -2,6 +2,7 @@
 {% block content %}
 <section class="form-wrap">
   <form class="form-card" method="post" action="/login">
+      <input type="hidden" name="_csrf" value="{{ request.state.csrf_token }}">
     <h1>Entrar</h1>
 
     {% if password_reset %}
