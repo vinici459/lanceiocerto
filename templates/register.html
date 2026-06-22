@@ -54,14 +54,10 @@
         </label>
 
         <label>Apelido público
-          <input name="public_name" placeholder="ex: Vinicius10" minlength="3" maxlength="24" autocomplete="nickname" pattern="[A-Za-z0-9._-]{3,24}" value="{{ fd.public_name or '' }}" required>
+          <input name="public_name" placeholder="ex: Usuario10" minlength="3" maxlength="24" autocomplete="nickname" pattern="[A-Za-z0-9._-]{3,24}" value="{{ fd.public_name or '' }}" required>
           <small>Pode ter maiúsculas/minúsculas, mas não pode ter espaço, acento ou símbolo especial. Apelidos repetidos não são permitidos.</small>
         </label>
-
-        <label>Código de indicação <small>(opcional)</small>
-          <input name="referral_code" placeholder="ex: VINICIUS123" maxlength="24" autocomplete="off" value="{{ fd.referral_code or '' }}">
-          <small>Use apenas se alguém indicou você. O código vale somente na primeira compra de Créditos LC.</small>
-        </label>
+       
 
         <label>Gênero
           <select name="gender" required>
