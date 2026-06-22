@@ -276,6 +276,67 @@ class MercadoPagoPayment(Base):
 
 
 
+class FiscalPendingRecord(Base):
+    """Registro fiscal interno para revisão humana/contábil.
+
+    Não emite NFS-e e não define tributação. Ele preserva a trilha completa
+    dos eventos financeiros para que contador e jurídico definam o tratamento
+    antes da integração fiscal real.
+    """
+    __tablename__ = "fiscal_pending_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_key: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(60), index=True)
+    status: Mapped[str] = mapped_column(String(40), default="pending_review", index=True)
+    direction: Mapped[str] = mapped_column(String(20), default="inflow")  # inflow/outflow
+    source_entity: Mapped[str] = mapped_column(String(60), default="")
+    source_entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    order_id: Mapped[Optional[int]] = mapped_column(ForeignKey("winner_orders.id"), nullable=True, index=True)
+    auction_id: Mapped[Optional[int]] = mapped_column(ForeignKey("auction_items.id"), nullable=True, index=True)
+    bid_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bids.id"), nullable=True, index=True)
+    payment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mercadopago_payments.id"), nullable=True, index=True)
+
+    # Valores capturados do evento. Não representam automaticamente base tributável.
+    event_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    estimated_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    taxable_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    payment_method: Mapped[str] = mapped_column(String(40), default="")
+    payment_reference: Mapped[str] = mapped_column(String(180), default="")
+
+    # Dados para compra assistida feita no link enviado pelo vencedor.
+    external_store_name: Mapped[str] = mapped_column(String(180), default="")
+    external_store_document: Mapped[str] = mapped_column(String(40), default="")
+    external_paid_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    external_invoice_number: Mapped[str] = mapped_column(String(100), default="")
+    external_invoice_key: Mapped[str] = mapped_column(String(120), default="")
+    external_invoice_url: Mapped[str] = mapped_column(String(700), default="")
+    external_payment_proof_url: Mapped[str] = mapped_column(String(700), default="")
+    customer_document: Mapped[str] = mapped_column(String(40), default="")
+
+    origin: Mapped[str] = mapped_column(String(160), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    fiscal_classification: Mapped[str] = mapped_column(String(80), default="")
+    internal_note: Mapped[str] = mapped_column(Text, default="")
+    fiscal_note_number: Mapped[str] = mapped_column(String(100), default="")
+    fiscal_note_url: Mapped[str] = mapped_column(String(700), default="")
+    fiscal_issued_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_by_admin_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped[Optional[User]] = relationship(foreign_keys=[user_id])
+    order: Mapped[Optional["WinnerOrder"]] = relationship(foreign_keys=[order_id])
+    auction: Mapped[Optional[AuctionItem]] = relationship(foreign_keys=[auction_id])
+    bid: Mapped[Optional[Bid]] = relationship(foreign_keys=[bid_id])
+    payment: Mapped[Optional[MercadoPagoPayment]] = relationship(foreign_keys=[payment_id])
+    reviewed_by_admin: Mapped[Optional[User]] = relationship(foreign_keys=[reviewed_by_admin_id])
+
+
+
 class WinnerOrder(Base):
     __tablename__ = "winner_orders"
 
@@ -1366,6 +1427,392 @@ def release_referral_bonus_if_eligible(db: Session, request: Request, user: User
     audit_event(db, request, "referral.bonus_released", referrer, "referral_reward", reward.id, f"Indicado #{user.id} | Bônus {REFERRAL_BONUS_CREDITS:.0f} LC")
 
 
+
+FISCAL_EVENT_LABELS = {
+    "credit_purchase_approved": "Compra aprovada de Créditos LC",
+    "bid_credit_consumed": "Créditos LC consumidos em participação",
+    "winner_payment_approved": "Pagamento final do vencedor aprovado",
+    "external_purchase": "Compra assistida no link externo",
+    "refund": "Estorno ao cliente",
+}
+
+FISCAL_STATUS_LABELS = {
+    "pending_review": "Pendente de revisão",
+    "pending_documents": "Aguardando documentos",
+    "ready_for_issue": "Pronto para emissão",
+    "not_platform_revenue": "Não é receita própria",
+    "issued": "Documento emitido",
+    "canceled": "Cancelado",
+}
+
+FISCAL_EDITABLE_STATUSES = set(FISCAL_STATUS_LABELS)
+
+
+def fiscal_event_label(value: str) -> str:
+    return FISCAL_EVENT_LABELS.get((value or "").strip(), value or "Evento fiscal")
+
+
+def fiscal_status_label(value: str) -> str:
+    return FISCAL_STATUS_LABELS.get((value or "").strip(), value or "Pendente de revisão")
+
+
+def _fiscal_customer_document(db: Session, user_id: Optional[int]) -> str:
+    if not user_id:
+        return ""
+    user = db.get(User, user_id)
+    return (getattr(user, "cpf", "") or getattr(user, "document_number", "") or "").strip()
+
+
+def create_fiscal_pending_record(
+    db: Session,
+    *,
+    source_key: str,
+    event_type: str,
+    direction: str,
+    source_entity: str,
+    source_entity_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    order_id: Optional[int] = None,
+    auction_id: Optional[int] = None,
+    bid_id: Optional[int] = None,
+    payment_id: Optional[int] = None,
+    event_amount: float = 0.0,
+    estimated_amount: float = 0.0,
+    payment_method: str = "",
+    payment_reference: str = "",
+    origin: str = "",
+    reason: str = "",
+    occurred_at: Optional[datetime] = None,
+    initial_status: str = "pending_review",
+) -> tuple[FiscalPendingRecord, bool]:
+    """Cria somente uma linha por evento de origem, sem emitir nota fiscal."""
+    clean_key = (source_key or "").strip()[:180]
+    if not clean_key:
+        raise ValueError("source_key fiscal é obrigatório")
+    existing = db.query(FiscalPendingRecord).filter(FiscalPendingRecord.source_key == clean_key).first()
+    if existing:
+        # Mantém dados revisados manualmente. Atualiza apenas vínculos técnicos ausentes.
+        if not existing.user_id and user_id:
+            existing.user_id = user_id
+        if not existing.order_id and order_id:
+            existing.order_id = order_id
+        if not existing.auction_id and auction_id:
+            existing.auction_id = auction_id
+        if not existing.bid_id and bid_id:
+            existing.bid_id = bid_id
+        if not existing.payment_id and payment_id:
+            existing.payment_id = payment_id
+        if not existing.payment_reference and payment_reference:
+            existing.payment_reference = payment_reference[:180]
+        if not existing.payment_method and payment_method:
+            existing.payment_method = payment_method[:40]
+        if not existing.estimated_amount and estimated_amount:
+            existing.estimated_amount = BR(estimated_amount)
+        if not existing.customer_document and user_id:
+            existing.customer_document = _fiscal_customer_document(db, user_id)
+        existing.updated_at = datetime.utcnow()
+        db.add(existing)
+        return existing, False
+
+    record = FiscalPendingRecord(
+        source_key=clean_key,
+        event_type=(event_type or "").strip()[:60],
+        status=initial_status if initial_status in FISCAL_EDITABLE_STATUSES else "pending_review",
+        direction="outflow" if direction == "outflow" else "inflow",
+        source_entity=(source_entity or "").strip()[:60],
+        source_entity_id=source_entity_id,
+        user_id=user_id,
+        order_id=order_id,
+        auction_id=auction_id,
+        bid_id=bid_id,
+        payment_id=payment_id,
+        event_amount=BR(event_amount or 0.0),
+        estimated_amount=BR(estimated_amount or 0.0),
+        payment_method=(payment_method or "").strip()[:40],
+        payment_reference=(payment_reference or "").strip()[:180],
+        customer_document=_fiscal_customer_document(db, user_id),
+        origin=(origin or "").strip()[:160],
+        reason=(reason or "").strip(),
+        occurred_at=occurred_at or datetime.utcnow(),
+    )
+    db.add(record)
+    return record, True
+
+
+def record_credit_purchase_fiscal(db: Session, payment_row: MercadoPagoPayment, payment_method: str) -> tuple[FiscalPendingRecord, bool]:
+    return create_fiscal_pending_record(
+        db,
+        source_key=f"credit_purchase_mp:{payment_row.id}",
+        event_type="credit_purchase_approved",
+        direction="inflow",
+        source_entity="mercadopago_payment",
+        source_entity_id=payment_row.id,
+        user_id=payment_row.user_id,
+        payment_id=payment_row.id,
+        event_amount=payment_row.amount,
+        payment_method=payment_method,
+        payment_reference=payment_row.mp_payment_id,
+        origin="Mercado Pago • compra de Créditos LC",
+        occurred_at=payment_row.approved_at or payment_row.created_at or datetime.utcnow(),
+    )
+
+
+def record_winner_payment_fiscal(
+    db: Session,
+    *,
+    order: WinnerOrder,
+    user_id: int,
+    amount: float,
+    payment_method: str,
+    source_key: str,
+    payment_id: Optional[int] = None,
+    payment_reference: str = "",
+    occurred_at: Optional[datetime] = None,
+) -> tuple[FiscalPendingRecord, bool]:
+    return create_fiscal_pending_record(
+        db,
+        source_key=source_key,
+        event_type="winner_payment_approved",
+        direction="inflow",
+        source_entity="winner_order",
+        source_entity_id=order.id,
+        user_id=user_id,
+        order_id=order.id,
+        auction_id=order.auction_id,
+        payment_id=payment_id,
+        event_amount=amount,
+        payment_method=payment_method,
+        payment_reference=payment_reference,
+        origin="Pagamento final confirmado do vencedor",
+        occurred_at=occurred_at or order.paid_at or datetime.utcnow(),
+    )
+
+
+def ensure_external_purchase_fiscal_record(db: Session, order: WinnerOrder, now: Optional[datetime] = None) -> tuple[FiscalPendingRecord, bool]:
+    item = db.get(AuctionItem, order.auction_id)
+    estimated_amount = BR(getattr(item, "source_price", 0.0) or 0.0)
+    link = (order.submitted_purchase_link or order.purchase_link or getattr(item, "source_url", "") or "").strip()
+    domain = (order.submitted_link_domain or "").strip()
+    if not domain and link:
+        try:
+            domain = (urlparse(link).netloc or "").lower().replace("www.", "")
+        except Exception:
+            domain = ""
+    record, created = create_fiscal_pending_record(
+        db,
+        source_key=f"external_purchase_order:{order.id}",
+        event_type="external_purchase",
+        direction="outflow",
+        source_entity="winner_order",
+        source_entity_id=order.id,
+        user_id=order.user_id,
+        order_id=order.id,
+        auction_id=order.auction_id,
+        event_amount=0.0,
+        estimated_amount=estimated_amount,
+        payment_method="platform_checkout",
+        payment_reference=link,
+        origin="Pagamento assistido realizado pela plataforma no link do vencedor",
+        occurred_at=now or order.purchased_at or datetime.utcnow(),
+        initial_status="pending_documents",
+    )
+    if not record.external_store_name and domain:
+        record.external_store_name = domain[:180]
+    if not record.reason:
+        record.reason = "Preencher valor real pago, fornecedor/CNPJ, nota fiscal e comprovante antes da revisão contábil."
+    record.updated_at = datetime.utcnow()
+    db.add(record)
+    return record, created
+
+
+def sync_product_outgoing_from_fiscal_record(db: Session, record: FiscalPendingRecord) -> None:
+    """Atualiza a saída de caixa operacional quando o custo real do link é informado."""
+    if not record or not record.order_id:
+        return
+    order = db.get(WinnerOrder, record.order_id)
+    if not order:
+        return
+    amount = BR(record.external_paid_amount or record.event_amount or record.estimated_amount or 0.0)
+    if amount <= 0:
+        return
+    marker = f"Pedido #{order.id}"
+    tx = (
+        db.query(WalletTransaction)
+        .filter(WalletTransaction.kind == "product_outgoing", WalletTransaction.note.like(f"%{marker}%"))
+        .order_by(desc(WalletTransaction.id))
+        .first()
+    )
+    item = db.get(AuctionItem, order.auction_id)
+    note = f"Saída compra assistida • Pedido #{order.id} • Disputa #{order.auction_id} • Registro fiscal #{record.id} • {getattr(item, 'title', '')}"[:200]
+    if tx:
+        tx.amount = -amount
+        tx.note = note
+        db.add(tx)
+    else:
+        db.add(WalletTransaction(
+            user_id=order.user_id,
+            amount=-amount,
+            kind="product_outgoing",
+            note=note,
+            created_at=record.occurred_at or datetime.utcnow(),
+        ))
+
+
+def build_fiscal_ledger_context(db: Session, *, status: str = "", event_type: str = "", search: str = "", limit: int = 120) -> dict:
+    query = (
+        db.query(FiscalPendingRecord)
+        .options(
+            selectinload(FiscalPendingRecord.user),
+            selectinload(FiscalPendingRecord.order),
+            selectinload(FiscalPendingRecord.auction),
+            selectinload(FiscalPendingRecord.reviewed_by_admin),
+        )
+    )
+    if status in FISCAL_EDITABLE_STATUSES:
+        query = query.filter(FiscalPendingRecord.status == status)
+    if event_type in FISCAL_EVENT_LABELS:
+        query = query.filter(FiscalPendingRecord.event_type == event_type)
+    if search:
+        like = f"%{search.strip()}%"
+        query = query.outerjoin(User, FiscalPendingRecord.user_id == User.id).filter(
+            or_(
+                FiscalPendingRecord.source_key.ilike(like),
+                FiscalPendingRecord.payment_reference.ilike(like),
+                FiscalPendingRecord.external_store_name.ilike(like),
+                FiscalPendingRecord.external_invoice_number.ilike(like),
+                FiscalPendingRecord.external_store_document.ilike(like),
+                User.full_name.ilike(like),
+                User.email.ilike(like),
+                User.cpf.ilike(like),
+            )
+        )
+    records = query.order_by(desc(FiscalPendingRecord.occurred_at), desc(FiscalPendingRecord.id)).limit(max(20, min(int(limit or 120), 300))).all()
+    all_status_rows = db.query(FiscalPendingRecord.status, func.count(FiscalPendingRecord.id)).group_by(FiscalPendingRecord.status).all()
+    counts = {row[0]: int(row[1] or 0) for row in all_status_rows}
+    incomplete_external = db.query(FiscalPendingRecord.id).filter(
+        FiscalPendingRecord.event_type == "external_purchase",
+        or_(
+            FiscalPendingRecord.external_paid_amount <= 0,
+            FiscalPendingRecord.external_store_name == "",
+            FiscalPendingRecord.external_invoice_number == "",
+            FiscalPendingRecord.external_payment_proof_url == "",
+        ),
+    ).count()
+    return {
+        "fiscal_records": records,
+        "fiscal_status": status,
+        "fiscal_event_type": event_type,
+        "fiscal_search": search,
+        "fiscal_counts": counts,
+        "fiscal_external_incomplete": incomplete_external,
+        "fiscal_event_labels": FISCAL_EVENT_LABELS,
+        "fiscal_status_labels": FISCAL_STATUS_LABELS,
+    }
+
+
+def backfill_fiscal_records(db: Session, *, limit: int = 800) -> dict:
+    """Gera registros históricos pendentes; nunca emite nota e nunca altera receita."""
+    remaining = max(1, min(int(limit or 800), 3000))
+    created = {"credit_purchases": 0, "bids": 0, "winner_payments": 0, "external_purchases": 0, "refunds": 0}
+
+    payments = db.query(MercadoPagoPayment).filter(MercadoPagoPayment.status == "approved").order_by(MercadoPagoPayment.id.asc()).limit(remaining).all()
+    for payment in payments:
+        if payment.purpose == "deposit":
+            _, was_created = record_credit_purchase_fiscal(db, payment, "pix" if payment.qr_code else "card")
+            created["credit_purchases"] += int(was_created)
+        elif payment.purpose == "order_payment" and payment.order_id:
+            order = db.get(WinnerOrder, payment.order_id)
+            if order:
+                _, was_created = record_winner_payment_fiscal(
+                    db,
+                    order=order,
+                    user_id=payment.user_id,
+                    amount=payment.amount,
+                    payment_method="pix" if payment.qr_code else "card",
+                    source_key=f"winner_payment_mp:{payment.id}",
+                    payment_id=payment.id,
+                    payment_reference=payment.mp_payment_id,
+                    occurred_at=payment.approved_at or payment.created_at,
+                )
+                created["winner_payments"] += int(was_created)
+
+    bids = db.query(Bid).order_by(Bid.id.asc()).limit(remaining).all()
+    for bid in bids:
+        _, was_created = create_fiscal_pending_record(
+            db,
+            source_key=f"bid:{bid.id}",
+            event_type="bid_credit_consumed",
+            direction="inflow",
+            source_entity="bid",
+            source_entity_id=bid.id,
+            user_id=bid.user_id,
+            auction_id=bid.auction_id,
+            bid_id=bid.id,
+            event_amount=bid.bid_value,
+            payment_method="creditos_lc",
+            origin="Créditos LC consumidos na participação",
+            occurred_at=bid.created_at,
+        )
+        created["bids"] += int(was_created)
+
+    orders = db.query(WinnerOrder).filter(WinnerOrder.status.in_([
+        "pagamento_pedido_realizado", "purchased", "sent", "delivered", "resolved", "finalized"
+    ])).order_by(WinnerOrder.id.asc()).limit(remaining).all()
+    for order in orders:
+        _, was_created = ensure_external_purchase_fiscal_record(db, order, order.purchased_at or order.created_at)
+        created["external_purchases"] += int(was_created)
+
+    wallet_payments = db.query(WalletTransaction).filter(WalletTransaction.kind == "payment").order_by(WalletTransaction.id.asc()).limit(remaining).all()
+    for tx in wallet_payments:
+        auction_match = re.search(r"#(\d+)", tx.note or "")
+        auction_id = int(auction_match.group(1)) if auction_match else None
+        order = None
+        if auction_id:
+            order = db.query(WinnerOrder).filter(WinnerOrder.user_id == tx.user_id, WinnerOrder.auction_id == auction_id).order_by(desc(WinnerOrder.id)).first()
+        if order:
+            _, was_created = record_winner_payment_fiscal(
+                db,
+                order=order,
+                user_id=tx.user_id,
+                amount=abs(BR(tx.amount)),
+                payment_method="creditos_lc",
+                source_key=f"winner_payment_wallet_tx:{tx.id}",
+                payment_reference=f"wallet_transaction:{tx.id}",
+                occurred_at=tx.created_at,
+            )
+            created["winner_payments"] += int(was_created)
+
+    refunds = db.query(WalletTransaction).filter(WalletTransaction.kind == "refund").order_by(WalletTransaction.id.asc()).limit(remaining).all()
+    for tx in refunds:
+        order_match = re.search(r"Pedido\s*#(\d+)", tx.note or "", flags=re.I)
+        order_id = int(order_match.group(1)) if order_match else None
+        order = db.get(WinnerOrder, order_id) if order_id else None
+        _, was_created = create_fiscal_pending_record(
+            db,
+            source_key=f"refund_wallet_tx:{tx.id}",
+            event_type="refund",
+            direction="outflow",
+            source_entity="wallet_transaction",
+            source_entity_id=tx.id,
+            user_id=tx.user_id,
+            order_id=order.id if order else None,
+            auction_id=order.auction_id if order else None,
+            event_amount=abs(BR(tx.amount)),
+            payment_method="creditos_lc",
+            payment_reference=f"wallet_transaction:{tx.id}",
+            origin="Estorno registrado ao cliente",
+            reason=tx.note or "",
+            occurred_at=tx.created_at,
+        )
+        created["refunds"] += int(was_created)
+
+    created["total"] = sum(created.values())
+    return created
+
+
+templates.env.globals["fiscal_event_label"] = fiscal_event_label
+templates.env.globals["fiscal_status_label"] = fiscal_status_label
+
 def apply_approved_mp_payment(db: Session, request: Request, payment_row: MercadoPagoPayment) -> bool:
     """Aplica aprovação do Mercado Pago uma única vez."""
     if not payment_row or (payment_row.status == "approved" and payment_row.approved_at):
@@ -1393,6 +1840,7 @@ def apply_approved_mp_payment(db: Session, request: Request, payment_row: Mercad
             note=f"Compra de Créditos LC via {payment_label} aprovada pelo Mercado Pago. Referência MP #{payment_row.mp_payment_id}",
         ))
         release_referral_bonus_if_eligible(db, request, user, float(payment_row.amount or 0.0))
+        record_credit_purchase_fiscal(db, payment_row, payment_label.lower())
         audit_event(db, request, "wallet.credit_purchase_approved", user, "mercadopago_payment", payment_row.mp_payment_id, f"Método: {payment_label} | Créditos LC: {fmt_money(payment_row.amount)}")
 
     elif payment_row.purpose == "order_payment" and payment_row.order_id:
@@ -1408,6 +1856,17 @@ def apply_approved_mp_payment(db: Session, request: Request, payment_row: Mercad
                 kind="order_payment_pix" if is_pix_payment else "order_payment_card",
                 note=f"Pagamento {payment_label} do pedido #{order.id}/leilão #{order.auction_id} confirmado pelo Mercado Pago.",
             ))
+            record_winner_payment_fiscal(
+                db,
+                order=order,
+                user_id=user.id,
+                amount=payment_row.amount,
+                payment_method=payment_label.lower(),
+                source_key=f"winner_payment_mp:{payment_row.id}",
+                payment_id=payment_row.id,
+                payment_reference=payment_row.mp_payment_id,
+                occurred_at=payment_row.approved_at,
+            )
             audit_event(db, request, "order.payment_approved", user, "order", order.id, f"Método: {payment_label} | Referência MP #{payment_row.mp_payment_id} | Valor R$ {fmt_money(payment_row.amount)}")
             nav_cache_clear("account:")
             db.add(order)
@@ -4125,6 +4584,52 @@ def ensure_columns() -> None:
                 if name not in cols:
                     conn.execute(text(f"ALTER TABLE winner_orders ADD COLUMN {name} {ddl}"))
 
+
+        if inspector.has_table("fiscal_pending_records"):
+            cols = {c["name"] for c in inspector.get_columns("fiscal_pending_records")}
+            for name, ddl in {
+                "source_key": "VARCHAR(180) DEFAULT ''",
+                "event_type": "VARCHAR(60) DEFAULT ''",
+                "status": "VARCHAR(40) DEFAULT 'pending_review'",
+                "direction": "VARCHAR(20) DEFAULT 'inflow'",
+                "source_entity": "VARCHAR(60) DEFAULT ''",
+                "source_entity_id": "INTEGER NULL",
+                "user_id": "INTEGER NULL",
+                "order_id": "INTEGER NULL",
+                "auction_id": "INTEGER NULL",
+                "bid_id": "INTEGER NULL",
+                "payment_id": "INTEGER NULL",
+                "event_amount": "FLOAT DEFAULT 0",
+                "estimated_amount": "FLOAT DEFAULT 0",
+                "taxable_amount": "FLOAT DEFAULT 0",
+                "payment_method": "VARCHAR(40) DEFAULT ''",
+                "payment_reference": "VARCHAR(180) DEFAULT ''",
+                "external_store_name": "VARCHAR(180) DEFAULT ''",
+                "external_store_document": "VARCHAR(40) DEFAULT ''",
+                "external_paid_amount": "FLOAT DEFAULT 0",
+                "external_invoice_number": "VARCHAR(100) DEFAULT ''",
+                "external_invoice_key": "VARCHAR(120) DEFAULT ''",
+                "external_invoice_url": "VARCHAR(700) DEFAULT ''",
+                "external_payment_proof_url": "VARCHAR(700) DEFAULT ''",
+                "customer_document": "VARCHAR(40) DEFAULT ''",
+                "origin": "VARCHAR(160) DEFAULT ''",
+                "reason": "TEXT DEFAULT ''",
+                "fiscal_classification": "VARCHAR(80) DEFAULT ''",
+                "internal_note": "TEXT DEFAULT ''",
+                "fiscal_note_number": "VARCHAR(100) DEFAULT ''",
+                "fiscal_note_url": "VARCHAR(700) DEFAULT ''",
+                "fiscal_issued_at": "TIMESTAMP NULL",
+                "occurred_at": "TIMESTAMP NULL",
+                "reviewed_at": "TIMESTAMP NULL",
+                "reviewed_by_admin_id": "INTEGER NULL",
+                "created_at": "TIMESTAMP NULL",
+                "updated_at": "TIMESTAMP NULL",
+            }.items():
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE fiscal_pending_records ADD COLUMN {name} {ddl}"))
+            conn.execute(text("UPDATE fiscal_pending_records SET status = COALESCE(NULLIF(status, ''), 'pending_review') WHERE status IS NULL OR status = ''"))
+            conn.execute(text("UPDATE fiscal_pending_records SET occurred_at = COALESCE(occurred_at, created_at, CURRENT_TIMESTAMP) WHERE occurred_at IS NULL"))
+
         if inspector.has_table("withdrawal_requests"):
             cols = {c["name"] for c in inspector.get_columns("withdrawal_requests")}
             for name, ddl in {
@@ -4236,6 +4741,11 @@ def ensure_columns() -> None:
             "CREATE INDEX IF NOT EXISTS ix_users_referral_code ON users (referral_code)",
             "CREATE INDEX IF NOT EXISTS ix_referral_rewards_referred_status ON referral_rewards (referred_user_id, status)",
             "CREATE INDEX IF NOT EXISTS ix_referral_rewards_referrer_status ON referral_rewards (referrer_user_id, status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fiscal_pending_records_source_key ON fiscal_pending_records (source_key)",
+            "CREATE INDEX IF NOT EXISTS ix_fiscal_pending_status_occurred ON fiscal_pending_records (status, occurred_at)",
+            "CREATE INDEX IF NOT EXISTS ix_fiscal_pending_event_occurred ON fiscal_pending_records (event_type, occurred_at)",
+            "CREATE INDEX IF NOT EXISTS ix_fiscal_pending_order ON fiscal_pending_records (order_id, occurred_at)",
+            "CREATE INDEX IF NOT EXISTS ix_fiscal_pending_user ON fiscal_pending_records (user_id, occurred_at)",
         ]:
             try:
                 conn.execute(text(ddl))
@@ -5979,6 +6489,23 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
             raise
 
         bid_id = int(bid_row.id if hasattr(bid_row, "id") else bid_row[0])
+        # Registro fiscal pendente: não emite NFS-e, apenas preserva o evento de uso dos Créditos LC.
+        db.add(FiscalPendingRecord(
+            source_key=f"bid:{bid_id}",
+            event_type="bid_credit_consumed",
+            status="pending_review",
+            direction="inflow",
+            source_entity="bid",
+            source_entity_id=bid_id,
+            user_id=user.id,
+            auction_id=item.id,
+            bid_id=bid_id,
+            event_amount=bid_value,
+            payment_method="creditos_lc",
+            customer_document=(getattr(user, "cpf", "") or ""),
+            origin="Créditos LC consumidos na participação",
+            occurred_at=now,
+        ))
 
         db.execute(text("""
             INSERT INTO wallet_transactions (user_id, amount, kind, note, created_at)
@@ -6296,6 +6823,21 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
 
             item.turbo_level = turbo_after_bid
             button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
+            create_fiscal_pending_record(
+                db,
+                source_key=f"bid:{bid.id}",
+                event_type="bid_credit_consumed",
+                direction="inflow",
+                source_entity="bid",
+                source_entity_id=bid.id,
+                user_id=user.id,
+                auction_id=item.id,
+                bid_id=bid.id,
+                event_amount=bid_value,
+                payment_method="creditos_lc",
+                origin="Créditos LC consumidos na participação",
+                occurred_at=now,
+            )
 
             db.commit()
             _set_fast_cooldown(item.id, user.id, bid_value, button_cooldown, now)
@@ -6963,16 +7505,15 @@ async def my_support_create(
         refund_received = parse_money(consumer_refund_amount_received)
         declaration_ok = str(consumer_declaration_accepted or "").strip().lower() in {"1", "true", "on", "yes", "sim"}
 
-        if not declaration_ok:
-            ctx = support_context_for_user(db, user, error="Para abrir um chamado, é obrigatório confirmar ciência da Política do Consumidor/Reembolso e declarar que as informações enviadas são verdadeiras.")
-            return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
-
         if is_consumer_case:
             if not valid_order_id:
                 ctx = support_context_for_user(db, user, error="Para problema com produto, devolução ou reembolso, selecione o pedido relacionado.")
                 return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
             if not consumer_issue_type:
                 ctx = support_context_for_user(db, user, error="Informe o tipo de problema para abrir este chamado.")
+                return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
+            if not declaration_ok:
+                ctx = support_context_for_user(db, user, error="Para este tipo de chamado, é obrigatório aceitar a declaração de veracidade e ciência da política de devolução/reembolso.")
                 return templates.TemplateResponse("account_pages.html", {"request": request, "user": user, **ctx}, status_code=400)
 
         priority = support_category_priority(category)
@@ -6990,10 +7531,10 @@ async def my_support_create(
             consumer_return_tracking_code=consumer_return_tracking_code if is_consumer_case else "",
             consumer_refund_amount_claimed=refund_claimed if is_consumer_case else 0.0,
             consumer_refund_amount_received=refund_received if is_consumer_case else 0.0,
-            consumer_policy_version=CONSUMER_RULES_VERSION,
-            consumer_declaration_accepted=bool(declaration_ok),
-            consumer_declaration_ip=client_ip(request),
-            consumer_declaration_user_agent=(request.headers.get("user-agent") or "")[:600],
+            consumer_policy_version=CONSUMER_RULES_VERSION if is_consumer_case else "",
+            consumer_declaration_accepted=bool(declaration_ok) if is_consumer_case else False,
+            consumer_declaration_ip=client_ip(request) if is_consumer_case else "",
+            consumer_declaration_user_agent=(request.headers.get("user-agent") or "")[:600] if is_consumer_case else "",
             status="open",
             last_customer_message_at=datetime.utcnow(),
             sla_due_at=support_sla_due(category, priority),
@@ -7615,6 +8156,16 @@ def confirm_payment_flow(
         order.status = "paid"
         order.paid_at = datetime.utcnow()
         order.admin_note = "Pagamento confirmado com saldo interno. Aguardando escolha do modo de recebimento."
+        record_winner_payment_fiscal(
+            db,
+            order=order,
+            user_id=user.id,
+            amount=order.final_price,
+            payment_method="creditos_lc",
+            source_key=f"winner_payment_wallet_order:{order.id}",
+            payment_reference=f"winner_order:{order.id}",
+            occurred_at=order.paid_at,
+        )
         audit_event(db, request, "order.payment_wallet_confirmed", user, "order", order.id, f"Valor: R$ {fmt_money(order.final_price)}")
 
         db.commit()
@@ -8357,7 +8908,7 @@ def admin_dashboard(request: Request):
             allowed_tabs.update({
                 "admin-dashboard", "admin-cashflow", "admin-pending-payments",
                 "admin-users", "admin-identity-pending", "admin-withdrawals",
-                "admin-audit",
+                "admin-audit", "admin-fiscal-ledger",
             })
 
         requested_tab = (request.query_params.get("tab") or "").strip()
@@ -8385,6 +8936,14 @@ def admin_dashboard(request: Request):
         elif active_panel == "admin-cashflow" and is_super_admin:
             cashflow_ctx = cached_admin_cashflow_context(db)
             ctx.update(cashflow_ctx)
+            ctx["stats"] = cached_admin_light_stats(db, is_super_admin)
+        elif active_panel == "admin-fiscal-ledger" and is_super_admin:
+            ctx.update(build_fiscal_ledger_context(
+                db,
+                status=(request.query_params.get("fiscal_status") or "").strip(),
+                event_type=(request.query_params.get("fiscal_event") or "").strip(),
+                search=(request.query_params.get("fiscal_q") or "").strip(),
+            ))
             ctx["stats"] = cached_admin_light_stats(db, is_super_admin)
         elif active_panel == "admin-returned":
             returned_items = cached_returned_items(db)
@@ -8610,6 +9169,90 @@ async def admin_returned_update_relist(
         db.close()
 
 
+@app.post("/admin/fiscal/record/{record_id}/review")
+def admin_review_fiscal_record(
+    request: Request,
+    record_id: int,
+    status: str = Form("pending_review"),
+    taxable_amount: float = Form(0.0),
+    fiscal_classification: str = Form(""),
+    external_store_name: str = Form(""),
+    external_store_document: str = Form(""),
+    external_paid_amount: float = Form(0.0),
+    external_invoice_number: str = Form(""),
+    external_invoice_key: str = Form(""),
+    external_invoice_url: str = Form(""),
+    external_payment_proof_url: str = Form(""),
+    customer_document: str = Form(""),
+    fiscal_note_number: str = Form(""),
+    fiscal_note_url: str = Form(""),
+    internal_note: str = Form(""),
+):
+    db = SessionLocal()
+    try:
+        admin_user = require_superadmin(request, db)
+        record = db.get(FiscalPendingRecord, record_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Registro fiscal não encontrado.")
+        clean_status = (status or "").strip()
+        if clean_status not in FISCAL_EDITABLE_STATUSES:
+            raise HTTPException(status_code=400, detail="Status fiscal inválido.")
+
+        record.status = clean_status
+        record.taxable_amount = BR(max(0.0, taxable_amount or 0.0))
+        record.fiscal_classification = (fiscal_classification or "").strip()[:80]
+        record.external_store_name = (external_store_name or "").strip()[:180]
+        record.external_store_document = re.sub(r"\D", "", external_store_document or "")[:40]
+        record.external_paid_amount = BR(max(0.0, external_paid_amount or 0.0))
+        if record.event_type == "external_purchase" and record.external_paid_amount > 0:
+            record.event_amount = record.external_paid_amount
+        record.external_invoice_number = (external_invoice_number or "").strip()[:100]
+        record.external_invoice_key = re.sub(r"\s", "", external_invoice_key or "")[:120]
+        record.external_invoice_url = (external_invoice_url or "").strip()[:700]
+        record.external_payment_proof_url = (external_payment_proof_url or "").strip()[:700]
+        record.customer_document = re.sub(r"\D", "", customer_document or record.customer_document or "")[:40]
+        record.fiscal_note_number = (fiscal_note_number or "").strip()[:100]
+        record.fiscal_note_url = (fiscal_note_url or "").strip()[:700]
+        record.internal_note = (internal_note or "").strip()
+        record.reviewed_by_admin_id = admin_user.id
+        record.reviewed_at = datetime.utcnow()
+        record.updated_at = datetime.utcnow()
+        if clean_status == "issued" and not record.fiscal_issued_at:
+            record.fiscal_issued_at = datetime.utcnow()
+        if clean_status != "issued":
+            record.fiscal_issued_at = None
+        db.add(record)
+        sync_product_outgoing_from_fiscal_record(db, record)
+        audit_event(
+            db,
+            request,
+            "fiscal.record_reviewed",
+            admin_user,
+            "fiscal_pending_record",
+            record.id,
+            f"{record.event_type} | status={record.status} | valor_evento={fmt_money(record.event_amount)} | base_definida={fmt_money(record.taxable_amount)}",
+        )
+        nav_cache_clear()
+        db.commit()
+        return RedirectResponse("/admin?tab=admin-fiscal-ledger", status_code=303)
+    finally:
+        db.close()
+
+
+@app.post("/admin/fiscal/backfill")
+def admin_backfill_fiscal_records(request: Request, limit: int = Form(800)):
+    db = SessionLocal()
+    try:
+        admin_user = require_superadmin(request, db)
+        result = backfill_fiscal_records(db, limit=limit)
+        audit_event(db, request, "fiscal.backfill", admin_user, "fiscal_pending_records", "batch", json.dumps(result, ensure_ascii=False))
+        db.commit()
+        return RedirectResponse(f"/admin?tab=admin-fiscal-ledger&backfill={result['total']}", status_code=303)
+    finally:
+        db.close()
+
+
+
 @app.post("/admin/order/{order_id}/admin-update")
 def admin_update_order_control(
     request: Request,
@@ -8680,24 +9323,28 @@ def admin_update_order_control(
                 order.status = "pagamento_pedido_realizado"
                 order.purchased_at = order.purchased_at or now
                 register_product_outgoing_if_needed(db, order, now)
+                ensure_external_purchase_fiscal_record(db, order, now)
                 audit_event(db, request, "order.customer_purchase_paid", admin_user, "order", order.id, f"Pagamento do pedido registrado pelo status. Link: {order.submitted_purchase_link or order.purchase_link or 'sem link'}")
 
             elif requested_status == "purchased":
                 order.status = "purchased"
                 order.purchased_at = order.purchased_at or now
                 register_product_outgoing_if_needed(db, order, now)
+                ensure_external_purchase_fiscal_record(db, order, now)
                 audit_event(db, request, "order.purchased", admin_user, "order", order.id, f"Compra realizada. Pedido #{order.id}")
 
             elif requested_status == "sent":
                 order.status = "sent"
                 order.sent_at = order.sent_at or now
                 register_product_outgoing_if_needed(db, order, now)
+                ensure_external_purchase_fiscal_record(db, order, now)
                 audit_event(db, request, "order.sent", admin_user, "order", order.id, f"Produto enviado. Rastreio: {order.tracking_code or 'sem código'}")
 
             elif requested_status == "delivered":
                 order.status = "delivered"
                 order.delivered_at = order.delivered_at or now
                 register_product_outgoing_if_needed(db, order, now)
+                ensure_external_purchase_fiscal_record(db, order, now)
                 audit_event(db, request, "order.delivered", admin_user, "order", order.id, f"Produto entregue. Pedido #{order.id}")
 
             elif requested_status == "finalized":
@@ -9141,7 +9788,26 @@ def admin_refund_order(request: Request, order_id: int, amount: float = Form(...
         user = db.get(User, order.user_id)
         if user:
             user.wallet_balance = BR(user.wallet_balance + amount)
-            db.add(WalletTransaction(user_id=user.id, amount=amount, kind="refund", note=f"Estorno pedido #{order.id}: {admin_note.strip()}"))
+            refund_tx = WalletTransaction(user_id=user.id, amount=amount, kind="refund", note=f"Estorno pedido #{order.id}: {admin_note.strip()}")
+            db.add(refund_tx)
+            db.flush()
+            create_fiscal_pending_record(
+                db,
+                source_key=f"refund_wallet_tx:{refund_tx.id}",
+                event_type="refund",
+                direction="outflow",
+                source_entity="wallet_transaction",
+                source_entity_id=refund_tx.id,
+                user_id=user.id,
+                order_id=order.id,
+                auction_id=order.auction_id,
+                event_amount=amount,
+                payment_method="creditos_lc",
+                payment_reference=f"wallet_transaction:{refund_tx.id}",
+                origin="Estorno registrado ao cliente",
+                reason=admin_note.strip(),
+                occurred_at=refund_tx.created_at,
+            )
         order.status = "resolved"
         order.admin_note = (order.admin_note or "") + f"\nEstorno de R$ {fmt_money(amount)} registrado. {admin_note.strip()}"
         db.commit()

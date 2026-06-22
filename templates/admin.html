@@ -14,6 +14,7 @@
           <span class="admin-menu-label">Visão geral</span>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-dashboard' %}active{% endif %}" href="/admin?tab=admin-dashboard" data-target="admin-dashboard" data-no-prefetch="true">Resumo Geral</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-cashflow' %}active{% endif %}" href="/admin?tab=admin-cashflow" data-target="admin-cashflow" data-no-prefetch="true">Fluxo de Caixa</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-fiscal-ledger' %}active{% endif %}" href="/admin?tab=admin-fiscal-ledger" data-target="admin-fiscal-ledger" data-no-prefetch="true">Central Fiscal</a>
         </div>
         {% endif %}
 
@@ -32,212 +33,12 @@
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-users' %}active{% endif %}" href="/admin?tab=admin-users" data-target="admin-users" data-no-prefetch="true">Usuários</a>{% endif %}
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-identity-pending' %}active{% endif %}" href="/admin?tab=admin-identity-pending" data-target="admin-identity-pending" data-no-prefetch="true">Usuários pendentes</a>{% endif %}
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-withdrawals' %}active{% endif %}" href="/admin?tab=admin-withdrawals" data-target="admin-withdrawals" data-no-prefetch="true">Saques Pendentes</a>{% endif %}
-          <a class="side-link admin-link 
-{% if admin_active_panel == 'admin-tickets' %}
-<section id="admin-tickets" class="admin-panel {% if admin_active_panel == 'admin-tickets' %}active{% endif %}">
-  <div class="section-head admin-section-head-pro">
-    <div>
-      <h1>Suporte ao Cliente</h1>
-      <p>Fila operacional para resolver pagamentos, Créditos LC, indicações, pedidos, documentos e disputas com histórico completo.</p>
-    </div>
-    <a class="btn small ghost" href="/admin?tab=admin-tickets&status=ativos" data-no-prefetch="true">Ver ativos</a>
-  </div>
-
-  <div class="stats-grid account-stats admin-kpi-grid">
-    <div class="stat"><span>Ativos</span><strong>{{ support_counters.active_count if support_counters else 0 }}</strong><small>Chamados em andamento</small></div>
-    <div class="stat"><span>Abertos</span><strong>{{ support_counters.open_count if support_counters else 0 }}</strong><small>Aguardando primeira ação</small></div>
-    <div class="stat"><span>Aguardando usuário</span><strong>{{ support_counters.awaiting_count if support_counters else 0 }}</strong><small>Depende do cliente</small></div>
-    <div class="stat"><span>Disputas</span><strong>{{ support_counters.dispute_count if support_counters else 0 }}</strong><small>Casos sensíveis/master</small></div>
-    <div class="stat"><span>Atrasados</span><strong>{{ support_counters.late_count if support_counters else 0 }}</strong><small>Fora do SLA</small></div>
-  </div>
-
-  <div class="panel-card admin-card-pro">
-    <form method="get" action="/admin" class="admin-filter-form" style="display:grid;grid-template-columns:1fr 220px 260px auto;gap:10px;align-items:end">
-      <input type="hidden" name="tab" value="admin-tickets">
-      <label>Buscar por nome, e-mail, CPF, telefone, pedido ou assunto
-        <input name="q" value="{{ search or '' }}" placeholder="Ex: CPF, e-mail, @apelido, pedido, Pix">
-      </label>
-      <label>Status
-        <select name="status">
-          <option value="ativos" {% if support_status_filter == 'ativos' %}selected{% endif %}>Ativos</option>
-          <option value="open" {% if support_status_filter == 'open' %}selected{% endif %}>Abertos</option>
-          <option value="in_review" {% if support_status_filter == 'in_review' %}selected{% endif %}>Em análise</option>
-          <option value="awaiting_customer" {% if support_status_filter == 'awaiting_customer' %}selected{% endif %}>Aguardando usuário</option>
-          <option value="dispute" {% if support_status_filter == 'dispute' %}selected{% endif %}>Disputa</option>
-          <option value="resolved" {% if support_status_filter == 'resolved' %}selected{% endif %}>Resolvidos</option>
-          <option value="todos" {% if support_status_filter == 'todos' %}selected{% endif %}>Todos</option>
-        </select>
-      </label>
-      <label>Categoria
-        <select name="category">
-          <option value="">Todas</option>
-          {% for key,label in support_categories.items() %}
-            <option value="{{ key }}" {% if support_category_filter == key %}selected{% endif %}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button class="btn" type="submit">Buscar</button>
-    </form>
-  </div>
-
-  {% if support_user_results %}
-  <div class="panel-card admin-card-pro">
-    <div class="card-title-row"><h2>Usuários encontrados</h2><span class="pill-soft">Consulta rápida</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Usuário</th><th>CPF/Telefone</th><th>Créditos LC</th><th>Indicação</th></tr></thead><tbody>
-      {% for u in support_user_results %}
-      <tr>
-        <td><strong>{{ u.full_name }}</strong><br><small>{{ u.email }} · @{{ u.public_name or u.nickname }}</small></td>
-        <td>{{ u.cpf or '—' }}<br><small>{{ u.phone or '—' }}</small></td>
-        <td>{{ '%.2f'|format(u.wallet_balance or 0)|replace('.', ',') }} LC</td>
-        <td>{{ u.referral_code or '—' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody></table></div>
-  </div>
-  {% endif %}
-
-  <div style="display:grid;grid-template-columns:420px minmax(0,1fr);gap:16px;align-items:start" class="support-admin-layout">
-    <div class="panel-card admin-card-pro">
-      <div class="card-title-row"><h2>Fila de chamados</h2><span class="pill-soft">{{ support_tickets|length }} carregados</span></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Chamado</th><th>Cliente</th><th>Status</th></tr></thead>
-          <tbody>
-            {% for t in support_tickets %}
-            <tr class="{% if support_ticket_detail and support_ticket_detail.id == t.id %}selected-row{% endif %}">
-              <td>
-                <a href="/admin?tab=admin-tickets&ticket={{ t.id }}&status={{ support_status_filter }}&category={{ support_category_filter }}&q={{ search or '' }}" data-no-prefetch="true"><strong>#LC-{{ '%06d'|format(t.id) }}</strong></a><br>
-                <small>{{ t.subject or support_category_label(t.category) }}</small><br>
-                <small>{{ support_category_label(t.category) }} · {{ support_priority_label(t.priority) }}</small>
-              </td>
-              <td>{{ t.user.full_name if t.user else '—' }}<br><small>{{ t.user.email if t.user else '' }}</small></td>
-              <td>{{ support_status_label(t.status) }}<br><small>{{ fmt_br_datetime(t.updated_at or t.created_at) if fmt_br_datetime is defined else t.created_at }}</small></td>
-            </tr>
-            {% else %}
-            <tr><td colspan="3">Nenhum chamado encontrado.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div>
-      {% if support_ticket_detail %}
-      {% set t = support_ticket_detail %}
-      {% set d = support_dossier or {} %}
-      <div class="panel-card admin-card-pro">
-        <div class="card-title-row"><h2>#LC-{{ '%06d'|format(t.id) }} · {{ t.subject or support_category_label(t.category) }}</h2><span class="pill-soft">{{ support_status_label(t.status) }}</span></div>
-        <div class="admin-detail-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px">
-          <div><span>Cliente</span><strong>{{ t.user.full_name if t.user else '—' }}</strong><small>{{ t.user.email if t.user else '' }}</small></div>
-          <div><span>Apelido</span><strong>@{{ t.user.public_name or t.user.nickname if t.user else '—' }}</strong><small>CPF: {{ t.user.cpf if t.user else '—' }}</small></div>
-          <div><span>Créditos LC</span><strong>{{ '%.2f'|format(t.user.wallet_balance or 0 if t.user else 0)|replace('.', ',') }} LC</strong><small>Telefone: {{ t.user.phone if t.user else '—' }}</small></div>
-          <div><span>Categoria</span><strong>{{ support_category_label(t.category) }}</strong><small>Prioridade: {{ support_priority_label(t.priority) }}</small></div>
-          <div><span>Pedido</span><strong>{% if t.order_id %}#{{ t.order_id }}{% else %}—{% endif %}</strong><small>{% if t.order and t.order.auction %}{{ t.order.auction.title }}{% endif %}</small></div>
-          <div><span>SLA</span><strong>{{ fmt_br_datetime(t.sla_due_at) if t.sla_due_at and fmt_br_datetime is defined else '—' }}</strong><small>Aberto: {{ fmt_br_datetime(t.created_at) if fmt_br_datetime is defined else t.created_at }}</small></div>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-tickets' %}active{% endif %}" href="/admin?tab=admin-tickets" data-target="admin-tickets" data-no-prefetch="true">Chamados/Disputas</a>
         </div>
-      </div>
 
-      <div class="panel-card admin-card-pro">
-        <div class="card-title-row"><h2>Conversa com o cliente</h2><span class="pill-soft">Histórico</span></div>
-        <div style="display:grid;gap:10px;max-height:430px;overflow:auto">
-          {% for m in support_messages %}
-          <div style="border:1px solid rgba(148,163,184,.18);border-radius:14px;padding:11px;background:{% if m.message_type == 'internal' %}rgba(251,191,36,.08){% elif m.message_type == 'admin' %}rgba(37,99,235,.10){% else %}rgba(255,255,255,.04){% endif %}">
-            <div style="display:flex;justify-content:space-between;gap:10px;color:#b7c6e6;font-size:12px;font-weight:900;margin-bottom:6px">
-              <span>{% if m.message_type == 'internal' %}Nota interna{% elif m.message_type == 'admin' %}Admin{% else %}Cliente{% endif %}</span>
-              <span>{{ fmt_br_datetime(m.created_at) if fmt_br_datetime is defined else m.created_at }}</span>
-            </div>
-            <div style="white-space:pre-wrap;color:#e5e7eb">{{ m.body }}</div>
-            {% if m.proof_url %}<a href="{{ m.proof_url }}" target="_blank" class="btn small ghost" style="margin-top:8px">Abrir anexo</a>{% endif %}
-          </div>
-          {% else %}<p class="muted">Sem mensagens.</p>{% endfor %}
-        </div>
-      </div>
-
-      <div class="panel-card admin-card-pro">
-        <div class="card-title-row"><h2>Ações do atendimento</h2><span class="pill-soft">Resolver com rastreio</span></div>
-        <form method="post" action="/admin/ticket/{{ t.id }}/reply" style="display:grid;gap:10px;margin-bottom:14px">
-          <label>Responder ao cliente
-            <textarea name="message" required placeholder="Explique a solução, peça comprovante ou informe o próximo passo."></textarea>
-          </label>
-          <label>Próximo status
-            <select name="next_status">
-              <option value="awaiting_customer">Aguardando usuário</option>
-              <option value="in_review">Em análise</option>
-              <option value="resolved">Resolvido</option>
-              <option value="closed">Fechado</option>
-            </select>
-          </label>
-          <button class="btn" type="submit">Enviar resposta</button>
-        </form>
-
-        <form method="post" action="/admin/ticket/{{ t.id }}/set-status" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">
-          <label>Status<select name="status">{% for key,label in support_statuses.items() %}<option value="{{ key }}" {% if t.status == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-          <label>Prioridade<select name="priority">{% for key,label in support_priorities.items() %}<option value="{{ key }}" {% if t.priority == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-          <label>Categoria<select name="category">{% for key,label in support_categories.items() %}<option value="{{ key }}" {% if t.category == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-          <label>Resultado<select name="result"><option value="">Sem resultado</option><option value="client">Favorável ao cliente</option><option value="site">Favorável ao site</option><option value="agreement">Acordo</option><option value="manual_adjustment">Ajuste manual</option></select></label>
-          <label style="grid-column:1/-1">Observação interna<input name="admin_note" value="{{ t.admin_note or '' }}" placeholder="Resumo da decisão"></label>
-          <button class="btn small" type="submit">Salvar classificação</button>
-        </form>
-
-        <form method="post" action="/admin/ticket/{{ t.id }}/adjust-lc" style="display:grid;grid-template-columns:160px 140px minmax(0,1fr) auto;gap:10px;align-items:end;margin-bottom:14px">
-          <label>Operação<select name="operation"><option value="credit">Creditar LC</option><option value="debit">Debitar LC</option></select></label>
-          <label>Valor LC<input type="number" step="0.01" min="0.01" name="amount" required></label>
-          <label>Motivo obrigatório<input name="reason" required placeholder="Ex: Pix aprovado no gateway, crédito não liberado automaticamente"></label>
-          <button class="btn small" type="submit">Ajustar</button>
-          <small style="grid-column:1/-1;color:#b7c6e6">Admin comum: ajuste até {{ support_admin_adjust_limit }} LC; acima disso vira revisão master automaticamente. Tudo gera movimentação e auditoria.</small>
-        </form>
-
-        <form method="post" action="/admin/ticket/{{ t.id }}/internal-note" style="display:grid;gap:10px;margin-bottom:14px">
-          <label>Nota interna<input name="note" placeholder="Ex: Gateway respondeu aprovado, aguardando conferência do webhook."></label>
-          <button class="btn small ghost" type="submit">Adicionar nota interna</button>
-        </form>
-
-        <form method="post" action="/admin/ticket/{{ t.id }}/request-master-review" style="display:grid;gap:10px">
-          <label>Escalar para admin master<input name="reason" placeholder="Explique por que precisa revisão superior"></label>
-          <button class="btn small danger" type="submit">Solicitar revisão master</button>
-        </form>
-      </div>
-
-      <div class="panel-card admin-card-pro">
-        <div class="card-title-row"><h2>Dossiê da conta no servidor</h2><span class="pill-soft">Diagnóstico</span></div>
-        <h3>Pagamentos Mercado Pago</h3>
-        <div class="table-wrap"><table><thead><tr><th>Data</th><th>Finalidade</th><th>Valor</th><th>Status</th><th>Ref.</th></tr></thead><tbody>
-          {% for p in d.payments or [] %}<tr><td>{{ fmt_br_datetime(p.created_at) if fmt_br_datetime is defined else p.created_at }}</td><td>{{ p.purpose }}</td><td>R$ {{ '%.2f'|format(p.amount or 0)|replace('.', ',') }}</td><td>{{ p.status }}</td><td>{{ p.mp_payment_id }}</td></tr>{% else %}<tr><td colspan="5">Sem pagamentos recentes.</td></tr>{% endfor %}
-        </tbody></table></div>
-
-        <h3>Movimentações de Créditos LC</h3>
-        <div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>LC</th><th>Observação</th></tr></thead><tbody>
-          {% for tx in d.transactions or [] %}<tr><td>{{ fmt_br_datetime(tx.created_at) if fmt_br_datetime is defined else tx.created_at }}</td><td>{{ tx.kind }}</td><td>{{ '%.2f'|format(tx.amount or 0)|replace('.', ',') }}</td><td>{{ tx.note }}</td></tr>{% else %}<tr><td colspan="4">Sem movimentações recentes.</td></tr>{% endfor %}
-        </tbody></table></div>
-
-        <h3>Indicações</h3>
-        <div class="table-wrap"><table><thead><tr><th>Tipo</th><th>Usuário relacionado</th><th>LC</th><th>Status</th><th>Motivo</th></tr></thead><tbody>
-          {% for r in d.referrals_as_referrer or [] %}<tr><td>Indicou</td><td>{{ r.referred.full_name if r.referred else r.referred_user_id }}</td><td>{{ '%.2f'|format(r.amount_credits or 0)|replace('.', ',') }}</td><td>{{ r.status }}</td><td>{{ r.reason }}</td></tr>{% endfor %}
-          {% for r in d.referrals_as_referred or [] %}<tr><td>Foi indicado por</td><td>{{ r.referrer.full_name if r.referrer else r.referrer_user_id }}</td><td>{{ '%.2f'|format(r.amount_credits or 0)|replace('.', ',') }}</td><td>{{ r.status }}</td><td>{{ r.reason }}</td></tr>{% endfor %}
-          {% if not d.referrals_as_referrer and not d.referrals_as_referred %}<tr><td colspan="5">Sem indicação recente.</td></tr>{% endif %}
-        </tbody></table></div>
-
-        <h3>Pedidos e lances recentes</h3>
-        <div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Item</th><th>Status/Valor</th></tr></thead><tbody>
-          {% for o in d.orders or [] %}<tr><td>{{ fmt_br_datetime(o.created_at) if fmt_br_datetime is defined else o.created_at }}</td><td>Pedido #{{ o.id }}</td><td>{{ o.auction.title if o.auction else 'Produto' }}</td><td>{{ o.status }} · R$ {{ '%.2f'|format(o.final_price or 0)|replace('.', ',') }}</td></tr>{% endfor %}
-          {% for b in d.bids or [] %}<tr><td>{{ fmt_br_datetime(b.created_at) if fmt_br_datetime is defined else b.created_at }}</td><td>Lance</td><td>{{ b.auction.title if b.auction else '#' ~ b.auction_id }}</td><td>{{ '%.2f'|format(b.fee_value or 0)|replace('.', ',') }} LC</td></tr>{% endfor %}
-          {% if not d.orders and not d.bids %}<tr><td colspan="4">Sem pedidos/lances recentes.</td></tr>{% endif %}
-        </tbody></table></div>
-
-        <h3>Auditoria técnica da conta</h3>
-        <div class="table-wrap"><table><thead><tr><th>Data</th><th>Ação</th><th>Detalhes</th></tr></thead><tbody>
-          {% for a in d.audits or [] %}<tr><td>{{ fmt_br_datetime(a.created_at) if fmt_br_datetime is defined else a.created_at }}</td><td>{{ a.action }}</td><td>{{ a.details }}</td></tr>{% else %}<tr><td colspan="3">Sem auditoria recente.</td></tr>{% endfor %}
-        </tbody></table></div>
-      </div>
-      {% else %}
-      <div class="panel-card admin-card-pro"><h2>Nenhum chamado selecionado</h2><p class="muted">Escolha um chamado da fila ou use a busca para localizar uma conta.</p></div>
-      {% endif %}
-    </div>
-  </div>
-</section>
-{% endif %}
-
-{% if admin_active_panel == 'admin-suggestions' %}active{% endif %}" href="/admin?tab=admin-suggestions" data-target="admin-suggestions" data-no-prefetch="true">Indicações</a>
+        <div class="admin-menu-group">
+          <span class="admin-menu-label">Ferramentas</span>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-suggestions' %}active{% endif %}" href="/admin?tab=admin-suggestions" data-target="admin-suggestions" data-no-prefetch="true">Indicações</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}" href="/admin?tab=admin-search-orders" data-target="admin-search-orders" data-no-prefetch="true">Consulta</a>
           {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-audit' %}active{% endif %}" href="/admin?tab=admin-audit" data-target="admin-audit" data-no-prefetch="true">Central de Auditoria</a>{% endif %}
           <a class="side-link admin-link {% if admin_active_panel == 'admin-moderation' %}active{% endif %}" href="/admin?tab=admin-moderation" data-target="admin-moderation" data-no-prefetch="true">Moderação</a>
@@ -398,6 +199,176 @@
       </section>
 
       {% endif %}
+{% if admin_active_panel == 'admin-fiscal-ledger' %}
+<section id="admin-fiscal-ledger" class="admin-panel active fiscal-ledger-panel">
+  <style>
+    .fiscal-ledger-panel .fiscal-notice { border-left: 4px solid #eab308; padding: 14px 16px; margin-bottom: 16px; background: rgba(234,179,8,.08); border-radius: 12px; }
+    .fiscal-ledger-panel .fiscal-toolbar { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+    .fiscal-ledger-panel .fiscal-toolbar label { min-width: 170px; flex: 1 1 180px; }
+    .fiscal-ledger-panel .fiscal-stats { margin: 18px 0; }
+    .fiscal-ledger-panel .fiscal-record { margin: 14px 0; overflow:hidden; }
+    .fiscal-ledger-panel .fiscal-record summary { cursor:pointer; list-style:none; padding:14px 16px; display:flex; gap:12px; justify-content:space-between; align-items:center; }
+    .fiscal-ledger-panel .fiscal-record summary::-webkit-details-marker { display:none; }
+    .fiscal-ledger-panel .fiscal-record summary:hover { background: rgba(255,255,255,.035); }
+    .fiscal-ledger-panel .fiscal-record-meta { display:flex; flex-wrap:wrap; gap:8px; align-items:center; color:var(--muted, #9aa4b2); font-size:.9rem; }
+    .fiscal-ledger-panel .fiscal-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px; }
+    .fiscal-ledger-panel .fiscal-grid .wide { grid-column: span 3; }
+    .fiscal-ledger-panel .fiscal-summary { padding: 0 16px 12px; color:var(--muted, #9aa4b2); font-size:.9rem; }
+    .fiscal-ledger-panel .status-chip { display:inline-flex; align-items:center; padding:4px 9px; border-radius:999px; font-size:.78rem; background:rgba(255,255,255,.08); }
+    .fiscal-ledger-panel .status-pending_review, .fiscal-ledger-panel .status-pending_documents { background:rgba(234,179,8,.16); color:#facc15; }
+    .fiscal-ledger-panel .status-ready_for_issue { background:rgba(59,130,246,.16); color:#93c5fd; }
+    .fiscal-ledger-panel .status-issued { background:rgba(34,197,94,.16); color:#86efac; }
+    .fiscal-ledger-panel .status-not_platform_revenue, .fiscal-ledger-panel .status-canceled { background:rgba(148,163,184,.16); color:#cbd5e1; }
+    .fiscal-ledger-panel .fiscal-record form { padding: 0 16px 16px; }
+    .fiscal-ledger-panel .fiscal-help { font-size:.82rem; color:var(--muted, #9aa4b2); margin-top:4px; }
+    @media (max-width: 900px) { .fiscal-ledger-panel .fiscal-grid { grid-template-columns:1fr; } .fiscal-ledger-panel .fiscal-grid .wide { grid-column:auto; } .fiscal-ledger-panel .fiscal-record summary { align-items:flex-start; flex-direction:column; } }
+  </style>
+  <div class="section-head admin-section-head-pro">
+    <div>
+      <h1>Central Fiscal</h1>
+      <p>Trilha de eventos financeiros para revisão do contador. Esta área não emite NFS-e automaticamente.</p>
+    </div>
+  </div>
+
+  <div class="fiscal-notice">
+    <strong>Registro preparatório, não emissão fiscal.</strong>
+    <div class="fiscal-help">Os eventos são guardados com origem, valor, usuário, forma de pagamento e documentos. A classificação tributária e a emissão só devem ser definidas após orientação contábil.</div>
+  </div>
+
+  {% if request.query_params.get('backfill') is not none %}
+  <div class="fiscal-notice"><strong>Histórico processado:</strong> {{ request.query_params.get('backfill') }} novo(s) registro(s) fiscal(is) pendente(s) criado(s). Nenhuma nota foi emitida.</div>
+  {% endif %}
+
+  <div class="panel-card admin-card-pro">
+    <div class="card-title-row"><h2>Filtros e histórico</h2><span class="pill-soft">Somente superadmin</span></div>
+    <form method="get" action="/admin" class="fiscal-toolbar">
+      <input type="hidden" name="tab" value="admin-fiscal-ledger">
+      <label>Status
+        <select name="fiscal_status">
+          <option value="">Todos os status</option>
+          {% for code, label in fiscal_status_labels.items() %}
+          <option value="{{ code }}" {% if fiscal_status == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Evento
+        <select name="fiscal_event">
+          <option value="">Todos os eventos</option>
+          {% for code, label in fiscal_event_labels.items() %}
+          <option value="{{ code }}" {% if fiscal_event_type == code %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Buscar
+        <input name="fiscal_q" value="{{ fiscal_search or '' }}" placeholder="Pedido, CPF, cliente, loja, MP ou nota">
+      </label>
+      <button class="btn" type="submit">Filtrar</button>
+      <a class="btn secondary" href="/admin?tab=admin-fiscal-ledger" data-no-prefetch="true">Limpar</a>
+    </form>
+    <form method="post" action="/admin/fiscal/backfill" class="fiscal-toolbar" style="margin-top:14px;">
+      <label>Registros por processamento
+        <input name="limit" type="number" min="1" max="3000" value="800">
+      </label>
+      <button class="btn secondary" type="submit">Gerar registros históricos</button>
+      <span class="fiscal-help">Usar uma vez para transformar movimentações já existentes em registros pendentes. Não altera valores nem emite documento.</span>
+    </form>
+  </div>
+
+  <div class="stats-grid account-stats admin-stats-pro fiscal-stats">
+    <div class="stat"><span>Pendentes de revisão</span><strong>{{ fiscal_counts.get('pending_review', 0) }}</strong><small>Sem classificação definida</small></div>
+    <div class="stat"><span>Aguardando documentos</span><strong>{{ fiscal_counts.get('pending_documents', 0) }}</strong><small>Principalmente compras no link externo</small></div>
+    <div class="stat"><span>Prontos para emissão</span><strong>{{ fiscal_counts.get('ready_for_issue', 0) }}</strong><small>Após validação do contador</small></div>
+    <div class="stat"><span>Documentos emitidos</span><strong>{{ fiscal_counts.get('issued', 0) }}</strong><small>Controle manual até integrar NFS-e</small></div>
+    <div class="stat"><span>Compras externas incompletas</span><strong>{{ fiscal_external_incomplete or 0 }}</strong><small>Faltam valor real, fornecedor, nota ou comprovante</small></div>
+  </div>
+
+  <div class="panel-card admin-card-pro">
+    <div class="card-title-row"><h2>Registros pendentes e revisados</h2><span class="pill-soft">Últimos {{ fiscal_records|length }}</span></div>
+    {% for record in fiscal_records %}
+    <details class="fiscal-record" {% if loop.first %}open{% endif %}>
+      <summary>
+        <div>
+          <strong>#{{ record.id }} · {{ fiscal_event_label(record.event_type) }}</strong>
+          <div class="fiscal-record-meta">
+            <span>{{ fmt_br_datetime(record.occurred_at) }}</span>
+            {% if record.order_id %}<span>Pedido #{{ record.order_id }}</span>{% endif %}
+            {% if record.auction_id %}<span>Disputa #{{ record.auction_id }}</span>{% endif %}
+            {% if record.user %}<span>{{ record.user.full_name or record.user.email }}</span>{% endif %}
+          </div>
+        </div>
+        <div class="fiscal-record-meta">
+          <span>{{ 'Entrada' if record.direction == 'inflow' else 'Saída' }}</span>
+          <strong>R$ {{ '%.2f'|format(record.event_amount or 0)|replace('.', ',') }}</strong>
+          <span class="status-chip status-{{ record.status }}">{{ fiscal_status_label(record.status) }}</span>
+        </div>
+      </summary>
+      <div class="fiscal-summary">
+        Origem: {{ record.origin or '—' }} · Referência: {{ record.payment_reference or record.source_key }}
+        {% if record.estimated_amount %} · Estimativa: R$ {{ '%.2f'|format(record.estimated_amount)|replace('.', ',') }}{% endif %}
+      </div>
+      <form method="post" action="/admin/fiscal/record/{{ record.id }}/review" class="form-card no-shadow">
+        <div class="fiscal-grid">
+          <label>Status de revisão
+            <select name="status">
+              {% for code, label in fiscal_status_labels.items() %}
+              <option value="{{ code }}" {% if record.status == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Valor definido para tratamento fiscal
+            <input type="number" name="taxable_amount" min="0" step="0.01" value="{{ '%.2f'|format(record.taxable_amount or 0) }}">
+            <span class="fiscal-help">Preencher somente quando contador definir a base.</span>
+          </label>
+          <label>Classificação definida pelo contador
+            <input name="fiscal_classification" value="{{ record.fiscal_classification or '' }}" placeholder="Ex.: receita de serviço, valor de terceiro...">
+          </label>
+
+          {% if record.event_type == 'external_purchase' %}
+          <label>Fornecedor / loja
+            <input name="external_store_name" value="{{ record.external_store_name or '' }}" placeholder="Nome da loja, hotel, parque ou parceiro">
+          </label>
+          <label>CNPJ / CPF do fornecedor
+            <input name="external_store_document" value="{{ record.external_store_document or '' }}" placeholder="Somente números">
+          </label>
+          <label>Valor real pago no link
+            <input type="number" name="external_paid_amount" min="0" step="0.01" value="{{ '%.2f'|format(record.external_paid_amount or 0) }}">
+          </label>
+          <label>Número da NF-e / NFS-e do fornecedor
+            <input name="external_invoice_number" value="{{ record.external_invoice_number or '' }}" placeholder="Número do documento">
+          </label>
+          <label>Chave de acesso / identificador do documento
+            <input name="external_invoice_key" value="{{ record.external_invoice_key or '' }}" placeholder="Chave/ID fiscal">
+          </label>
+          <label>CPF do vencedor na compra
+            <input name="customer_document" value="{{ record.customer_document or '' }}" placeholder="CPF do cliente da nota">
+          </label>
+          <label class="wide">Link/arquivo da nota do fornecedor
+            <input name="external_invoice_url" value="{{ record.external_invoice_url or '' }}" placeholder="https://... ou arquivo salvo">
+          </label>
+          <label class="wide">Comprovante de pagamento do checkout
+            <input name="external_payment_proof_url" value="{{ record.external_payment_proof_url or '' }}" placeholder="https://... ou arquivo salvo">
+          </label>
+          {% endif %}
+
+          <label>Número da nota da plataforma
+            <input name="fiscal_note_number" value="{{ record.fiscal_note_number or '' }}" placeholder="Preencher só após emissão real">
+          </label>
+          <label>Link/arquivo da nota da plataforma
+            <input name="fiscal_note_url" value="{{ record.fiscal_note_url or '' }}" placeholder="https://... ou arquivo salvo">
+          </label>
+          <label class="wide">Observação interna de revisão
+            <textarea name="internal_note" placeholder="Decisão do contador, documentos conferidos, motivo de não incidência...">{{ record.internal_note or '' }}</textarea>
+          </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; margin-top:14px;"><button class="btn" type="submit">Salvar revisão fiscal</button></div>
+      </form>
+    </details>
+    {% else %}
+    <p class="empty-state">Nenhum registro encontrado com estes filtros.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endif %}
 {% if admin_active_panel == 'admin-product' %}
 
