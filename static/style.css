@@ -195,7 +195,7 @@
   }
 }
 
-/* Correção da página de leilão: cards de preço/metadados e chat encerrado */
+
 .status-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .auction-panel h1{margin:0 0 16px;font-size:clamp(28px,3vw,38px);line-height:1.1}
 .price-box,.meta-grid{align-items:stretch}
@@ -472,11 +472,7 @@ body.page-loading a,body.page-loading button{cursor:progress;}
 }
 
 
-/* =========================================================
-   RESPONSIVO GLOBAL - Lancei o Certo
-   Correções para celular/tablet sem alterar o layout desktop.
-   Foco: capa da home, menu, cards, leilão, formulários, admin e tabelas.
-   ========================================================= */
+
 html{
   -webkit-text-size-adjust:100%;
   scroll-padding-top:86px;
@@ -927,10 +923,7 @@ button,a,input,select,textarea{
   min-width:6.2ch;
 }
 
-/* V10: no celular alguns navegadores repintavam cards com content-visibility,
-   fazendo o cronômetro parecer piscar. Mantemos a otimização nas áreas pesadas
-   do admin/conta, mas deixamos cards de leilão e painel de disputa sempre
-   renderizados de forma estável. */
+
 .lc-auction-card,
 .lc-home .lc-auction-card,
 .auction-layout .auction-panel,
@@ -955,7 +948,7 @@ button,a,input,select,textarea{
   text-align:left;
 }
 
-/* V11 - estabilidade visual do cronômetro em mobile e cards de leilão */
+
 .auction-countdown,
 .countdown{
   font-variant-numeric: tabular-nums !important;
@@ -993,7 +986,7 @@ button,a,input,select,textarea{
 }
 
 
-/* V12 - Home/leilão mais natural: evita piscada brusca e deixa transições de estado suaves. */
+
 .countdown,.auction-countdown{
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "lnum" 1;

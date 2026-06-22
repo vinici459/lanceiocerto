@@ -19,12 +19,12 @@
         {% endif %}
 
         <div class="admin-menu-group">
-          <span class="admin-menu-label">Leilões</span>
+          <span class="admin-menu-label">Disputas</span>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-product' %}active{% endif %}" href="/admin?tab=admin-product" data-target="admin-product" data-no-prefetch="true">Cadastrar Produto</a>
           <a class="side-link admin-link {% if admin_active_panel == 'admin-returned' %}active{% endif %}" href="/admin?tab=admin-returned" data-target="admin-returned" data-no-prefetch="true">Produtos Retornados</a>
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-auctions' %}active{% endif %}" href="/admin?tab=admin-auctions" data-target="admin-auctions" data-no-prefetch="true">Gerenciar Leilões</a>
-          <a class="side-link admin-link {% if admin_active_panel == 'admin-finished' %}active{% endif %}" href="/admin?tab=admin-finished" data-target="admin-finished" data-no-prefetch="true">Leilões Finalizados</a>
-          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}" href="/admin?tab=admin-pending-payments" data-target="admin-pending-payments" data-no-prefetch="true">Leilões Pendentes</a>{% endif %}
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-auctions' %}active{% endif %}" href="/admin?tab=admin-auctions" data-target="admin-auctions" data-no-prefetch="true">Gerenciar Disputas</a>
+          <a class="side-link admin-link {% if admin_active_panel == 'admin-finished' %}active{% endif %}" href="/admin?tab=admin-finished" data-target="admin-finished" data-no-prefetch="true">Disputas Finalizadas</a>
+          {% if user.is_superadmin %}<a class="side-link admin-link {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}" href="/admin?tab=admin-pending-payments" data-target="admin-pending-payments" data-no-prefetch="true">Disputas Pendentes</a>{% endif %}
           <a class="side-link admin-link {% if admin_active_panel == 'admin-shipping' %}active{% endif %}" href="/admin?tab=admin-shipping" data-target="admin-shipping" data-no-prefetch="true">Pedidos dos Vencedores</a>
         </div>
 
@@ -53,7 +53,7 @@
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Resumo Geral</h1>
-            <p>Visão executiva da operação, com indicadores de leilões, usuários, caixa e risco financeiro.</p>
+            <p>Visão executiva da operação, com indicadores de disputas, usuários, caixa e risco financeiro.</p>
           </div>
           <a class="btn small" href="/admin?tab=admin-cashflow" data-no-prefetch="true">Abrir fluxo de caixa</a>
         </div>
@@ -61,17 +61,17 @@
         <div class="stats-grid account-stats admin-stats-pro admin-kpi-grid">
           <div class="stat"><span>Usuários cadastrados</span><strong>{{ stats.users }}</strong><small>Total de contas criadas</small></div>
           <div class="stat"><span>Usuários ativos</span><strong>{{ stats.active_users if stats.active_users is defined else '—' }}</strong><small>Com acesso ou atividade recente</small></div>
-          <div class="stat"><span>Ao vivo</span><strong>{{ stats.live }}</strong><small>Leilões em disputa</small></div>
-          <div class="stat"><span>Próximos</span><strong>{{ stats.scheduled }}</strong><small>Leilões agendados</small></div>
+          <div class="stat"><span>Ao vivo</span><strong>{{ stats.live }}</strong><small>Disputas em andamento</small></div>
+          <div class="stat"><span>Próximos</span><strong>{{ stats.scheduled }}</strong><small>Disputas agendadas</small></div>
           <div class="stat"><span>Pagamentos pendentes</span><strong>{{ stats.pending_payment }}</strong><small>Vencedores aguardando pagamento</small></div>
-          <div class="stat"><span>Encerrados</span><strong>{{ stats.completed }}</strong><small>Leilões já finalizados</small></div>
+          <div class="stat"><span>Encerrados</span><strong>{{ stats.completed }}</strong><small>Disputas já finalizadas</small></div>
           <div class="stat"><span>Identidades pendentes</span><strong>{{ stats.identity_pending if stats.identity_pending is defined else 0 }}</strong><small>Documentos para conferência</small></div>
           <div class="stat"><span>Saques pendentes</span><strong>{{ stats.pending_withdrawals if stats.pending_withdrawals is defined else 0 }}</strong><small>Solicitações aguardando admin</small></div>
           <div class="stat"><span>Chamados abertos</span><strong>{{ stats.open_tickets if stats.open_tickets is defined else 0 }}</strong><small>Disputas ou suporte</small></div>
         </div>
 
         <div class="stats-grid account-stats admin-stats-pro admin-finance-grid">
-          <div class="stat finance-card positive"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Total bruto que saiu do saldo dos usuários nos leilões</small></div>
+          <div class="stat finance-card positive"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Total bruto que saiu do Créditos LC usados nas disputas</small></div>
           <div class="stat finance-card positive"><span>Taxas arrecadadas</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Taxas dos lances + taxa de saque separadas do lucro</small></div>
           <div class="stat finance-card positive"><span>Lucro nos lances</span><strong>R$ {{ '%.2f'|format(finance.bid_profit_total if finance is defined and finance.bid_profit_total is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe margem operacional, sem contar taxas</small></div>
           <div class="stat finance-card"><span>Pagamentos recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Valores pagos por vencedores</small></div>
@@ -79,7 +79,7 @@
           <div class="stat finance-card"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Entradas operacionais menos saídas/reservas</small></div>
           <div class="stat finance-card {% if finance is defined and finance.real_cash is defined and finance.real_cash < 0 %}danger{% else %}positive{% endif %}"><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong><small>Caixa após cobrir todas as saídas previstas</small></div>
           <div class="stat finance-card {% if finance is defined and finance.coverage_percent is defined and finance.coverage_percent < 100 %}danger{% else %}positive{% endif %}"><span>Índice de cobertura</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong><small>Quanto o caixa cobre das saídas previstas</small></div>
-          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Complemento do site nos leilões + saques líquidos pendentes</small></div>
+          <div class="stat finance-card danger"><span>Saídas previstas</span><strong>R$ {{ '%.2f'|format(finance.expected_outgoing if finance is defined and finance.expected_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Complemento do site nas disputas + saques líquidos pendentes</small></div>
           <div class="stat finance-card"><span>Lucro estimado</span><strong>R$ {{ '%.2f'|format(finance.estimated_profit if finance is defined and finance.estimated_profit is defined else 0)|replace('.', ',') }}</strong><small>Resultado operacional estimado</small></div>
           <div class="stat finance-card danger"><span>Prejuízo acumulado</span><strong>R$ {{ '%.2f'|format(finance.accumulated_loss if finance is defined and finance.accumulated_loss is defined else 0)|replace('.', ',') }}</strong><small>Produtos vendidos abaixo do equilíbrio</small></div>
         </div>
@@ -109,7 +109,7 @@
           <div class="panel-card admin-card-pro">
             <div class="card-title-row"><h2>Alertas importantes</h2><span class="pill-soft warn">Atenção</span></div>
             <div class="admin-alert-list">
-              <div><strong>Pagamentos pendentes</strong><span>{{ stats.pending_payment }} leilões aguardando pagamento.</span></div>
+              <div><strong>Pagamentos pendentes</strong><span>{{ stats.pending_payment }} disputas aguardando pagamento.</span></div>
               <div><strong>Envios pendentes</strong><span>{{ stats.pending_shipping if stats.pending_shipping is defined else '—' }} produtos pagos aguardando envio.</span></div>
               <div><strong>Controle de risco</strong><span>Revise lucro/prejuízo antes de relançar produtos retornados.</span></div>
               <div><strong>Cobertura do caixa</strong><span>{% if finance is defined and finance.coverage_percent is defined and finance.coverage_percent < 100 %}Atenção: caixa abaixo das saídas previstas.{% else %}Caixa cobre as saídas previstas no momento.{% endif %}</span></div>
@@ -127,7 +127,7 @@
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Fluxo de Caixa</h1>
-            <p>Controle rigoroso de entradas, saídas, taxas, pagamentos autorizados, saldo em custódia e resultado por leilão.</p>
+            <p>Controle rigoroso de entradas, saídas, taxas, pagamentos autorizados, saldo em custódia e resultado .</p>
           </div>
         </div>
 
@@ -135,11 +135,11 @@
           <div class="stat"><span>Total de entradas</span><strong>R$ {{ '%.2f'|format(finance.total_income if finance is defined and finance.total_income is defined else 0)|replace('.', ',') }}</strong><small>Lances recebidos + pagamentos dos vencedores</small></div>
           <div class="stat"><span>Total de saídas</span><strong>R$ {{ '%.2f'|format(finance.total_outgoing if finance is defined and finance.total_outgoing is defined else 0)|replace('.', ',') }}</strong><small>Produtos comprados/enviados, saques pagos e estornos</small></div>
           <div class="stat"><span>Caixa disponível</span><strong>R$ {{ '%.2f'|format(finance.available_cash if finance is defined and finance.available_cash is defined else 0)|replace('.', ',') }}</strong><small>Disponível após saídas e saques pendentes</small></div>
-          <div class="stat"><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong><small>Caixa disponível menos complemento dos leilões</small></div>
+          <div class="stat"><span>Caixa real</span><strong>R$ {{ '%.2f'|format(finance.real_cash if finance is defined and finance.real_cash is defined else 0)|replace('.', ',') }}</strong><small>Caixa disponível menos complemento das disputas</small></div>
           <div class="stat"><span>Índice de cobertura</span><strong>{{ '%.2f'|format(finance.coverage_percent if finance is defined and finance.coverage_percent is defined else 100)|replace('.', ',') }}%</strong><small>Capacidade de cobrir saídas previstas</small></div>
-          <div class="stat"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Entrada bruta dos leilões</small></div>
+          <div class="stat"><span>Lances recebidos</span><strong>R$ {{ '%.2f'|format(finance.total_bid_spent if finance is defined and finance.total_bid_spent is defined else 0)|replace('.', ',') }}</strong><small>Entrada bruta das disputas</small></div>
           <div class="stat"><span>Taxas de lance</span><strong>R$ {{ '%.2f'|format(finance.total_fees if finance is defined and finance.total_fees is defined else 0)|replace('.', ',') }}</strong><small>Receita separada por taxa</small></div>
-          <div class="stat"><span>Caixa dos lances p/ produto</span><strong>R$ {{ '%.2f'|format(finance.bid_product_cash if finance is defined and finance.bid_product_cash is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe o valor do leilão</small></div>
+          <div class="stat"><span>Caixa dos lances p/ produto</span><strong>R$ {{ '%.2f'|format(finance.bid_product_cash if finance is defined and finance.bid_product_cash is defined else 0)|replace('.', ',') }}</strong><small>Parte dos lances que compõe o valor da disputa</small></div>
           <div class="stat"><span>Pagamentos de vencedores</span><strong>R$ {{ '%.2f'|format(finance.total_payments if finance is defined and finance.total_payments is defined else 0)|replace('.', ',') }}</strong><small>Entradas após vitória</small></div>
           <div class="stat"><span>Saques pendentes</span><strong>R$ {{ '%.2f'|format(finance.pending_withdrawals if finance is defined and finance.pending_withdrawals is defined else 0)|replace('.', ',') }}</strong><small>Valor líquido a pagar aos usuários</small></div>
           <div class="stat"><span>Lucro nos lances</span><strong>R$ {{ '%.2f'|format(finance.bid_profit_total if finance is defined and finance.bid_profit_total is defined else 0)|replace('.', ',') }}</strong><small>Lucro operacional dos lances, sem taxas</small></div>
@@ -171,7 +171,7 @@
         </div>
 
         <div class="panel-card admin-card-pro">
-          <div class="card-title-row"><h2>Resultado por leilão</h2><span class="pill-soft">Últimos 100 na tela</span></div>
+          <div class="card-title-row"><h2>Resultado por disputa</h2><span class="pill-soft">Últimos 100 na tela</span></div>
           <div class="table-wrap admin-scroll-table">
             <table>
               <thead><tr><th>Produto</th><th>Preço original</th><th>Lances recebidos</th><th>Taxas</th><th>Caixa dos lances</th><th>Pago pelo vencedor</th><th>Saída produto</th><th>Complemento</th><th>Resultado</th><th>Situação</th></tr></thead>
@@ -190,7 +190,7 @@
                   <td>{{ r.status_label }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="10">Nenhum resultado por leilão disponível ainda.</td></tr>
+                <tr><td colspan="10">Nenhum resultado por disputa disponível ainda.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
@@ -402,7 +402,7 @@
               </label>
               <label class="schedule-minutes-field">Iniciar em quantos minutos?<input type="number" name="start_in_minutes" value="60" min="0"></label>
               <label class="schedule-datetime-field">Data e hora do início<input type="datetime-local" name="scheduled_start_at"></label>
-              <label>Tempo inicial do leilão em minutos
+              <label>Tempo inicial da disputa em minutos
                 <input type="number" name="initial_duration_minutes" value="30" min="1" max="60">
                 <small>Máximo recomendado: 60 minutos.</small>
               </label>
@@ -430,12 +430,12 @@
                 <input type="number" step="0.01" name="bid_fee_percent" value="10" min="0" max="50">
                 <small>Ex.: R$ 1,00 de lance gera R$ 0,10 de taxa para o site.</small>
               </label>
-              <label>Cashback opcional no fim do leilão
+              <label>Cashback opcional no fim da disputa.
                 <select name="cashback_enabled">
                   <option value="0">Não ativar</option>
-                  <option value="1">Ativar neste leilão</option>
+                  <option value="1">Ativar nesta disputa</option>
                 </select>
-                <small>Use apenas em leilões estratégicos, quando houver caixa disponível.</small>
+                <small>Use apenas em disputas estratégicas, quando houver caixa disponível.</small>
               </label>
             </div>
 
@@ -445,7 +445,7 @@
             </div>
 
             <div class="admin-toolbar-end">
-              <button class="btn" type="submit">Criar leilão profissional</button>
+              <button class="btn" type="submit">Criar disputa</button>
             </div>
           </form>
         </div>
@@ -547,8 +547,8 @@
       <section id="admin-auctions" class="admin-panel {% if admin_active_panel == 'admin-auctions' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
-            <h1>Gerenciar Leilões</h1>
-            <p>Controle operacional dos leilões ao vivo, agendados e em preparação.</p>
+            <h1>Gerenciar Disputas</h1>
+            <p>Controle operacional das disputas ao vivo, agendados e em preparação.</p>
           </div>
         </div>
 
@@ -571,7 +571,7 @@
                       <form method="post" action="/admin/item/{{ item.id }}/start-now" class="inline-form"><button class="btn small" type="submit">Começar</button></form>
                       <form method="post" action="/admin/item/{{ item.id }}/relist" class="inline-form">
                         <input type="number" name="start_in_minutes" value="60" min="0" required title="Começar em quantos minutos">
-                        <input type="number" name="initial_duration_minutes" value="30" min="1" max="60" required title="Tempo inicial do leilão">
+                        <input type="number" name="initial_duration_minutes" value="30" min="1" max="60" required title="Tempo inicial da disputa">
                         <button class="btn small ghost" type="submit">Relançar</button>
                       </form>
                       {% if item.status != 'live' %}<form method="post" action="/admin/item/{{ item.id }}/delete" class="inline-form"><button class="btn small danger" type="submit">Excluir</button></form>{% endif %}
@@ -580,7 +580,7 @@
                   </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8">Nenhum leilão cadastrado.</td></tr>
+                <tr><td colspan="8">Nenhuma disputa cadastrada.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
@@ -593,8 +593,8 @@
       <section id="admin-finished" class="admin-panel {% if admin_active_panel == 'admin-finished' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
-            <h1>Leilões Finalizados</h1>
-            <p>Histórico completo com valor de saída, taxa arrecadada, complemento do site, lucro e prejuízo.</p>
+            <h1>Disputas Finalizadas</h1>
+            <p>Histórico completo com valor final, taxa arrecadada, complemento do site, lucro e prejuízo.</p>
           </div>
         </div>
 
@@ -615,7 +615,7 @@
                   <td>{{ item.status_label }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8">Nenhum leilão finalizado com contabilidade calculada ainda.</td></tr>
+                <tr><td colspan="8">Nenhuma disputa finalizado com contabilidade calculada ainda.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
@@ -631,7 +631,7 @@
 <section id="admin-pending-payments" class="admin-panel {% if admin_active_panel == 'admin-pending-payments' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
-            <h1>Leilões Pendentes</h1>
+            <h1>Disputas Pendentes</h1>
             <p>Produtos vencidos que aguardam pagamento do vencedor dentro do prazo.</p>
           </div>
         </div>
@@ -661,7 +661,7 @@
                 </tr>
                 {% endif %}
                 {% else %}
-                <tr><td colspan="8">Nenhum leilão pendente de pagamento.</td></tr>
+                <tr><td colspan="8">Nenhuma disputa pendente de pagamento.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
@@ -1135,7 +1135,7 @@
         <div class="section-head admin-section-head-pro">
           <div>
             <h1>Indicações de Produtos</h1>
-            <p>Produtos mais pedidos pelos usuários para próximos leilões. Cada usuário pode votar uma vez por dia.</p>
+            <p>Produtos mais pedidos pelos usuários para próximas disputas. Cada usuário pode votar uma vez por dia.</p>
           </div>
         </div>
 
@@ -1186,7 +1186,7 @@
             <section id="admin-search-orders" class="admin-panel {% if admin_active_panel == 'admin-search-orders' %}active{% endif %}">
         <div class="section-head admin-section-head-pro">
           <div>
-            <h1>Central de Controle de Arremates</h1>
+            <h1>Central de Controle de Pedidos Vencedores</h1>
             <p>Pesquise e abra o painel interno do pedido para controlar compra, envio, rastreio e mensagens. Informações financeiras ficam restritas ao super admin.</p>
           </div>
         </div>
@@ -1203,7 +1203,7 @@
                     <h3>{{ o.auction.title }}</h3>
                     <p><strong>Ganhador:</strong> {{ o.user.full_name }} • {{ o.user.email }}</p>
                     <p><strong>Status:</strong> {{ o.status }} • <strong>Valor:</strong> R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</p>
-                    <p><strong>Arrematado em:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
+                    <p><strong>Disputa encerrada em:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
                   </div>
                   <button class="btn small order-panel-btn" type="button" data-order-panel="order-panel-{{ o.id }}">Abrir painel</button>
                 </div>
@@ -1228,7 +1228,7 @@
                     </div>
                     <div class="panel-card mini-detail-card">
                       <h4>Pagamento e prazo</h4>
-                      <p><strong>Arrematou:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
+                      <p><strong>Venceu em:</strong> {{ o.created_at.strftime('%d/%m/%Y %H:%M') if o.created_at else '—' }}</p>
                       <p><strong>Pagamento:</strong> {{ o.paid_at.strftime('%d/%m/%Y %H:%M') if o.paid_at else 'Não confirmado' }}</p>
                       <p><strong>Prazo:</strong> {{ o.payment_deadline.strftime('%d/%m/%Y %H:%M') if o.payment_deadline else '—' }}</p>
                       {% if user.is_superadmin and (o.status == 'expired' or not o.paid_at) %}
@@ -1311,7 +1311,7 @@
                 </div>
               </article>
             {% else %}
-              <p>Nenhum arremate encontrado.</p>
+              <p>Nenhum pedido vencedor encontrado.</p>
             {% endfor %}
           </div>
         </div>
@@ -1326,7 +1326,7 @@
   <div class="section-head admin-section-head-pro">
     <div>
       <h1>Central de Auditoria</h1>
-      <p>Arquivo central da empresa: financeiro, leilões, pedidos, usuários, ações administrativas e arquivo morto, tudo separado em pastas pesquisáveis.</p>
+      <p>Arquivo central da empresa: financeiro, disputas, pedidos, usuários, ações administrativas e arquivo morto, tudo separado em pastas pesquisáveis.</p>
     </div>
     <a class="btn small" href="/admin/audit/export?folder={{ audit_folder or 'geral' }}&q={{ audit_search or '' }}&from={{ audit_date_from or '' }}&to={{ audit_date_to or '' }}" data-no-prefetch="true">Exportar CSV</a>
   </div>
@@ -1374,7 +1374,7 @@
       <div class="card-title-row"><h2>Como essa central organiza</h2><span class="pill-soft">Arquivo empresarial</span></div>
       <div class="admin-alert-list">
         <div><strong>Financeiro</strong><span>Entradas, saídas, saques, taxas, estornos, créditos manuais e pagamentos confirmados.</span></div>
-        <div><strong>Operação</strong><span>Leilões, pedidos, compra do produto, envio, entrega, disputa e finalização.</span></div>
+        <div><strong>Operação</strong><span>Disputas, pedidos, compra do produto, envio, entrega, disputa e finalização.</span></div>
         <div><strong>Arquivo morto</strong><span>Registros antigos ou concluídos ficam consultáveis para auditoria futura.</span></div>
       </div>
     </div>
@@ -1420,14 +1420,14 @@
             <div class="profile-grid">
               <div><span>Usuários</span><strong>Banimento apenas por infração real</strong></div>
               <div><span>Chat</span><strong>Mutar comportamentos abusivos</strong></div>
-              <div><span>Leilões</span><strong>Pausar chat em momentos críticos</strong></div>
+              <div><span>Disputas</span><strong>Pausar chat em momentos críticos</strong></div>
               <div><span>Auditoria</span><strong>Registrar motivo das ações</strong></div>
             </div>
           </div>
           <div class="panel-card admin-card-pro">
             <h2>Boas práticas</h2>
             <div class="admin-alert-list">
-              <div><strong>Transparência</strong><span>Manter leilões, resultados e vencedores auditáveis.</span></div>
+              <div><strong>Transparência</strong><span>Manter disputas, resultados e vencedores auditáveis.</span></div>
               <div><strong>Contabilidade</strong><span>Separar saldo dos usuários do caixa operacional.</span></div>
               <div><strong>Risco</strong><span>Não relançar produto sem revisar margem e prejuízo acumulado.</span></div>
             </div>

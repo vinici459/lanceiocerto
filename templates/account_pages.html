@@ -58,11 +58,11 @@
     </a>
 
     <a href="/minha-conta/participacoes" class="account-side-link {% if section == 'participations' %}active{% endif %}">
-      Leilões Participados
+      Disputas Participadas
     </a>
 
     <a href="/minha-conta/ganhos" class="account-side-link {% if section in ['wins','order_detail'] %}active{% endif %}">
-      Leilões Ganhos
+      Disputas Vencidas
     </a>
 
     <a href="/minha-conta/pagamentos" class="account-side-link {% if section == 'payments' %}active{% endif %}">
@@ -89,7 +89,7 @@
 <div class="stats-grid account-stats">
   <div class="stat"><span>Participações</span><strong>{{ stats.distinct_auctions }}</strong></div>
   <div class="stat"><span>Lances</span><strong>{{ stats.bids_total }}</strong></div>
-  <div class="stat"><span>Leilões ganhos</span><strong>{{ stats.won }}</strong></div>
+  <div class="stat"><span>Disputas vencidas</span><strong>{{ stats.won }}</strong></div>
   <div class="stat"><span>Pagamentos pendentes</span><strong>{{ stats.pending }}</strong></div>
   <div class="stat"><span>Produtos expirados</span><strong>{{ stats.expired }}</strong></div>
 </div>
@@ -113,7 +113,7 @@
 
 <div class="notice-grid">
   <div class="panel-card">
-    <h2>Último leilão ganho</h2>
+    <h2>Última disputa ganha</h2>
     {% if latest_orders %}
       {% set o = latest_orders[0] %}
       <div class="mini-auction">
@@ -126,7 +126,7 @@
         </div>
       </div>
     {% else %}
-      <p class="muted">Você ainda não ganhou nenhum leilão.</p>
+      <p class="muted">Você ainda não ganhou nenhuma disputa.</p>
     {% endif %}
   </div>
 
@@ -171,7 +171,7 @@
   <div class="section-head compact-head">
     <div>
       <h1>Comprar Créditos LC</h1>
-      <p class="muted">Créditos LC são pré-pagos internos, usados para participar dos leilões e recursos da plataforma.</p>
+      <p class="muted">Créditos LC são pré-pagos internos, usados para participar das disputas e recursos da plataforma.</p>
     </div>
     <span class="wallet-badge">Créditos LC: {{ '%.2f'|format(user.wallet_balance or 0)|replace('.', ',') }}</span>
   </div>
@@ -668,7 +668,7 @@
 
 {% elif section == 'participations' %}
 <div class="panel-card">
-  <div class="section-head"><div><h1>Leilões Participados</h1></div></div>
+  <div class="section-head"><div><h1>Disputas Participadas</h1></div></div>
   <div class="cards account-cards">
     {% for item in items %}
     <article class="card auction-card compact-card">
@@ -679,11 +679,11 @@
         <p>Total gasto: <strong>R$ {{ '%.2f'|format(item.total_spent)|replace('.', ',') }}</strong></p>
         <p>Status: {{ item.status }}</p>
         <p>Resultado: {% if item.won %}<strong>Você venceu</strong>{% else %}Não venceu{% endif %}</p>
-        <a href="/auction/{{ item.auction_id }}" class="btn full">Ver leilão</a>
+        <a href="/auction/{{ item.auction_id }}" class="btn full">Ver disputa</a>
       </div>
     </article>
     {% else %}
-    <div class="panel-card empty-card"><p class="muted">Você ainda não participou de nenhum leilão.</p></div>
+    <div class="panel-card empty-card"><p class="muted">Você ainda não participou de nenhuma disputa.</p></div>
     {% endfor %}
   </div>
 </div>
@@ -710,7 +710,7 @@
 
 {% elif section == 'wins' %}
 <div class="orders-page-marketplace">
-  <h1 style="margin:0 0 14px;font-size:34px;line-height:1.1;">Leilões Ganhos</h1>
+  <h1 style="margin:0 0 14px;font-size:34px;line-height:1.1;">Disputas Vencidas</h1>
 
   <div class="orders-list-marketplace">
     {% for o in orders %}
@@ -737,7 +737,7 @@
           </div>
 
           <div class="order-summary-meta">
-            <div><span>Arrematado por</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
+            <div><span>Valor final</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
             <div><span>Valor de mercado</span><strong>{% if market_value %}R$ {{ '%.2f'|format(market_value)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
             <div><span>Economia</span><strong class="order-saving">{% if savings %}R$ {{ '%.2f'|format(savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
             <div><span>Atendimento</span><strong>{% if o.fulfillment_mode == "customer_purchase" %}Pedido feito por você{% elif o.fulfillment_mode == "site_purchase" %}Compra assistida{% else %}Aguardando escolha{% endif %}</strong></div>
@@ -753,8 +753,8 @@
       </article>
     {% else %}
       <div class="panel-card empty-card orders-empty-marketplace">
-        <h2>Você ainda não ganhou nenhum leilão.</h2>
-        <a class="btn small" href="/">Ver leilões disponíveis</a>
+        <h2>Você ainda não ganhou nenhuma disputa.</h2>
+        <a class="btn small" href="/">Ver disputas disponíveis</a>
       </div>
     {% endfor %}
   </div>
@@ -779,7 +779,7 @@
     </div>
 
     <div class="order-detail-values">
-      <div><span>Arrematado por</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
+      <div><span>Valor final</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
       <div><span>Valor de mercado</span><strong>{% if o.source_price %}R$ {{ '%.2f'|format(o.source_price)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
       <div><span>Economia obtida</span><strong class="order-saving">{% if o.savings %}R$ {{ '%.2f'|format(o.savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
     </div>
@@ -931,7 +931,7 @@
     <section class="panel-card order-finance-card">
       <div class="order-panel-title"><h2>Resumo financeiro</h2></div>
       <div class="order-finance-list">
-        <div><span>Valor arrematado</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
+        <div><span>Valor final da disputa</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
         <div><span>Frete</span><strong>A calcular / conforme envio</strong></div>
         <div><span>Total pago</span><strong>R$ {{ '%.2f'|format(o.final_price)|replace('.', ',') }}</strong></div>
         <div><span>Economia</span><strong>{% if o.savings %}R$ {{ '%.2f'|format(o.savings)|replace('.', ',') }}{% else %}—{% endif %}</strong></div>
@@ -1016,7 +1016,7 @@
         <h3>Resumo do pedido</h3>
 
         <div class="summary-row">
-          <span>Valor do leilão</span>
+          <span>Valor da disputa</span>
           <strong>R$ {{ '%.2f'|format(order.final_price)|replace('.', ',') }}</strong>
         </div>
 
@@ -1297,7 +1297,7 @@
         <option value="privacidade">Privacidade/dados pessoais</option>
         <option value="dificuldade">Dificuldade para usar o site</option>
         <option value="problema_pagamento">Problema com pagamento ou Créditos LC</option>
-        <option value="problema_leilao">Problema com leilão ou pedido</option>
+        <option value="problema_leilao">Problema com disputa ou pedido</option>
         <option value="teste">Conta criada apenas para teste</option>
         <option value="outro">Outro motivo</option>
       </select>

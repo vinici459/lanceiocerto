@@ -377,10 +377,6 @@
       const status = (item.status === "pending_payment" ? "ended" : String(item.status || "").toLowerCase()) || "scheduled";
       const grids = homeGrids();
 
-      // Se a Home promoveu localmente um leilão que acabou de chegar a zero,
-      // não deixa uma resposta levemente atrasada do servidor voltar o card para
-      // "Próximo" por alguns segundos. Assim o usuário não vê o efeito
-      // "Iniciando... / Próximo / Ao vivo".
       if (card.dataset.homeLocalStarted === "true" && (status === "scheduled" || status === "relisted")) {
         const remainingToStart = Number(item.start_remaining || 0);
         if (remainingToStart <= 3) {

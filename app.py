@@ -676,7 +676,7 @@ SLOW_REQUEST_WARN_MS = float(os.getenv("SLOW_REQUEST_WARN_MS", "1500"))
 
 # Cache ultracurto para endpoints de estado.
 # Os logs de produção mostraram /api/home/state (~1.7s) e /api/auction/{id}/state
-# (~1.3s) competindo com POST /bid. Em leilão ao vivo o WebSocket é a fonte
+# (~1.3s) competindo com POST /bid. Em disputa ao vivo o WebSocket é a fonte
 # principal; o /state deve ser apenas guarda/sincronização, não uma consulta pesada
 # para cada navegador a cada poucos segundos.
 STATE_API_CACHE_ENABLED = os.getenv("STATE_API_CACHE_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
@@ -761,7 +761,7 @@ templates.env.globals["consumer_rules_version"] = CONSUMER_RULES_VERSION
 app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 AUCTION_BID_LOCKS: dict[int, threading.Lock] = defaultdict(threading.Lock)
-# Fila assíncrona por leilão: evita várias requisições ocupando threads só esperando
+# Fila assíncrona por disputa: evita várias requisições ocupando threads só esperando
 # o mesmo lock de lance. Mantém a ordem real dos cliques no caminho quente.
 AUCTION_BID_ASYNC_LOCKS: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 SUGGESTION_WEEK_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
@@ -994,7 +994,7 @@ TURBO_4_SECONDS = {
 
 # Cooldown visual e operacional após cada lance.
 # Regra atual: modo normal 20s; qualquer modo turbo 30s.
-# O cooldown é aplicado para todos os botões do usuário naquele leilão, evitando clique em sequência.
+# O cooldown é aplicado para todos os botões do usuário naquele disputa, evitando clique em sequência.
 BID_COOLDOWN_NORMAL_SECONDS = 20
 TURBO_BUTTON_COOLDOWN_SECONDS = {
     2: 30,
@@ -1026,8 +1026,8 @@ SUPPORT_CATEGORIES = {
     "pagamento_creditos": "Pagamento de Créditos LC não caiu",
     "creditos_descontados": "Créditos LC descontados indevidamente",
     "indicacao_bonus": "Indicação ou bônus não creditado",
-    "lance_leilao": "Problema em lance ou leilão",
-    "arremate_pagamento": "Problema no pagamento do arremate",
+    "lance_leilao": "Problema em lance ou disputa",
+    "arremate_pagamento": "Problema no pagamento final da disputa",
     "compra_assistida": "Compra assistida / link do pedido",
     "produto_entrega": "Entrega, atraso ou rastreio",
     "produto_defeito": "Produto com defeito ou divergente",
@@ -1854,7 +1854,7 @@ def apply_approved_mp_payment(db: Session, request: Request, payment_row: Mercad
                 user_id=user.id,
                 amount=payment_row.amount,
                 kind="order_payment_pix" if is_pix_payment else "order_payment_card",
-                note=f"Pagamento {payment_label} do pedido #{order.id}/leilão #{order.auction_id} confirmado pelo Mercado Pago.",
+                note=f"Pagamento {payment_label} do pedido #{order.id}/disputa #{order.auction_id} confirmado pelo Mercado Pago.",
             ))
             record_winner_payment_fiscal(
                 db,
@@ -1972,7 +1972,7 @@ def register_product_outgoing_if_needed(db: Session, order: WinnerOrder, now: Op
         user_id=order.user_id,
         amount=-cost,
         kind="product_outgoing",
-        note=f"Saída compra/envio do produto • Pedido #{order.id} • Leilão #{order.auction_id} • {getattr(item, 'title', '')}",
+        note=f"Saída compra/envio do produto • Pedido #{order.id} • Disputa #{order.auction_id} • {getattr(item, 'title', '')}",
         created_at=now or datetime.utcnow(),
     ))
 
@@ -1998,10 +1998,10 @@ templates.env.globals["support_category_label"] = support_category_label
 templates.env.globals["support_priority_label"] = support_priority_label
 templates.env.globals["support_status_label"] = support_status_label
 def public_display_status(status: str) -> str:
-    """Status público do leilão.
+    """Status público do disputa.
 
     Internamente o banco mantém pending_payment para o vencedor pagar na área
-    "Minha Conta". Publicamente, porém, o leilão já terminou e deve aparecer
+    "Minha Conta". Publicamente, porém, o disputa já terminou e deve aparecer
     apenas como encerrado, com o vencedor.
     """
     value = (status or "").strip().lower()
@@ -2062,7 +2062,7 @@ def public_name_from_parts(public_name: str | None, full_name: str | None) -> st
 
 
 def auction_last_bid_meta(db: Session, auction_id: int, viewer_user_id: Optional[int] = None) -> tuple[int, Optional[str]]:
-    """Busca o último lance do leilão em uma única consulta leve.
+    """Busca o último lance do disputa em uma única consulta leve.
 
     A versão anterior fazia MAX(id) e depois outra busca do último Bid + User.
     Em /state isso era chamado repetidamente e virava gargalo. Ordenar por id
@@ -2311,7 +2311,7 @@ def audit_event(db: Session, request: Request, action: str, user: Optional[User]
 AUDIT_FOLDERS = {
     "geral": {"label": "Tudo", "description": "Todos os registros arquivados na central."},
     "financeiro": {"label": "Financeiro", "description": "Entradas, saídas, taxas, estornos e ajustes de Créditos LC."},
-    "leiloes": {"label": "Leilões", "description": "Criação, início, encerramento, relançamento, vencedor e mudanças críticas."},
+    "leiloes": {"label": "Disputas", "description": "Criação, início, encerramento, relançamento, vencedor e mudanças críticas."},
     "pedidos": {"label": "Pedidos", "description": "Pagamento do vencedor, compra do produto, envio, entrega, disputa e finalização."},
     "usuarios": {"label": "Usuários", "description": "Cadastro, dados, KYC, banimentos, moderação e conta."},
     "admin": {"label": "Admin", "description": "Ações feitas por administradores e alterações sensíveis."},
@@ -2861,7 +2861,7 @@ def calculate_turbo_trigger_percent(winner_min_percent: float = 50.0, target_pro
     """Calcula o gatilho automático do Turbo 2.0.
 
     Regra correta definida para o projeto:
-    - O vencedor paga o preço final do leilão.
+    - O vencedor paga o preço final da disputa.
     - Então, para buscar 10% de margem sobre o produto, o gatilho não deve ser 50% + 10%,
       e sim 50% + metade da meta.
 
@@ -2995,8 +2995,8 @@ def start_auction_if_due(item: AuctionItem, now: Optional[datetime] = None) -> b
         item.status = "live"
         duration = getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS) or DEFAULT_INITIAL_DURATION_SECONDS
 
-        # Regra importante para alinhar home e página do leilão:
-        # o tempo do leilão deve contar a partir do horário agendado, não do momento
+        # Regra importante para alinhar home e página do disputa:
+        # o tempo do disputa deve contar a partir do horário agendado, não do momento
         # em que alguém abre a página. Antes, se a home mostrava "começa agora" e
         # o usuário entrava depois, a página reiniciava o tempo completo.
         logical_start = item.scheduled_start or now
@@ -3008,7 +3008,7 @@ def start_auction_if_due(item: AuctionItem, now: Optional[datetime] = None) -> b
 
 
 def finish_auction_if_due(item: AuctionItem, db: Session, now: Optional[datetime] = None, create_side_effects: bool = True) -> bool:
-    """Finaliza imediatamente um leilão live cujo relógio chegou a zero.
+    """Finaliza imediatamente um disputa live cujo relógio chegou a zero.
 
     Essa função é chamada pelo watcher, pelo endpoint /state e antes de aceitar lances.
     Assim o frontend não recebe um estado live vencido e não reinicia o cronômetro.
@@ -3133,7 +3133,7 @@ def ensure_finished_auction_side_effects(auction_id: int) -> None:
 
 
 def sync_due_auction_states(db: Session, now: Optional[datetime] = None, limit: int = 80) -> bool:
-    """Sincroniza leilões vencidos/iniciados antes de montar páginas públicas.
+    """Sincroniza disputas vencidos/iniciados antes de montar páginas públicas.
 
     Sem isso, a home pode mostrar "próximo" ou um cronômetro diferente enquanto
     a página interna já muda para "ao vivo" ou encerrado. A sincronização é leve
@@ -3142,8 +3142,8 @@ def sync_due_auction_states(db: Session, now: Optional[datetime] = None, limit: 
     now = now or datetime.utcnow()
     changed = False
 
-    # Carrega apenas leilões que realmente precisam mudar de estado agora.
-    # Antes a Home varria até 80 leilões scheduled/live em todo cache miss,
+    # Carrega apenas disputas que realmente precisam mudar de estado agora.
+    # Antes a Home varria até 80 disputas scheduled/live em todo cache miss,
     # mesmo quando nada estava vencido. Em produção isso custava segundos.
     due_items = (
         db.query(AuctionItem)
@@ -3223,7 +3223,7 @@ def datetime_ms(dt: Optional[datetime]) -> Optional[int]:
 def auction_state_guard_fields(item: AuctionItem, *, last_bid_id: int, bids_count: int, now: Optional[datetime] = None) -> dict:
     """Campos de versão usados pelo navegador para aceitar somente estado novo.
 
-    Todo payload que atualiza a tela do leilão precisa carregar a mesma base de
+    Todo payload que atualiza a tela do disputa precisa carregar a mesma base de
     comparação. Assim /state, WebSocket e resposta do POST obedecem uma única
     regra e não conseguem fazer preço/lances/cronômetro voltarem para trás.
     """
@@ -3311,11 +3311,11 @@ def public_auction_payload(item: AuctionItem, db: Session, user: Optional[User] 
 
 
 def public_auction_live_payload(item: AuctionItem, db: Session, *, include_cashback: bool = False, bids_count_override: Optional[int] = None, last_bidder_override: Optional[str] = None, last_bid_id_override: Optional[int] = None, user: Optional[User] = None, user_turbo_eligible_override: Optional[bool] = None) -> dict:
-    """Payload leve para atualizações em tempo real do leilão.
+    """Payload leve para atualizações em tempo real do disputa.
 
     O endpoint de lance precisa ser rápido. O payload completo chama cashback e
     outras informações que não precisam ser recalculadas a cada clique. Este
-    payload mantém todos os campos usados pelo JavaScript da tela do leilão,
+    payload mantém todos os campos usados pelo JavaScript da tela do disputa,
     mas evita trabalho extra desnecessário.
     """
     last_bid_id = 0
@@ -3487,8 +3487,8 @@ def fast_bid_auction_payload(
 def public_auction_card_payload(item: AuctionItem) -> dict:
     """Payload leve para a vitrine/home.
 
-    Mantém os campos usados pelos cards, mas evita consultas extras por leilão
-    (lances, cashback, usuário vencedor etc.). A página completa do leilão
+    Mantém os campos usados pelos cards, mas evita consultas extras por disputa
+    (lances, cashback, usuário vencedor etc.). A página completa do disputa
     continua usando public_auction_payload(), preservando a lógica original.
     """
     remaining = 0
@@ -3892,7 +3892,7 @@ def build_cashflow_movements(db: Session) -> list[dict]:
     return tmp
 
 def build_auction_results(db: Session) -> list[dict]:
-    """Resultado resumido por leilão com poucas consultas.
+    """Resultado resumido por disputa com poucas consultas.
 
     Mantém a visão produto a produto, mas evita hidratar objetos ORM e reduz o
     volume inicial para o que o Admin enxerga primeiro.
@@ -4187,7 +4187,7 @@ def build_order_timeline(order: WinnerOrder) -> list[dict]:
         approved_done = status in {"aprovado_para_pagamento", "pagamento_pedido_realizado", "finalized", "completed"}
         paid_order_done = status in {"pagamento_pedido_realizado", "finalized", "completed"}
         steps = [
-            ("Leilão vencido", order.created_at, True, "Produto arrematado na sua conta."),
+            ("Disputa vencida", order.created_at, True, "Compra assistida liberada na sua conta."),
             ("Pagamento aprovado", order.paid_at, paid_done, "Aguardando confirmação do pagamento."),
             ("Forma escolhida", getattr(order, "order_choice_at", None), bool(getattr(order, "order_choice_at", None)), "Escolha como quer seguir com o pedido."),
             ("Link enviado", getattr(order, "submitted_link_checked_at", None), link_done, "Envie o link/código Pix do site original."),
@@ -4200,7 +4200,7 @@ def build_order_timeline(order: WinnerOrder) -> list[dict]:
         sent_done = bool(order.sent_at) or status in {"sent", "delivered", "finalized", "completed"}
         delivered_done = bool(order.delivered_at) or status in {"delivered", "finalized", "completed"}
         steps = [
-            ("Leilão vencido", order.created_at, True, "Produto arrematado na sua conta."),
+            ("Disputa vencida", order.created_at, True, "Compra assistida liberada na sua conta."),
             ("Pagamento aprovado", order.paid_at, paid_done, "Aguardando confirmação do pagamento."),
             ("Forma escolhida", getattr(order, "order_choice_at", None), bool(getattr(order, "order_choice_at", None)), "Escolha como quer receber."),
             ("Compra realizada", order.purchased_at, purchased_done, "Aguardando compra do produto."),
@@ -4233,7 +4233,7 @@ def build_order_timeline(order: WinnerOrder) -> list[dict]:
 
 def build_order_history(order: WinnerOrder) -> list[dict]:
     events = [
-        (order.created_at, "Leilão vencido", "Você foi o vencedor deste leilão."),
+        (order.created_at, "Disputa vencida", "Você foi o vencedor desta disputa."),
         (order.paid_at, "Pagamento aprovado", "Pagamento confirmado na plataforma."),
         (getattr(order, "order_choice_at", None), "Forma de recebimento escolhida", "O modo de atendimento do pedido foi definido."),
         (getattr(order, "submitted_link_checked_at", None), "Link de pagamento enviado", getattr(order, "submitted_link_validation_note", "") or "Link recebido para validação."),
@@ -4350,7 +4350,7 @@ def draw_cashback_if_due(event: CashbackEvent, db: Session, now: datetime) -> No
             user_id=winner.id,
             amount=event.cashback_amount,
             kind="cashback",
-            note=f"Cashback sorteado no leilão #{event.auction_id}",
+            note=f"Cashback sorteado no disputa #{event.auction_id}",
         ))
 
 
@@ -4675,7 +4675,7 @@ def ensure_columns() -> None:
             conn.execute(text("UPDATE support_tickets SET last_customer_message_at = created_at WHERE last_customer_message_at IS NULL"))
 
 
-        # Índices leves para as consultas mais repetidas da home, conta, admin e leilão.
+        # Índices leves para as consultas mais repetidas da home, conta, admin e disputa.
         # CREATE INDEX IF NOT EXISTS funciona em SQLite e PostgreSQL.
         for ddl in [
             "CREATE INDEX IF NOT EXISTS ix_auction_items_status_created ON auction_items (status, created_at)",
@@ -4995,7 +4995,7 @@ def seed() -> None:
                     ),
                     AuctionItem(
                         title="Bicicleta Aro 29",
-                        description="Bicicleta urbana pronta para o próximo leilão.",
+                        description="Bicicleta urbana pronta para a próxima disputa.",
                         image_url="https://images.unsplash.com/photo-1541625602330-2277a4c46182?q=80&w=1400&auto=format&fit=crop",
                         source_store="Magazine Luiza",
                         source_url="https://www.magazineluiza.com.br/",
@@ -5163,7 +5163,7 @@ def cached_home_public_context(db: Session, ttl_seconds: int = 2) -> dict:
     """Dados públicos da Home com cache ultracurto e sincronização forte.
 
     A vitrine não pode mostrar relógio/status velho. Antes o cache de 90s podia
-    deixar a Home em "Próximo" enquanto a página do leilão já estava ao vivo.
+    deixar a Home em "Próximo" enquanto a página do disputa já estava ao vivo.
     Agora sincronizamos estados vencidos antes de consultar o cache e mantemos
     o cache em apenas 2s, suficiente para aliviar cliques repetidos sem quebrar
     a sensação de tempo real.
@@ -5267,7 +5267,7 @@ def _api_cache_set(cache: dict[str, tuple[float, dict]], key: str, payload: dict
     if not STATE_API_CACHE_ENABLED:
         return payload
     if max_items and len(cache) > max_items:
-        # Limpeza simples e barata: remove os mais antigos quando houver muitos usuários/leilões.
+        # Limpeza simples e barata: remove os mais antigos quando houver muitos usuários/disputas.
         for old_key, _ in sorted(cache.items(), key=lambda item: item[1][0])[: max(1, len(cache) // 4)]:
             cache.pop(old_key, None)
     cache[key] = (time.monotonic(), dict(payload))
@@ -5312,8 +5312,8 @@ def _request_user_id(request: Request) -> Optional[int]:
     return _session_user_id(request.cookies.get("session_token"))
 
 
-# Estado público em memória por leilão: usado para /api/auction/{id}/state
-# responder instantâneo durante leilão ao vivo. O saldo do usuário continua vindo
+# Estado público em memória por disputa: usado para /api/auction/{id}/state
+# responder instantâneo durante disputa ao vivo. O saldo do usuário continua vindo
 # somente na resposta privada do POST /bid ou no estado personalizado quando necessário.
 AUCTION_PUBLIC_STATE_MEMORY: dict[int, tuple[float, dict]] = {}
 AUCTION_PUBLIC_STATE_MEMORY_TTL_MS = int(os.getenv("AUCTION_PUBLIC_STATE_MEMORY_TTL_MS", "8000"))
@@ -6193,7 +6193,7 @@ def auction_page(request: Request, auction_id: int):
         user = current_user(request, db)
         item = db.get(AuctionItem, auction_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
 
         now = datetime.utcnow()
         changed = start_auction_if_due(item, now)
@@ -6332,7 +6332,7 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
         user = _light_user_for_bid(request, db)
         item = _select_auction_for_bid_fast(db, auction_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
 
         # Início exato no servidor sem depender do polling da Home.
         if item.status in {"scheduled", "relisted"} and item.scheduled_start and item.scheduled_start <= now:
@@ -6374,10 +6374,10 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
                     WHERE id=:auction_id
                 """), {"auction_id": auction_id})
             db.commit()
-            _official_payload_for_fast_error(db, item, user, "Este leilão foi encerrado.", 400)
+            _official_payload_for_fast_error(db, item, user, "Este disputa foi encerrado.", 400)
 
         if item.status != "live":
-            _official_payload_for_fast_error(db, item, user, "Leilão não está ao vivo.", 400)
+            _official_payload_for_fast_error(db, item, user, "Disputa não está ao vivo.", 400)
 
         bid_value = BR(bid_value)
         if bid_value not in ALLOWED_BIDS:
@@ -6514,7 +6514,7 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
             "user_id": user.id,
             "amount": -bid_value,
             "kind": "bid_spent",
-            "note": f"Lance no leilão #{item.id}",
+            "note": f"Lance no disputa #{item.id}",
             "created_at": now,
         })
 
@@ -6583,7 +6583,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
     """Processa o lance com proteção real contra duplicidade.
 
     Camadas de segurança:
-    - lock por leilão para serializar preço/tempo;
+    - lock por disputa para serializar preço/tempo;
     - client_bid_id para idempotência do mesmo clique;
     - índice único no banco para impedir duplicidade mesmo sob corrida;
     - payload privado para quem clicou e payload público separado para websocket.
@@ -6601,7 +6601,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
         db = SessionLocal()
         try:
             user = require_user(request, db)
-            # Trava a linha do leilão no PostgreSQL durante o processamento do lance.
+            # Trava a linha do disputa no PostgreSQL durante o processamento do lance.
             # O lock em memória protege dentro de uma réplica; o FOR UPDATE protege
             # caso Railway rode mais de um processo/réplica.
             if IS_SQLITE:
@@ -6614,7 +6614,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     .first()
                 )
             if not item:
-                raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+                raise HTTPException(status_code=404, detail="Disputa não encontrado.")
 
             now = datetime.utcnow()
             if start_auction_if_due(item, now):
@@ -6627,13 +6627,13 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                 public_payload = public_auction_live_payload(item, db, include_cashback=True, user_turbo_eligible_override=None)
                 raise AuctionStateHTTPException(
                     status_code=400,
-                    detail="Este leilão foi encerrado.",
+                    detail="Este disputa foi encerrado.",
                     auction_payload=private_payload,
                 )
 
             if item.status != "live":
                 private_payload = public_auction_live_payload(item, db, user=user)
-                raise AuctionStateHTTPException(status_code=400, detail="Leilão não está ao vivo.", auction_payload=private_payload)
+                raise AuctionStateHTTPException(status_code=400, detail="Disputa não está ao vivo.", auction_payload=private_payload)
 
             bid_value = BR(bid_value)
             if bid_value not in ALLOWED_BIDS:
@@ -6649,7 +6649,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             mode_for_bid = compute_turbo_level(item)
             button_cooldown = bid_button_cooldown_seconds(bid_value, mode_for_bid)
 
-            # Só consulta histórico do usuário quando o leilão já está em modo Turbo.
+            # Só consulta histórico do usuário quando o disputa já está em modo Turbo.
             # No modo normal, essa consulta era feita em todo clique sem necessidade e
             # aumentava a latência percebida do lance.
             if mode_for_bid >= 2:
@@ -6747,7 +6747,7 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
                     "user_id": user.id,
                     "amount": -bid_value,
                     "kind": "bid_spent",
-                    "note": f"Lance no leilão #{item.id}",
+                    "note": f"Lance no disputa #{item.id}",
                     "created_at": now,
                 },
             )
@@ -6897,7 +6897,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
     lock_entered = perf_start
     process_done = perf_start
     try:
-        # Uma fila assíncrona por leilão evita ocupar várias threads com lances
+        # Uma fila assíncrona por disputa evita ocupar várias threads com lances
         # parados esperando o mesmo lock. O processamento continua serializado,
         # mas o servidor fica mais estável em pico.
         async with AUCTION_BID_ASYNC_LOCKS[auction_id]:
@@ -6947,7 +6947,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
     return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
 
 def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Optional[dict], bool, str]:
-    """Monta /state com cache curto por leilão+usuário.
+    """Monta /state com cache curto por disputa+usuário.
 
     O WebSocket mantém a tela em tempo real. Esta rota é guarda de correção e não
     pode disputar banco/threadpool com POST /bid em cada polling de cada cliente.
@@ -7016,7 +7016,7 @@ def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Option
 
             item = db.get(AuctionItem, auction_id)
             if not item:
-                raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+                raise HTTPException(status_code=404, detail="Disputa não encontrado.")
             now = datetime.utcnow()
             changed = start_auction_if_due(item, now)
             finished_now = finish_auction_if_due(item, db, now, create_side_effects=False)
@@ -7061,7 +7061,7 @@ def join_cashback(request: Request, auction_id: int):
         user = require_user(request, db)
         item = db.get(AuctionItem, auction_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
         event = db.query(CashbackEvent).filter(CashbackEvent.auction_id == auction_id).first()
         if not event:
             raise HTTPException(status_code=404, detail="Sorteio de cashback ainda não disponível.")
@@ -7069,7 +7069,7 @@ def join_cashback(request: Request, auction_id: int):
             raise HTTPException(status_code=400, detail="Prazo para participar do cashback encerrado.")
         spent = float(db.query(func.coalesce(func.sum(Bid.bid_value), 0.0)).filter(Bid.auction_id == auction_id, Bid.user_id == user.id).scalar() or 0.0)
         if spent <= 0:
-            raise HTTPException(status_code=403, detail="Apenas participantes deste leilão podem entrar no cashback.")
+            raise HTTPException(status_code=403, detail="Apenas participantes deste disputa podem entrar no cashback.")
         existing = db.query(CashbackEntry).filter(CashbackEntry.event_id == event.id, CashbackEntry.user_id == user.id).first()
         if not existing:
             db.add(CashbackEntry(event_id=event.id, user_id=user.id, auction_id=auction_id, amount_spent=BR(spent)))
@@ -7085,9 +7085,9 @@ def _send_chat_sync(request: Request, auction_id: int, message: str) -> dict:
         user = require_user(request, db)
         item = db.get(AuctionItem, auction_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
         if not auction_chat_is_open(item):
-            raise HTTPException(status_code=403, detail="O chat está disponível apenas próximo ao início ou durante o leilão.")
+            raise HTTPException(status_code=403, detail="O chat está disponível apenas próximo ao início ou durante o disputa.")
         if item.chat_paused:
             raise HTTPException(status_code=403, detail="O chat está pausado pelo administrador.")
         if user.chat_muted:
@@ -7659,7 +7659,7 @@ def account_delete_submit(
             "privacidade": "Privacidade/dados pessoais",
             "dificuldade": "Dificuldade para usar o site",
             "problema_pagamento": "Problema com pagamento ou Créditos LC",
-            "problema_leilao": "Problema com leilão ou pedido",
+            "problema_leilao": "Problema com disputa ou pedido",
             "teste": "Conta criada apenas para teste",
             "outro": "Outro motivo",
         }
@@ -8051,7 +8051,7 @@ def confirm_payment_flow(
                 user_id=user.id,
                 amount=-order.final_price,
                 kind="payment",
-                note=f"Pagamento do leilão #{order.auction_id}"
+                note=f"Pagamento final da disputa #{order.auction_id}"
             ))
 
         # PIX Mercado Pago: gera QR Code e só marca como pago depois da confirmação oficial.
@@ -8768,7 +8768,7 @@ def cached_admin_dashboard_context(db: Session, is_super_admin: bool, ttl_second
 def cached_admin_cashflow_context(db: Session, ttl_seconds: int = 300) -> dict:
     """Blocos financeiros completos com cache curto.
 
-    O resumo financeiro usa totais cacheados dos leilões. As tabelas detalhadas
+    O resumo financeiro usa totais cacheados dos disputas. As tabelas detalhadas
     continuam disponíveis, mas com limites menores para o Admin não travar ao
     trocar de aba.
     """
@@ -9123,7 +9123,7 @@ async def admin_returned_update_relist(
         require_admin(request, db)
         item = db.get(AuctionItem, item_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
 
         source_price = BR(item.source_price or 0.0)
         turbo_base_value = BR(turbo_base_value)
@@ -9159,7 +9159,7 @@ async def admin_returned_update_relist(
         item.turbo_enabled = True
         item.cashback_enabled = False
 
-        # Ao relançar, remove sorteio antigo para evitar cashback preso de leilão anterior.
+        # Ao relançar, remove sorteio antigo para evitar cashback preso de disputa anterior.
         db.query(CashbackEntry).filter(CashbackEntry.auction_id == item.id).delete(synchronize_session=False)
         db.query(CashbackEvent).filter(CashbackEvent.auction_id == item.id).delete(synchronize_session=False)
 
@@ -9427,7 +9427,7 @@ def admin_start_now(request: Request, item_id: int):
         require_admin(request, db)
         item = db.get(AuctionItem, item_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
         item.status = "live"
         item.scheduled_start = datetime.utcnow()
         duration = getattr(item, "initial_duration_seconds", DEFAULT_INITIAL_DURATION_SECONDS) or DEFAULT_INITIAL_DURATION_SECONDS
@@ -9446,9 +9446,9 @@ def admin_delete_item(request: Request, item_id: int):
         require_admin(request, db)
         item = db.get(AuctionItem, item_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
         if item.status == "live":
-            raise HTTPException(status_code=400, detail="Não é possível excluir um leilão em andamento.")
+            raise HTTPException(status_code=400, detail="Não é possível excluir um disputa em andamento.")
         db.delete(item)
         db.commit()
         return RedirectResponse("/admin", status_code=303)
@@ -9463,9 +9463,9 @@ def admin_toggle_chat(request: Request, item_id: int):
         require_admin(request, db)
         item = db.get(AuctionItem, item_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
         if item.status != "live":
-            raise HTTPException(status_code=400, detail="O chat só pode ser pausado ou iniciado enquanto o leilão estiver ao vivo.")
+            raise HTTPException(status_code=400, detail="O chat só pode ser pausado ou iniciado enquanto o disputa estiver ao vivo.")
         item.chat_paused = not item.chat_paused
         db.commit()
         return RedirectResponse(f"/auction/{item_id}", status_code=303)
@@ -9658,7 +9658,7 @@ def admin_relist(request: Request, item_id: int, start_in_minutes: int = Form(..
         require_admin(request, db)
         item = db.get(AuctionItem, item_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Leilão não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
         reset_relisted_public_history(db, item)
         item.status = "relisted"
         item.chat_paused = False

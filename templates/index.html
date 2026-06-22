@@ -202,7 +202,7 @@
         </article>
         {% else %}
         <div class="empty-state">
-          <strong>Nenhum leilão encerrado ainda.</strong>
+          <strong>Nenhuma disputa encerrado ainda.</strong>
           <span>Os resultados aparecerão nesta área.</span>
         </div>
         {% endfor %}
@@ -245,7 +245,7 @@
       <div class="suggestion-interactive-panel">
         <div class="suggestion-panel-copy">
           
-          <h3>Indique o próximo produto do leilão</h3>
+          <h3>Indique o próximo produto para disputa</h3>
           {% if user_week_nomination %}
             <p>Você já indicou nesta semana: <strong>{{ user_week_nomination.product_name }}</strong>. Volte na próxima semana para indicar outro.</p>
           {% elif suggestion_week_count >= suggestion_week_limit %}

@@ -68,7 +68,7 @@
             <strong id="last-bidder">{{ item.winner_name or item.last_bidder or '—' }}</strong>
           {% elif item.status in ['scheduled', 'relisted'] %}
             <span id="last-bidder-label">Status</span>
-            <strong id="last-bidder">Próximo leilão</strong>
+            <strong id="last-bidder">Próxima disputa</strong>
           {% else %}
             <span id="last-bidder-label">Último lance</span>
             <strong id="last-bidder">{{ item.last_bidder or '—' }}</strong>
@@ -84,7 +84,7 @@
             <strong id="model-value">Encerrado</strong>
           {% else %}
             <span id="model-label">Modelo</span>
-            <strong id="model-value">Lance com Créditos LC</strong>
+            <strong id="model-value">Disputa com Créditos LC</strong>
           {% endif %}
         </div>
       </div>
@@ -126,25 +126,44 @@
           {% endfor %}
         </form>
 
-        <p id="bid-note" class="muted" {% if item.status != 'live' %}style="display:none"{% endif %}>
-          Cada lance consome Créditos LC imediatamente. A tela responde na hora e o servidor confirma em seguida.
+        <p id="bid-note" class="bid-disclosure-note" {% if item.status != 'live' %}style="display:none"{% endif %}>
+          <strong>Aviso de participação:</strong> cada lance consome Créditos LC imediatamente. Créditos LC usados em lances válidos não retornam caso você não seja o vencedor. <a href="/regras-de-participacao" target="_blank" rel="noopener">Consultar regras</a>
         </p>
+
+        <div class="bid-confirm-backdrop" id="bid-confirm-dialog" aria-hidden="true" hidden>
+          <section class="bid-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="bid-confirm-title" aria-describedby="bid-confirm-description">
+            <span class="eyebrow">Confirmação de participação</span>
+            <h2 id="bid-confirm-title">Confirmar lance</h2>
+            <p id="bid-confirm-description">Este lance consumirá <strong id="bid-confirm-value">0,00 Créditos LC</strong> imediatamente.</p>
+            <div class="bid-confirm-notice">
+              Créditos LC usados em lances válidos não retornam caso você não seja o vencedor desta disputa.
+            </div>
+            <label class="bid-confirm-check">
+              <input type="checkbox" id="bid-confirm-hide-next">
+              <span>Não exibir este aviso novamente neste dispositivo.</span>
+            </label>
+            <div class="bid-confirm-actions">
+              <button class="btn ghost" type="button" id="bid-confirm-cancel">Cancelar</button>
+              <button class="btn" type="button" id="bid-confirm-continue">Entendi e continuar</button>
+            </div>
+          </section>
+        </div>
 
         <div id="bid-feedback" class="bid-feedback" aria-live="polite"></div>
 
         <div id="auction-state-alert" class="alert {% if item.status in ['scheduled', 'relisted'] %}scheduled-alert{% endif %}" {% if item.status == 'live' %}style="display:none"{% endif %}>
           {% if item.status in ['scheduled', 'relisted'] %}
-            Aguardando início do leilão.
+            Aguardando início da disputa.
           {% elif item.status == 'pending_payment' %}
-            Este leilão foi encerrado.
+            Esta disputa foi encerrada.
           {% elif item.status == 'ended' %}
-            Este leilão foi encerrado.
+            Esta disputa foi encerrada.
           {% else %}
-            Este leilão não está em andamento neste momento.
+            Esta disputa não está em andamento neste momento.
           {% endif %}
         </div>
       {% else %}
-        <div class="alert">Faça login para participar do leilão.</div>
+        <div class="alert">Faça login para participar da disputa.</div>
       {% endif %}
 
       {% if false and item.cashback.available %}
@@ -163,9 +182,9 @@
         </div>
         {% if item.cashback.status == 'open' %}
           {% if item.cashback.joined %}
-            <p>Você já entrou no sorteio. Se for sorteado, recebe de volta o valor usado somente neste leilão.</p>
+            <p>Você já entrou no sorteio. Se for sorteado, recebe de volta o valor usado somente nesta disputa.</p>
           {% else %}
-            <p>Quem participou deste leilão pode entrar no sorteio aleatório para receber de volta o valor usado somente neste leilão.</p>
+            <p>Quem participou desta disputa pode entrar no sorteio aleatório para receber de volta o valor usado somente nesta disputa.</p>
             <button class="btn full" type="button" id="join-cashback-btn">Cashback removido</button>
           {% endif %}
         {% elif item.cashback.status == 'drawn' %}
@@ -191,14 +210,14 @@
           {% endif %}
 
           {% if entity.status != 'live' %}
-          <form method="post" action="/admin/item/{{ entity.id }}/delete"><button class="btn small danger">Excluir leilão</button></form>
+          <form method="post" action="/admin/item/{{ entity.id }}/delete"><button class="btn small danger">Excluir disputa</button></form>
           {% endif %}
         </div>
 
         {% if entity.status == 'ended' %}
-        <p class="muted admin-ended-note">Leilão encerrado. O chat fica bloqueado automaticamente.</p>
+        <p class="muted admin-ended-note">Disputa encerrada. O chat fica bloqueado automaticamente.</p>
         {% elif entity.status == 'pending_payment' %}
-        <p class="muted admin-ended-note">Leilão encerrado. O pagamento aparece somente para o vencedor em Minha Conta.</p>
+        <p class="muted admin-ended-note">Disputa encerrada. O pagamento aparece somente para o vencedor em Minha Conta.</p>
         {% endif %}
       </div>
       {% endif %}
@@ -211,11 +230,11 @@
 
     <div id="chat-closed-alert" class="alert chat-closed-alert" {% if item.chat_open %}style="display:none"{% endif %}>
       {% if entity.status in ['scheduled', 'relisted'] %}
-        O chat será liberado próximo ao início do leilão.
+        O chat será liberado próximo ao início da disputa.
       {% elif entity.status == 'pending_payment' %}
-        O chat foi encerrado porque este leilão terminou.
+        O chat foi encerrado porque esta disputa terminou.
       {% elif entity.status == 'ended' %}
-        O chat foi encerrado porque este leilão terminou.
+        O chat foi encerrado porque esta disputa terminou.
       {% else %}
         O chat está indisponível neste momento.
       {% endif %}
@@ -287,6 +306,20 @@
 .strategy-marks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px;color:#b7c6e6;font-size:12px}
 .strategy-card p{margin:10px 0 0;color:#b7c6e6;line-height:1.45}
 .bid-feedback{min-height:22px;margin-top:8px;font-weight:800;color:#fbbf24}
+.bid-disclosure-note{margin:10px 0 0;padding:11px 12px;border:1px solid rgba(96,165,250,.24);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;line-height:1.45;font-size:13px}
+.bid-disclosure-note strong{color:#fff}
+.bid-disclosure-note a{color:#93c5fd;font-weight:900;text-decoration:none}
+.bid-disclosure-note a:hover{text-decoration:underline}
+.bid-confirm-backdrop[hidden]{display:none!important}
+.bid-confirm-backdrop{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:18px;background:rgba(2,6,23,.74);backdrop-filter:blur(6px)}
+.bid-confirm-dialog{width:min(460px,100%);border:1px solid rgba(96,165,250,.32);border-radius:22px;padding:20px;background:linear-gradient(145deg,#101d35,#0f172a);box-shadow:0 24px 70px rgba(0,0,0,.48)}
+.bid-confirm-dialog h2{margin:8px 0 10px;font-size:27px}
+.bid-confirm-dialog p{margin:0;color:#dbeafe;line-height:1.5}
+.bid-confirm-notice{margin:14px 0;padding:12px;border:1px solid rgba(251,191,36,.28);border-radius:14px;background:rgba(251,191,36,.10);color:#fde68a;font-weight:800;line-height:1.42}
+.bid-confirm-check{display:flex!important;align-items:flex-start;gap:10px;margin:14px 0!important;color:#dbeafe!important;font-weight:800!important;line-height:1.4}
+.bid-confirm-check input{width:auto!important;margin:3px 0 0!important}
+.bid-confirm-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:10px;margin-top:16px}
+@media(max-width:560px){.bid-confirm-backdrop{align-items:end;padding:12px}.bid-confirm-dialog{border-radius:22px 22px 16px 16px;padding:18px}.bid-confirm-dialog h2{font-size:23px}.bid-confirm-actions{grid-template-columns:1fr}}
 .bid-btn.cooling{opacity:.55;cursor:not-allowed;filter:grayscale(.15)}
 .chat-note{margin-top:-8px;color:#b7c6e6;font-size:13px}
 .scheduled-alert{border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.09)}
@@ -328,7 +361,7 @@
   .reference-link-box{grid-column:auto}
 }
 
-/* Ajustes da tela do leilão: leitura, status encerrado e cards de métricas */
+/* Ajustes da tela da disputa: leitura, status encerrado e cards de métricas */
 .status-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .auction-panel h1{margin:0 0 16px;font-size:clamp(28px,3vw,38px);line-height:1.1}
 .price-box,.meta-grid{align-items:stretch}
@@ -570,7 +603,7 @@ window.__AUCTION__ = {{ item | tojson }};
     const ownImmediateSources = new Set(["initial", "local-start"]);
     const isOwnImmediate = ownImmediateSources.has(source);
 
-    // Piso absoluto: preço e taxas de um mesmo leilão nunca diminuem.
+    // Piso absoluto: preço e taxas de um mesmo disputa nunca diminuem.
     // Se um /state ou WebSocket atrasado trouxer preço menor, ele é velho.
     // A única queda permitida é rollback local do próprio clique rejeitado,
     // mas nunca abaixo do maior preço já confirmado oficialmente.
@@ -710,10 +743,10 @@ window.__AUCTION__ = {{ item | tojson }};
   function activateLiveLocally(){
     if(!isScheduled(status())) return;
 
-    // O backend inicia o leilão contando a partir do scheduled_start, não do
+    // O backend inicia o disputa contando a partir do scheduled_start, não do
     // momento em que a página percebeu o zero. A versão anterior usava
     // Date.now()+duração e por alguns segundos mostrava um cronômetro maior
-    // que o real, causando o bug no começo do leilão.
+    // que o real, causando o bug no começo da disputa.
     const duration = Math.max(1, Number(auction.initial_duration_seconds || auction.remaining_seconds || 1800));
     const startMs = Date.parse(ensureUtcDateString(auction.scheduled_start));
     const logicalStartMs = Number.isNaN(startMs) ? estimatedServerNowMs() : startMs;
@@ -748,7 +781,7 @@ window.__AUCTION__ = {{ item | tojson }};
       chat_open: true
     };
     applyAuctionState(auction, "local-start");
-    setFeedback("Leilão ao vivo. Você já pode participar.");
+    setFeedback("Disputa ao vivo. Você já pode participar.");
     fetchState("confirm-local-start", 5000);
   }
 
@@ -876,7 +909,7 @@ window.__AUCTION__ = {{ item | tojson }};
         els.lastBidder.textContent = auction.winner_name || auction.last_bidder || "—";
       } else if(isScheduled(s)){
         els.lastBidderLabel.textContent = "Status";
-        els.lastBidder.textContent = "Próximo leilão";
+        els.lastBidder.textContent = "Próxima disputa";
       } else {
         els.lastBidderLabel.textContent = "Último lance";
         els.lastBidder.textContent = auction.last_bidder || "—";
@@ -908,10 +941,10 @@ window.__AUCTION__ = {{ item | tojson }};
       show(els.stateAlert, !live);
       els.stateAlert.classList.toggle("scheduled-alert", scheduled);
       if(finishConfirming) els.stateAlert.textContent = "Tempo esgotado. Conferindo encerramento oficial no servidor...";
-      else if(scheduled) els.stateAlert.textContent = "Aguardando início do leilão.";
-      else if(s === "pending_payment") els.stateAlert.textContent = `Este leilão foi encerrado.${auction.winner_name || auction.last_bidder ? " Vencedor: " + (auction.winner_name || auction.last_bidder) + "." : ""}`;
-      else if(s === "ended") els.stateAlert.textContent = "Este leilão foi encerrado.";
-      else els.stateAlert.textContent = "Este leilão não está em andamento neste momento.";
+      else if(scheduled) els.stateAlert.textContent = "Aguardando início da disputa.";
+      else if(s === "pending_payment") els.stateAlert.textContent = `Esta disputa foi encerrada.${auction.winner_name || auction.last_bidder ? " Vencedor: " + (auction.winner_name || auction.last_bidder) + "." : ""}`;
+      else if(s === "ended") els.stateAlert.textContent = "Esta disputa foi encerrada.";
+      else els.stateAlert.textContent = "Esta disputa não está em andamento neste momento.";
     }
   }
 
@@ -979,7 +1012,7 @@ window.__AUCTION__ = {{ item | tojson }};
         <span class="turbo-badge">🎁 Bônus promocional</span>
         <strong id="cashback-status">${statusText}</strong>
       </div>
-      <p>Entre no sorteio para tentar recuperar parte do que gastou em lances neste leilão.</p>
+      <p>Entre no sorteio para tentar recuperar parte do que gastou em lances nesta disputa.</p>
       ${body}
     `;
 
@@ -1128,7 +1161,7 @@ window.__AUCTION__ = {{ item | tojson }};
     const critical = isCriticalStateReason(reason);
 
     // Polling de rotina nunca deve empilhar. Já uma confirmação crítica
-    // (fim de leilão/lance pendente) pode passar por cima da rotina para não
+    // (fim de disputa/lance pendente) pode passar por cima da rotina para não
     // deixar a tela presa em estado atrasado.
     if(!critical && stateFetchInFlight) return false;
     if(critical && criticalStateFetchInFlight) return false;
@@ -1163,7 +1196,7 @@ window.__AUCTION__ = {{ item | tojson }};
   function closeAuctionLocally(){
     if(localFinishTriggered || finishConfirming || !isLive(status())) return;
 
-    // Não encerramos mais o leilão no navegador. O vídeo mostrou celular
+    // Não encerramos mais o disputa no navegador. O vídeo mostrou celular
     // encerrando com R$ 8,19/18 e depois corrigindo para R$ 9,90/20.
     // Agora o front só entra em modo de conferência e aguarda o estado oficial.
     finishConfirming = true;
@@ -1213,7 +1246,7 @@ window.__AUCTION__ = {{ item | tojson }};
 
   // Sincronização dupla: WebSocket para instantâneo + /state curto para correção.
   // O vídeo mostrou que o WebSocket pode ficar aberto, mas uma tela perder/ignorar
-  // eventos e só corrigir muito tempo depois. Por isso, durante leilão ao vivo,
+  // eventos e só corrigir muito tempo depois. Por isso, durante disputa ao vivo,
   // o /state volta a conferir frequentemente. O guard anti-retrocesso impede que
   // qualquer resposta atrasada volte preço/lances para trás.
   const liveStateSyncMs = 18000 + Math.floor(Math.random() * 5000);
@@ -1281,105 +1314,187 @@ window.__AUCTION__ = {{ item | tojson }};
     }
   }, 1200);
 
+  const bidConfirmDialog = document.getElementById("bid-confirm-dialog");
+  const bidConfirmValue = document.getElementById("bid-confirm-value");
+  const bidConfirmHideNext = document.getElementById("bid-confirm-hide-next");
+  const bidConfirmCancel = document.getElementById("bid-confirm-cancel");
+  const bidConfirmContinue = document.getElementById("bid-confirm-continue");
+  const bidDisclosureStorageKey = "lc_bid_credit_notice_ack_v1";
+  let pendingBidConfirmationButton = null;
+
+  function formatCredits(value){
+    return `${Number(value || 0).toFixed(2).replace(".", ",")} Créditos LC`;
+  }
+
+  function shouldShowBidDisclosure(){
+    try{
+      return window.localStorage.getItem(bidDisclosureStorageKey) !== "1";
+    }catch(_){
+      return true;
+    }
+  }
+
+  function rememberBidDisclosure(){
+    try{
+      if(bidConfirmHideNext?.checked){
+        window.localStorage.setItem(bidDisclosureStorageKey, "1");
+      }
+    }catch(_){}
+  }
+
+  function closeBidDisclosure(){
+    if(!bidConfirmDialog) return;
+    const trigger = pendingBidConfirmationButton;
+    pendingBidConfirmationButton = null;
+    bidConfirmDialog.hidden = true;
+    bidConfirmDialog.setAttribute("aria-hidden", "true");
+    if(trigger && document.contains(trigger)){
+      trigger.focus({preventScroll:true});
+    }
+  }
+
+  function openBidDisclosure(btn, value){
+    if(!bidConfirmDialog) return;
+    pendingBidConfirmationButton = btn;
+    if(bidConfirmValue) bidConfirmValue.textContent = formatCredits(value);
+    if(bidConfirmHideNext) bidConfirmHideNext.checked = false;
+    bidConfirmDialog.hidden = false;
+    bidConfirmDialog.setAttribute("aria-hidden", "false");
+    window.setTimeout(() => bidConfirmContinue?.focus({preventScroll:true}), 0);
+  }
+
+  function bidCanStart(btn){
+    const value = bidKey(btn?.dataset?.bid);
+    if(!value || btn?.disabled || bidInFlight || pendingBids[value]) return false;
+    if(isTurboLockedForUser()){
+      setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
+      renderButtons();
+      return false;
+    }
+    const availableBalance = Number(localWalletBalance || 0) - Number(walletPendingReserve || 0);
+    if(Number(value) > availableBalance + 0.000001){
+      setFeedback("Créditos LC insuficientes para este lance.");
+      renderButtons();
+      return false;
+    }
+    return true;
+  }
+
+  async function submitConfirmedBid(btn){
+    if(!bidCanStart(btn)) return;
+    const value = bidKey(btn.dataset.bid);
+  const previousAuction = {...auction};
+  const previousRemaining = remaining;
+  const previousWalletBalance = localWalletBalance;
+  const previousWalletReserve = walletPendingReserve;
+
+  bidInFlight = true;
+  bidInFlightValue = value;
+  bidInFlightStartedAt = Date.now();
+  pendingBids[value] = true;
+  applyOptimisticBid(value);
+  applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
+  renderButtons();
+  setFeedback("Lance enviado.");
+
+  // Entrega um frame para o navegador pintar preço, cronômetro, Créditos LC e
+  // contagem do botão antes de iniciar o POST. Sem isso, em alguns Chrome/PCs
+  // a rede começa antes do repaint e parece que o botão demorou para contar.
+  await nextPaint();
+
+  const clientBidId = makeClientBidId();
+  const form = new FormData();
+  form.append("bid_value", value);
+  form.append("client_bid_id", clientBidId);
+
+  let bidResponse = null;
+  let keepLockedForStateCheck = false;
+  try{
+    bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 15000);
+    const {res, json} = bidResponse;
+    if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
+    setFeedback("");
+    applyAuctionState(json.auction, "bid");
+    updateHeaderWalletBalance(json.auction?.wallet_balance);
+    applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(value), json.cooldown_scope || json.auction?.cooldown_scope || "button");
+  } catch(err){
+    const isTimeout = err?.name === "AbortError";
+    const msg = isTimeout
+      ? "Servidor demorou para confirmar. Conferindo se o lance entrou antes de liberar novo clique..."
+      : (err?.message || "Não foi possível confirmar o lance agora.");
+    setFeedback(msg);
+
+    // Só aplica cooldown em rejeição de cooldown real do backend (429/retry_after).
+    // Créditos LC insuficientes e outros erros não travam o botão.
+    if(bidResponse?.json?.retry_after){
+      applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
+    }
+
+    if(bidResponse?.json?.auction){
+      // Payload de erro vindo do backend é tratado como estado de servidor,
+      // mas não tem permissão especial para derrubar uma tela otimista mais
+      // nova. Se for realmente rejeição, o /state oficial corrige depois.
+      applyAuctionState(bidResponse.json.auction, "server-reject");
+      updateHeaderWalletBalance(bidResponse.json.auction?.wallet_balance);
+    } else if(isTimeout){
+      keepLockedForStateCheck = true;
+      setTimeout(async () => {
+        await fetchState("slow-bid-confirm", 9000);
+        delete pendingBids[value];
+        bidInFlight = false;
+        bidInFlightValue = "";
+        bidInFlightStartedAt = 0;
+        renderButtons();
+      }, 500);
+    } else {
+      // Não restauramos previousAuction imediatamente: isso causava a
+      // sensação de valor subindo e voltando. Mantemos a tela otimista por
+      // alguns segundos e pedimos o estado oficial prioritário.
+      walletPendingReserve = previousWalletReserve;
+      localWalletBalance = previousWalletBalance;
+      updateHeaderWalletBalance(localWalletBalance);
+      fetchState("bid-error", 9000);
+    }
+  } finally {
+    if(!keepLockedForStateCheck){
+      delete pendingBids[value];
+      bidInFlight = false;
+      bidInFlightValue = "";
+      bidInFlightStartedAt = 0;
+      renderButtons();
+    }
+  }
+  }
+
+  function requestBid(btn){
+    const value = bidKey(btn?.dataset?.bid);
+    if(!bidCanStart(btn)) return;
+    if(shouldShowBidDisclosure()){
+      openBidDisclosure(btn, value);
+      return;
+    }
+    submitConfirmedBid(btn);
+  }
+
+  bidConfirmCancel?.addEventListener("click", closeBidDisclosure);
+  bidConfirmDialog?.addEventListener("click", (event) => {
+    if(event.target === bidConfirmDialog) closeBidDisclosure();
+  });
+  document.addEventListener("keydown", (event) => {
+    if(event.key === "Escape" && bidConfirmDialog && !bidConfirmDialog.hidden){
+      closeBidDisclosure();
+    }
+  });
+  bidConfirmContinue?.addEventListener("click", () => {
+    const btn = pendingBidConfirmationButton;
+    rememberBidDisclosure();
+    closeBidDisclosure();
+    if(btn) submitConfirmedBid(btn);
+  });
+
   document.querySelectorAll(".bid-btn").forEach((btn) => {
     btn.dataset.bid = bidKey(btn.dataset.bid);
-    btn.addEventListener("click", async () => {
-      const value = bidKey(btn.dataset.bid);
-      if(btn.disabled || bidInFlight || pendingBids[value]) return;
-      if(isTurboLockedForUser()){
-        setFeedback(`Modo Turbo ${Number(auction.turbo_level || 2)}.0 exclusivo para quem já deu lance antes da ativação.`);
-        renderButtons();
-        return;
-      }
-      const availableBalance = Number(localWalletBalance || 0) - Number(walletPendingReserve || 0);
-      if(Number(value) > availableBalance + 0.000001){
-        setFeedback("Créditos LC insuficientes para este lance.");
-        renderButtons();
-        return;
-      }
-
-      const previousAuction = {...auction};
-      const previousRemaining = remaining;
-      const previousWalletBalance = localWalletBalance;
-      const previousWalletReserve = walletPendingReserve;
-
-      bidInFlight = true;
-      bidInFlightValue = value;
-      bidInFlightStartedAt = Date.now();
-      pendingBids[value] = true;
-      applyOptimisticBid(value);
-      applyButtonCooldown(value, cooldownForCurrentMode(value), "button");
-      renderButtons();
-      setFeedback("Lance enviado.");
-
-      // Entrega um frame para o navegador pintar preço, cronômetro, Créditos LC e
-      // contagem do botão antes de iniciar o POST. Sem isso, em alguns Chrome/PCs
-      // a rede começa antes do repaint e parece que o botão demorou para contar.
-      await nextPaint();
-
-      const clientBidId = makeClientBidId();
-      const form = new FormData();
-      form.append("bid_value", value);
-      form.append("client_bid_id", clientBidId);
-
-      let bidResponse = null;
-      let keepLockedForStateCheck = false;
-      try{
-        bidResponse = await fetchJson(`/api/auction/${auctionId}/bid`, {method:"POST", body:form}, 15000);
-        const {res, json} = bidResponse;
-        if(!res.ok || !json.ok) throw new Error(json.detail || "Não foi possível registrar o lance.");
-        setFeedback("");
-        applyAuctionState(json.auction, "bid");
-        updateHeaderWalletBalance(json.auction?.wallet_balance);
-        applyButtonCooldown(value, json.button_cooldown || json.auction?.button_cooldown || cooldownForCurrentMode(value), json.cooldown_scope || json.auction?.cooldown_scope || "button");
-      } catch(err){
-        const isTimeout = err?.name === "AbortError";
-        const msg = isTimeout
-          ? "Servidor demorou para confirmar. Conferindo se o lance entrou antes de liberar novo clique..."
-          : (err?.message || "Não foi possível confirmar o lance agora.");
-        setFeedback(msg);
-
-        // Só aplica cooldown em rejeição de cooldown real do backend (429/retry_after).
-        // Créditos LC insuficientes e outros erros não travam o botão.
-        if(bidResponse?.json?.retry_after){
-          applyButtonCooldown(value, bidResponse.json.retry_after, bidResponse.json.cooldown_scope || "button");
-        }
-
-        if(bidResponse?.json?.auction){
-          // Payload de erro vindo do backend é tratado como estado de servidor,
-          // mas não tem permissão especial para derrubar uma tela otimista mais
-          // nova. Se for realmente rejeição, o /state oficial corrige depois.
-          applyAuctionState(bidResponse.json.auction, "server-reject");
-          updateHeaderWalletBalance(bidResponse.json.auction?.wallet_balance);
-        } else if(isTimeout){
-          keepLockedForStateCheck = true;
-          setTimeout(async () => {
-            await fetchState("slow-bid-confirm", 9000);
-            delete pendingBids[value];
-            bidInFlight = false;
-            bidInFlightValue = "";
-            bidInFlightStartedAt = 0;
-            renderButtons();
-          }, 500);
-        } else {
-          // Não restauramos previousAuction imediatamente: isso causava a
-          // sensação de valor subindo e voltando. Mantemos a tela otimista por
-          // alguns segundos e pedimos o estado oficial prioritário.
-          walletPendingReserve = previousWalletReserve;
-          localWalletBalance = previousWalletBalance;
-          updateHeaderWalletBalance(localWalletBalance);
-          fetchState("bid-error", 9000);
-        }
-      } finally {
-        if(!keepLockedForStateCheck){
-          delete pendingBids[value];
-          bidInFlight = false;
-          bidInFlightValue = "";
-          bidInFlightStartedAt = 0;
-          renderButtons();
-        }
-      }
-    });
+    btn.addEventListener("click", () => requestBid(btn));
   });
 
   function appendChatMessage(message){
@@ -1504,7 +1619,7 @@ window.__AUCTION__ = {{ item | tojson }};
 }
 
 
-/* Mobile Pro: tela de leilão mais curta, menos leitura e lance sempre à mão */
+/* Mobile Pro: tela de disputa mais curta, menos leitura e lance sempre à mão */
 @media (max-width: 760px){
   .auction-layout{
     display:block;
