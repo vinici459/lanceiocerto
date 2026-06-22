@@ -819,8 +819,17 @@ SLOW_REQUEST_WARN_MS = float(os.getenv("SLOW_REQUEST_WARN_MS", "1500"))
 
 # Escala horizontal: Redis é a camada compartilhada para cache, limite de taxa,
 # cooldown, locks distribuídos e eventos WebSocket entre réplicas.
+#
+# IMPORTANTE: o app deve continuar iniciando com uma única réplica antes de
+# Redis/worker serem configurados. Redis só passa a ser obrigatório quando a
+# escala compartilhada é ativada de forma explícita no ambiente.
+def _env_flag(name: str, default: str = "0") -> bool:
+    return (os.getenv(name, default) or default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+HORIZONTAL_SCALE_ENABLED = _env_flag("HORIZONTAL_SCALE_ENABLED", "0")
 REDIS_URL = (os.getenv("REDIS_URL") or "").strip()
-REDIS_REQUIRED = os.getenv("REDIS_REQUIRED", "1" if IS_PRODUCTION else "0").strip().lower() in {"1", "true", "yes", "on"}
+REDIS_REQUIRED = _env_flag("REDIS_REQUIRED", "1" if HORIZONTAL_SCALE_ENABLED else "0")
 REDIS_SOCKET_TIMEOUT_SECONDS = float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "1.5"))
 REDIS_KEY_PREFIX = (os.getenv("REDIS_KEY_PREFIX") or "lc").strip().strip(":")
 APP_INSTANCE_ID = (os.getenv("APP_INSTANCE_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}").strip()[:160]
@@ -3036,9 +3045,13 @@ def public_base_url(request: Optional[Request] = None) -> str:
     return ""
 
 
-BACKGROUND_JOBS_ENABLED = os.getenv("BACKGROUND_JOBS_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
-BACKGROUND_JOBS_REQUIRED = os.getenv("BACKGROUND_JOBS_REQUIRED", "1" if IS_PRODUCTION else "0").strip().lower() in {"1", "true", "yes", "on"}
-WORKER_HEARTBEAT_REQUIRED = os.getenv("WORKER_HEARTBEAT_REQUIRED", "1" if IS_PRODUCTION else "0").strip().lower() in {"1", "true", "yes", "on"}
+# A fila é opcional durante o beta de uma única réplica. Sem worker, e-mails
+# seguem pelo envio direto e efeitos de finalização usam fallback local; assim
+# nenhum cadastro fica preso em uma fila sem consumidor.
+WORKER_SERVICE_ENABLED = _env_flag("WORKER_SERVICE_ENABLED", "0")
+BACKGROUND_JOBS_ENABLED = _env_flag("BACKGROUND_JOBS_ENABLED", "1" if WORKER_SERVICE_ENABLED else "0")
+BACKGROUND_JOBS_REQUIRED = _env_flag("BACKGROUND_JOBS_REQUIRED", "1" if WORKER_SERVICE_ENABLED else "0")
+WORKER_HEARTBEAT_REQUIRED = _env_flag("WORKER_HEARTBEAT_REQUIRED", "1" if WORKER_SERVICE_ENABLED else "0")
 WORKER_HEARTBEAT_TTL_SECONDS = int(os.getenv("WORKER_HEARTBEAT_TTL_SECONDS", "45"))
 JOB_LOCK_TIMEOUT_SECONDS = int(os.getenv("JOB_LOCK_TIMEOUT_SECONDS", "180"))
 JOB_MAX_BATCH = int(os.getenv("JOB_MAX_BATCH", "20"))
@@ -3096,6 +3109,8 @@ def enqueue_email_job(db: Session, to_email: str, subject: str, body: str, log_p
 
 
 def enqueue_finished_auction_side_effects_job(auction_id: int) -> bool:
+    if not BACKGROUND_JOBS_ENABLED:
+        return False
     db = SessionLocal()
     try:
         queued = enqueue_background_job(
@@ -3112,6 +3127,17 @@ def enqueue_finished_auction_side_effects_job(auction_id: int) -> bool:
         return False
     finally:
         db.close()
+
+
+def dispatch_finished_auction_side_effects(auction_id: int) -> None:
+    """Enfileira quando houver worker; no beta executa o fallback local.
+
+    Evita que um item encerrado fique sem pedido porque a fila foi desativada
+    durante a etapa de uma única réplica.
+    """
+    if BACKGROUND_JOBS_ENABLED and enqueue_finished_auction_side_effects_job(auction_id):
+        return
+    ensure_finished_auction_side_effects(int(auction_id))
 
 
 def _smtp_settings() -> tuple[str, int, str, str, str, str]:
@@ -3442,7 +3468,14 @@ def process_background_jobs_once(worker_id: str, limit: int = JOB_MAX_BATCH) -> 
 
 
 def run_background_worker_forever() -> None:
-    _init_redis_clients()
+    if not WORKER_SERVICE_ENABLED:
+        raise RuntimeError("Defina WORKER_SERVICE_ENABLED=1 somente no serviço worker.")
+    if not BACKGROUND_JOBS_ENABLED:
+        raise RuntimeError("O worker exige BACKGROUND_JOBS_ENABLED=1.")
+    if not REDIS_URL:
+        raise RuntimeError("O worker exige REDIS_URL configurada.")
+    if not _init_redis_clients() or not REDIS_READY:
+        raise RuntimeError("O worker não conseguiu conectar ao Redis.")
     worker_id = (os.getenv("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}")[:160]
     poll_seconds = max(0.2, float(os.getenv("JOB_WORKER_POLL_SECONDS", "0.8")))
     print(f"[WORKER-START] id={worker_id}")
@@ -8355,7 +8388,7 @@ async def auction_state(request: Request, auction_id: int):
     if public_payload:
         asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
     if finished_now:
-        asyncio.create_task(asyncio.to_thread(enqueue_finished_auction_side_effects_job, auction_id))
+        asyncio.create_task(asyncio.to_thread(dispatch_finished_auction_side_effects, auction_id))
     return JSONResponse(body)
 
 
@@ -11355,7 +11388,7 @@ async def auction_socket(websocket: WebSocket, auction_id: int):
         if payload:
             await manager.send_to(auction_id, websocket, {"type": "auction_update", "auction": payload})
         if finished_now:
-            asyncio.create_task(asyncio.to_thread(enqueue_finished_auction_side_effects_job, auction_id))
+            asyncio.create_task(asyncio.to_thread(dispatch_finished_auction_side_effects, auction_id))
 
         while True:
             message = await websocket.receive_text()
