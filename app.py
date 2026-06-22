@@ -685,6 +685,7 @@ HOME_STATE_CRITICAL_TTL_MS = int(os.getenv("HOME_STATE_CRITICAL_TTL_MS", "350"))
 AUCTION_STATE_CACHE_TTL_MS = int(os.getenv("AUCTION_STATE_CACHE_TTL_MS", "650"))
 AUCTION_STATE_CRITICAL_TTL_MS = int(os.getenv("AUCTION_STATE_CRITICAL_TTL_MS", "250"))
 BID_SLOW_WARN_MS = float(os.getenv("BID_SLOW_WARN_MS", "900"))
+BID_PERF_LOG_ALL = os.getenv("BID_PERF_LOG_ALL", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 HOME_STATE_API_CACHE: dict[str, tuple[float, dict]] = {}
 AUCTION_STATE_API_CACHE: dict[str, tuple[float, dict]] = {}
@@ -6890,6 +6891,40 @@ def _place_bid_sync(request: Request, auction_id: int, bid_value: float, client_
             db.close()
 
 
+def _bid_perf_headers(
+    *,
+    auction_id: int,
+    perf_start: float,
+    lock_entered: float,
+    process_done: float,
+    outcome: str,
+) -> dict[str, str]:
+    """Métricas leves do caminho crítico, sem registrar dados pessoais.
+
+    Os valores ficam disponíveis no DevTools pelo cabeçalho Server-Timing e,
+    quando lentos, nos logs do Railway. Isso permite descobrir se a demora está
+    na fila local, no banco/commit ou após a confirmação.
+    """
+    now = time.perf_counter()
+    total_ms = max(0.0, (now - perf_start) * 1000)
+    queue_ms = max(0.0, (lock_entered - perf_start) * 1000)
+    process_ms = max(0.0, (process_done - lock_entered) * 1000) if process_done >= lock_entered else 0.0
+    if BID_PERF_LOG_ALL or total_ms >= BID_SLOW_WARN_MS:
+        print(
+            f"[BID-PERF] auction={auction_id} outcome={outcome} "
+            f"total={total_ms:.1f}ms queue={queue_ms:.1f}ms "
+            f"process={process_ms:.1f}ms fast_sql={0 if IS_SQLITE else 1}"
+        )
+    return {
+        "Server-Timing": (
+            f"bid_queue;dur={queue_ms:.1f}, "
+            f"bid_process;dur={process_ms:.1f}, "
+            f"bid_total;dur={total_ms:.1f}"
+        ),
+        "X-Realtime-Mode": "diagnostic",
+    }
+
+
 @app.post("/api/auction/{auction_id}/bid")
 async def place_bid(request: Request, auction_id: int, bid_value: float = Form(...), client_bid_id: str = Form("")):
     public_payload = None
@@ -6916,7 +6951,17 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             body["retry_after"] = exc.retry_after
         if exc.auction_payload:
             body["auction"] = exc.auction_payload
-        return JSONResponse(body, status_code=exc.status_code)
+        return JSONResponse(
+            body,
+            status_code=exc.status_code,
+            headers=_bid_perf_headers(
+                auction_id=auction_id,
+                perf_start=perf_start,
+                lock_entered=lock_entered,
+                process_done=process_done,
+                outcome=f"rejected_{exc.status_code}",
+            ),
+        )
     except HTTPException as exc:
         retry_after = None
         msg = str(exc.detail or "")
@@ -6926,7 +6971,17 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
         body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
         if retry_after:
             body["retry_after"] = retry_after
-        return JSONResponse(body, status_code=exc.status_code)
+        return JSONResponse(
+            body,
+            status_code=exc.status_code,
+            headers=_bid_perf_headers(
+                auction_id=auction_id,
+                perf_start=perf_start,
+                lock_entered=lock_entered,
+                process_done=process_done,
+                outcome=f"rejected_{exc.status_code}",
+            ),
+        )
 
     # O lance confirmado atualiza caches em memória em vez de apagar a Home a cada clique.
     # Apagar a Home em todo lance causava cache miss caro e fazia o POST disputar banco
@@ -6938,13 +6993,16 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
     if public_payload:
         asyncio.create_task(manager.broadcast(auction_id, {"type": "auction_update", "auction": public_payload}))
 
-    total_ms = (time.perf_counter() - perf_start) * 1000
-    if total_ms >= BID_SLOW_WARN_MS:
-        queue_ms = max(0.0, (lock_entered - perf_start) * 1000)
-        process_ms = max(0.0, (process_done - lock_entered) * 1000)
-        print(f"[BID-PERF] auction={auction_id} total={total_ms:.1f}ms queue={queue_ms:.1f}ms process={process_ms:.1f}ms fast_sql={0 if IS_SQLITE else 1}")
-
-    return JSONResponse({"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"})
+    return JSONResponse(
+        {"ok": True, "auction": private_payload, "button_cooldown": button_cooldown, "cooldown_scope": "button"},
+        headers=_bid_perf_headers(
+            auction_id=auction_id,
+            perf_start=perf_start,
+            lock_entered=lock_entered,
+            process_done=process_done,
+            outcome="confirmed",
+        ),
+    )
 
 def _auction_state_sync(request: Request, auction_id: int) -> tuple[dict, Optional[dict], bool, str]:
     """Monta /state com cache curto por disputa+usuário.
@@ -9995,7 +10053,9 @@ async def auction_socket(websocket: WebSocket, auction_id: int):
             asyncio.create_task(asyncio.to_thread(ensure_finished_auction_side_effects, auction_id))
 
         while True:
-            await websocket.receive_text()
+            message = await websocket.receive_text()
+            if message == "ping":
+                await manager.send_to(auction_id, websocket, {"type": "heartbeat", **server_time_payload()})
     except WebSocketDisconnect:
         manager.disconnect(auction_id, websocket)
     except Exception:
