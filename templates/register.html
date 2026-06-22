@@ -67,9 +67,34 @@
           </select>
         </label>
 
-        <label>Data de nascimento
-          <input type="date" name="birth_date" autocomplete="bday" value="{{ fd.birth_date or '' }}" required>
-        </label>
+        <div class="birth-date-field" data-current-birth-date="{{ fd.birth_date or '' }}">
+          <span class="birth-date-label">Data de nascimento</span>
+
+          <!-- No celular, mantém o seletor nativo que já está confortável para toque. -->
+          <input
+            type="date"
+            id="birth-date-mobile"
+            name="birth_date"
+            autocomplete="bday"
+            value="{{ fd.birth_date or '' }}"
+            required
+          >
+
+          <!-- No computador, usa campos padronizados ao restante do formulário. -->
+          <div class="birth-date-desktop" aria-label="Data de nascimento">
+            <select id="birth-date-day" aria-label="Dia de nascimento" required>
+              <option value="">Dia</option>
+            </select>
+            <select id="birth-date-month" aria-label="Mês de nascimento" required>
+              <option value="">Mês</option>
+            </select>
+            <select id="birth-date-year" aria-label="Ano de nascimento" required>
+              <option value="">Ano</option>
+            </select>
+          </div>
+          <input type="hidden" id="birth-date-desktop-value" disabled>
+          <small class="birth-date-help">No computador, selecione dia, mês e ano.</small>
+        </div>
       </div>
 
       <h2>Senha</h2>
@@ -175,7 +200,7 @@
 </section>
 
 <style>
-.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}.legal-single-accept span{line-height:1.5}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.location-select{color-scheme:dark}.location-select:disabled{opacity:.62;cursor:not-allowed}.location-select option{background:#0f172a;color:#f8fafc}.location-hint{display:block;margin-top:7px;color:#b7c6e6;font-size:12px}.password-guidance{margin:8px 0 12px;padding:11px 13px;border:1px solid rgba(96,165,250,.20);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;font-weight:800}.password-guidance strong{color:#bfdbfe}.password-live-hint{display:block;margin-top:7px}.field-error{display:none;margin:8px 0 12px;padding:10px 12px;border:1px solid rgba(248,113,113,.35);border-radius:13px;background:rgba(239,68,68,.12);color:#fecaca;font-weight:850}.field-error.show{display:block}.input-error{border-color:rgba(248,113,113,.70)!important;box-shadow:0 0 0 3px rgba(239,68,68,.13)}.input-ok{border-color:rgba(74,222,128,.62)!important}.password-live-hint.ok{color:#bbf7d0}.password-live-hint.bad{color:#fecaca}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
+.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}.legal-single-accept span{line-height:1.5}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.location-select{color-scheme:dark}.location-select:disabled{opacity:.62;cursor:not-allowed}.location-select option{background:#0f172a;color:#f8fafc}.location-hint{display:block;margin-top:7px;color:#b7c6e6;font-size:12px}.birth-date-field{display:block;color:#fff;font-weight:850}.birth-date-label{display:block}.birth-date-desktop{display:none;grid-template-columns:.8fr 1.25fr 1fr;gap:8px;margin-top:7px}.birth-date-desktop select{margin-top:0!important;color-scheme:dark}.birth-date-desktop option{background:#0f172a;color:#f8fafc}.birth-date-help{display:none;margin-top:7px;color:#b7c6e6;font-size:12px;font-weight:650}.password-guidance{margin:8px 0 12px;padding:11px 13px;border:1px solid rgba(96,165,250,.20);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;font-weight:800}.password-guidance strong{color:#bfdbfe}.password-live-hint{display:block;margin-top:7px}.field-error{display:none;margin:8px 0 12px;padding:10px 12px;border:1px solid rgba(248,113,113,.35);border-radius:13px;background:rgba(239,68,68,.12);color:#fecaca;font-weight:850}.field-error.show{display:block}.input-error{border-color:rgba(248,113,113,.70)!important;box-shadow:0 0 0 3px rgba(239,68,68,.13)}.input-ok{border-color:rgba(74,222,128,.62)!important}.password-live-hint.ok{color:#bbf7d0}.password-live-hint.bad{color:#fecaca}@media(min-width:769px){#birth-date-mobile{display:none!important}.birth-date-desktop{display:grid}.birth-date-help{display:block}}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
 </style>
 
 <script>
@@ -191,8 +216,127 @@
   const passwordConfirmInput = document.getElementById("register-password-confirm");
   const passwordError = document.getElementById("register-password-error");
   const passwordHint = document.querySelector("[data-password-live-hint]");
+  const birthDateField = document.querySelector(".birth-date-field");
+  const birthDateMobile = document.getElementById("birth-date-mobile");
+  const birthDateDay = document.getElementById("birth-date-day");
+  const birthDateMonth = document.getElementById("birth-date-month");
+  const birthDateYear = document.getElementById("birth-date-year");
+  const birthDateDesktopValue = document.getElementById("birth-date-desktop-value");
+  const desktopBirthDateMedia = window.matchMedia("(min-width: 769px)");
 
   function digits(v){ return String(v || "").replace(/\D/g, ""); }
+
+  const birthMonths = [
+    ["01", "Janeiro"], ["02", "Fevereiro"], ["03", "Março"], ["04", "Abril"],
+    ["05", "Maio"], ["06", "Junho"], ["07", "Julho"], ["08", "Agosto"],
+    ["09", "Setembro"], ["10", "Outubro"], ["11", "Novembro"], ["12", "Dezembro"]
+  ];
+
+  function addDateOption(select, value, label){
+    if(!select) return;
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  }
+
+  function populateBirthDateControls(){
+    if(!birthDateDay || !birthDateMonth || !birthDateYear) return;
+    for(let day = 1; day <= 31; day += 1){
+      const value = String(day).padStart(2, "0");
+      addDateOption(birthDateDay, value, value);
+    }
+    birthMonths.forEach(([value, label]) => addDateOption(birthDateMonth, value, label));
+    const currentYear = new Date().getFullYear();
+    for(let year = currentYear; year >= 1900; year -= 1){
+      addDateOption(birthDateYear, String(year), String(year));
+    }
+
+    const saved = String(birthDateField?.dataset.currentBirthDate || birthDateMobile?.value || "");
+    const match = saved.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(match){
+      birthDateYear.value = match[1];
+      birthDateMonth.value = match[2];
+      birthDateDay.value = match[3];
+    }
+  }
+
+  function desktopBirthDateActive(){
+    return Boolean(desktopBirthDateMedia?.matches);
+  }
+
+  function clearBirthDateValidity(){
+    [birthDateDay, birthDateMonth, birthDateYear].forEach((field) => field?.setCustomValidity(""));
+  }
+
+  function syncDesktopBirthDate(){
+    if(!birthDateDay || !birthDateMonth || !birthDateYear || !birthDateDesktopValue) return true;
+    clearBirthDateValidity();
+    const day = birthDateDay.value;
+    const month = birthDateMonth.value;
+    const year = birthDateYear.value;
+    let message = "";
+
+    if(day && month && year){
+      const isoDate = `${year}-${month}-${day}`;
+      const parsed = new Date(`${isoDate}T12:00:00`);
+      const valid = parsed.getFullYear() === Number(year)
+        && String(parsed.getMonth() + 1).padStart(2, "0") === month
+        && String(parsed.getDate()).padStart(2, "0") === day;
+      if(valid){
+        birthDateDesktopValue.value = isoDate;
+      }else{
+        birthDateDesktopValue.value = "";
+        message = "Informe uma data de nascimento válida.";
+      }
+    }else{
+      birthDateDesktopValue.value = "";
+    }
+
+    if(message){
+      birthDateDay.setCustomValidity(message);
+      birthDateMonth.setCustomValidity(message);
+      birthDateYear.setCustomValidity(message);
+    }
+    return !message;
+  }
+
+  function syncBirthDateMode(){
+    if(!birthDateMobile || !birthDateDesktopValue) return;
+    const desktop = desktopBirthDateActive();
+    if(desktop){
+      birthDateMobile.disabled = true;
+      birthDateMobile.required = false;
+      birthDateMobile.removeAttribute("name");
+      birthDateDesktopValue.disabled = false;
+      birthDateDesktopValue.name = "birth_date";
+      [birthDateDay, birthDateMonth, birthDateYear].forEach((field) => { if(field) field.required = true; });
+      syncDesktopBirthDate();
+    }else{
+      birthDateMobile.disabled = false;
+      birthDateMobile.required = true;
+      birthDateMobile.name = "birth_date";
+      birthDateDesktopValue.disabled = true;
+      birthDateDesktopValue.removeAttribute("name");
+      [birthDateDay, birthDateMonth, birthDateYear].forEach((field) => { if(field) field.required = false; });
+      clearBirthDateValidity();
+    }
+  }
+
+  function validateBirthDate(){
+    if(!desktopBirthDateActive()) return Boolean(birthDateMobile?.value);
+    const valid = syncDesktopBirthDate();
+    const complete = Boolean(birthDateDay?.value && birthDateMonth?.value && birthDateYear?.value);
+    return valid && complete;
+  }
+
+  [birthDateDay, birthDateMonth, birthDateYear].forEach((field) => {
+    field?.addEventListener("change", syncDesktopBirthDate);
+  });
+  desktopBirthDateMedia?.addEventListener?.("change", syncBirthDateMode);
+  window.addEventListener("resize", syncBirthDateMode);
+  populateBirthDateControls();
+  syncBirthDateMode();
 
   function setPasswordMessage(message, show){
     if(passwordError){
@@ -349,6 +493,14 @@
   });
 
   form?.addEventListener("submit", function(event){
+    if(!validateBirthDate()){
+      event.preventDefault();
+      const target = desktopBirthDateActive() ? (birthDateDay || birthDateMonth || birthDateYear) : birthDateMobile;
+      target?.focus({ preventScroll: true });
+      birthDateField?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => target?.reportValidity(), 120);
+      return;
+    }
     if(!validatePassword(true)){
       event.preventDefault();
       const target = passwordInput?.validity.valid ? passwordConfirmInput : passwordInput;
@@ -361,7 +513,9 @@
   function focusReturnedField(){
     const fieldName = form?.dataset.focusField || "";
     if(!fieldName) return;
-    const target = form.querySelector(`[name="${fieldName}"]`) || (fieldName === "accept_legal" ? form.querySelector('.legal-accept-box input[type="checkbox"]') : null);
+    const target = fieldName === "birth_date"
+      ? (desktopBirthDateActive() ? birthDateDay : birthDateMobile)
+      : (form.querySelector(`[name="${fieldName}"]`) || (fieldName === "accept_legal" ? form.querySelector('.legal-accept-box input[type="checkbox"]') : null));
     if(target){
       setTimeout(() => {
         target.focus({ preventScroll: true });
