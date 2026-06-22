@@ -10,7 +10,7 @@
       <h1>Abra sua conta com segurança.</h1>
 
       <p class="register-lead">
-        Entre para acompanhar leilões ao vivo, disputar produtos e ter acesso completo à plataforma.
+        Entre para acompanhar disputas ao vivo, produtos e experiências selecionadas, com acesso completo à plataforma.
       </p>
 
       <div class="register-flow-box">
@@ -54,7 +54,7 @@
         </label>
 
         <label>Apelido público
-          <input name="public_name" placeholder="ex: Usuario10" minlength="3" maxlength="24" autocomplete="nickname" pattern="[A-Za-z0-9._-]{3,24}" value="{{ fd.public_name or '' }}" required>
+          <input name="public_name" placeholder="ex: Conta_10" minlength="3" maxlength="24" autocomplete="nickname" pattern="[A-Za-z0-9._-]{3,24}" value="{{ fd.public_name or '' }}" required>
           <small>Pode ter maiúsculas/minúsculas, mas não pode ter espaço, acento ou símbolo especial. Apelidos repetidos não são permitidos.</small>
         </label>
        
@@ -63,9 +63,7 @@
           <select name="gender" required>
             <option value="">Selecione</option>
             <option value="feminino" {% if fd.gender == 'feminino' %}selected{% endif %}>Feminino</option>
-            <option value="masculino" {% if fd.gender == 'masculino' %}selected{% endif %}>Masculino</option>
-            <option value="outro" {% if fd.gender == 'outro' %}selected{% endif %}>Outro</option>
-            <option value="nao_informar" {% if fd.gender == 'nao_informar' %}selected{% endif %}>Prefiro não informar</option>
+            <option value="masculino" {% if fd.gender == 'masculino' %}selected{% endif %}>Masculino</option>            
           </select>
         </label>
 
@@ -111,6 +109,34 @@
         {{ password_error if password_error is defined and password_error else '' }}
       </div>
 
+      <h2>Localização</h2>
+      <div class="grid-2">
+        <label>Estado
+          <select
+            name="state"
+            id="state-select"
+            class="location-select"
+            autocomplete="address-level1"
+            data-current-state="{{ fd.state or '' }}"
+          >
+            <option value="">Selecione o estado</option>
+          </select>
+        </label>
+        <label>Cidade
+          <select
+            name="city"
+            id="city-select"
+            class="location-select"
+            autocomplete="address-level2"
+            data-current-city="{{ fd.city or '' }}"
+            disabled
+          >
+            <option value="">Selecione o estado primeiro</option>
+          </select>
+          <small class="location-hint">Escolha o estado para carregar as cidades.</small>
+        </label>
+      </div>
+
       <h2>Endereço</h2>
       <div class="grid-2">
         <label>CEP
@@ -127,15 +153,6 @@
         </label>
         <label>Bairro
           <input name="district" placeholder="Bairro" value="{{ fd.district or '' }}">
-        </label>
-        <label>Estado
-          <select name="state" id="state-select" autocomplete="address-level1" data-current-state="{{ fd.state or '' }}">
-            <option value="">Selecione o estado</option>
-          </select>
-        </label>
-        <label>Cidade
-          <input name="city" id="city-input" list="city-list" placeholder="Digite para pesquisar" autocomplete="address-level2" value="{{ fd.city or '' }}">
-          <datalist id="city-list"></datalist>
         </label>
       </div>
 
@@ -158,7 +175,7 @@
 </section>
 
 <style>
-.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}.legal-single-accept span{line-height:1.5}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.password-guidance{margin:8px 0 12px;padding:11px 13px;border:1px solid rgba(96,165,250,.20);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;font-weight:800}.password-guidance strong{color:#bfdbfe}.password-live-hint{display:block;margin-top:7px}.field-error{display:none;margin:8px 0 12px;padding:10px 12px;border:1px solid rgba(248,113,113,.35);border-radius:13px;background:rgba(239,68,68,.12);color:#fecaca;font-weight:850}.field-error.show{display:block}.input-error{border-color:rgba(248,113,113,.70)!important;box-shadow:0 0 0 3px rgba(239,68,68,.13)}.input-ok{border-color:rgba(74,222,128,.62)!important}.password-live-hint.ok{color:#bbf7d0}.password-live-hint.bad{color:#fecaca}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
+.lc-register-clean{padding:42px 24px}.register-professional-grid{max-width:1180px}.register-info-panel{position:sticky;top:92px}.register-lead{font-size:16px}.register-flow-box{display:grid;gap:12px;margin-top:24px}.register-flow-box div{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:center;padding:14px;border:1px solid rgba(148,163,184,.16);border-radius:18px;background:rgba(255,255,255,.035)}.register-flow-box strong{width:38px;height:38px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(135deg,#2563eb,#22c55e);font-weight:950}.register-flow-box span{color:#dbeafe;line-height:1.35}.form-title-row h2{margin-top:0}.form-title-row p,.register-note{color:#b7c6e6;margin-top:4px}.legal-accept-box{border:1px solid rgba(148,163,184,.22);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;margin:18px 0;display:grid;gap:10px}.check-line{display:flex!important;align-items:flex-start;gap:10px;color:#dbeafe!important;font-weight:700!important;margin:0!important}.check-line input{width:auto!important;margin-top:3px!important}.check-line a{color:#93c5fd;font-weight:900}.legal-single-accept span{line-height:1.5}#register-submit:disabled{opacity:.5;cursor:not-allowed}.grid-2 select{width:100%;margin-top:7px;padding:12px 13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);color:#fff;outline:none}.location-select{color-scheme:dark}.location-select:disabled{opacity:.62;cursor:not-allowed}.location-select option{background:#0f172a;color:#f8fafc}.location-hint{display:block;margin-top:7px;color:#b7c6e6;font-size:12px}.password-guidance{margin:8px 0 12px;padding:11px 13px;border:1px solid rgba(96,165,250,.20);border-radius:14px;background:rgba(59,130,246,.08);color:#dbeafe;font-weight:800}.password-guidance strong{color:#bfdbfe}.password-live-hint{display:block;margin-top:7px}.field-error{display:none;margin:8px 0 12px;padding:10px 12px;border:1px solid rgba(248,113,113,.35);border-radius:13px;background:rgba(239,68,68,.12);color:#fecaca;font-weight:850}.field-error.show{display:block}.input-error{border-color:rgba(248,113,113,.70)!important;box-shadow:0 0 0 3px rgba(239,68,68,.13)}.input-ok{border-color:rgba(74,222,128,.62)!important}.password-live-hint.ok{color:#bbf7d0}.password-live-hint.bad{color:#fecaca}@media(max-width:980px){.register-info-panel{position:static}.register-professional-grid{grid-template-columns:1fr}.lc-register-clean{padding:24px 14px}}
 </style>
 
 <script>
@@ -169,8 +186,7 @@
   const phone = document.querySelector('[data-mask="phone"]');
   const cep = document.querySelector('[data-mask="cep"]');
   const stateSelect = document.getElementById("state-select");
-  const cityInput = document.getElementById("city-input");
-  const cityList = document.getElementById("city-list");
+  const citySelect = document.getElementById("city-select");
   const passwordInput = document.getElementById("register-password");
   const passwordConfirmInput = document.getElementById("register-password-confirm");
   const passwordError = document.getElementById("register-password-error");
@@ -250,34 +266,86 @@
   const states = [
     ["AC","Acre"],["AL","Alagoas"],["AP","Amapá"],["AM","Amazonas"],["BA","Bahia"],["CE","Ceará"],["DF","Distrito Federal"],["ES","Espírito Santo"],["GO","Goiás"],["MA","Maranhão"],["MT","Mato Grosso"],["MS","Mato Grosso do Sul"],["MG","Minas Gerais"],["PA","Pará"],["PB","Paraíba"],["PR","Paraná"],["PE","Pernambuco"],["PI","Piauí"],["RJ","Rio de Janeiro"],["RN","Rio Grande do Norte"],["RS","Rio Grande do Sul"],["RO","Rondônia"],["RR","Roraima"],["SC","Santa Catarina"],["SP","São Paulo"],["SE","Sergipe"],["TO","Tocantins"]
   ];
+  const normalizeUf = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const direct = raw.toUpperCase();
+    if (states.some(([uf]) => uf === direct)) return direct;
+    const match = states.find(([, name]) => name.toLowerCase() === raw.toLowerCase());
+    return match ? match[0] : "";
+  };
+
+  const currentUf = normalizeUf(stateSelect?.dataset.currentState);
   states.forEach(([uf,name]) => {
     const opt = document.createElement("option");
     opt.value = uf;
     opt.textContent = `${uf} — ${name}`;
-    if(stateSelect?.dataset.currentState === uf){ opt.selected = true; }
+    if(currentUf === uf){ opt.selected = true; }
     stateSelect?.appendChild(opt);
   });
-  if(stateSelect?.value){ loadCities(stateSelect.value); }
 
-  async function loadCities(uf){
-    if(!cityList) return;
-    cityList.innerHTML = "";
-    if(!uf){ cityInput.value = ""; return; }
+  function setCityPlaceholder(label, disabled){
+    if(!citySelect) return;
+    citySelect.innerHTML = "";
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = label;
+    citySelect.appendChild(option);
+    citySelect.disabled = Boolean(disabled);
+  }
+
+  async function loadCities(uf, keepCurrentCity = true){
+    if(!citySelect) return;
+    const currentCity = keepCurrentCity ? String(citySelect.dataset.currentCity || "").trim() : "";
+    if(!uf){
+      setCityPlaceholder("Selecione o estado primeiro", true);
+      return;
+    }
+
+    setCityPlaceholder("Carregando cidades...", true);
     try{
-      const res = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`);
+      const res = await fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${encodeURIComponent(uf)}/municipios?orderBy=nome`);
+      if(!res.ok) throw new Error("Não foi possível carregar as cidades.");
       const cities = await res.json();
+
+      citySelect.innerHTML = "";
+      const first = document.createElement("option");
+      first.value = "";
+      first.textContent = "Selecione a cidade";
+      citySelect.appendChild(first);
+
+      let hasCurrentCity = false;
       cities.forEach((city) => {
         const opt = document.createElement("option");
         opt.value = city.nome;
-        cityList.appendChild(opt);
+        opt.textContent = city.nome;
+        if(currentCity && city.nome.toLowerCase() === currentCity.toLowerCase()){
+          opt.selected = true;
+          hasCurrentCity = true;
+        }
+        citySelect.appendChild(opt);
       });
+
+      if(currentCity && !hasCurrentCity){
+        const legacy = document.createElement("option");
+        legacy.value = currentCity;
+        legacy.textContent = currentCity;
+        legacy.selected = true;
+        citySelect.appendChild(legacy);
+      }
+
+      citySelect.disabled = false;
     }catch(e){
       console.warn("Não foi possível carregar cidades automaticamente", e);
+      setCityPlaceholder("Não foi possível carregar. Tente novamente.", false);
     }
   }
+
+  if(stateSelect?.value){ loadCities(stateSelect.value, true); }
+
   stateSelect?.addEventListener("change", () => {
-    if(cityInput) cityInput.value = "";
-    loadCities(stateSelect.value);
+    if(citySelect) citySelect.dataset.currentCity = "";
+    loadCities(stateSelect.value, false);
   });
 
   form?.addEventListener("submit", function(event){
