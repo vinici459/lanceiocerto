@@ -237,8 +237,10 @@
 
     let homeStateInFlight = false;
     let homeStateQueued = false;
-    let homeFastSyncUntil = 0;
+    let homeQueuedReason = "";
     let homeLastStateAt = 0;
+    let homeLastCriticalStateAt = 0;
+    const HOME_CRITICAL_MIN_GAP_MS = 2600;
     const homeCardMap = new Map();
     document.querySelectorAll("[data-auction-card][data-auction-id]").forEach((card) => {
       homeCardMap.set(String(card.dataset.auctionId), card);
@@ -380,12 +382,13 @@
       if (card.dataset.homeLocalStarted === "true" && (status === "scheduled" || status === "relisted")) {
         const remainingToStart = Number(item.start_remaining || 0);
         if (remainingToStart <= 3) {
-          requestHomeStateSoon("local-start-confirm", true);
           return;
         }
       }
 
       card.dataset.auctionStatus = status;
+      delete card.dataset.homePreStartSync;
+      delete card.dataset.homeZeroSync;
       card.classList.toggle("ended", status === "ended");
       setBadge(card, status);
       updatePrice(card, item, status);
@@ -468,13 +471,19 @@
 
     function requestHomeStateSoon(reason, critical) {
       const now = Date.now();
-      if (critical) homeFastSyncUntil = Math.max(homeFastSyncUntil, now + 6000);
-      const minGap = critical ? 450 : 3500;
-      if (now - homeLastStateAt < minGap) {
-        if (critical) homeStateQueued = true;
+      const normalizedReason = reason || "timer";
+      if (critical && now - homeLastCriticalStateAt < HOME_CRITICAL_MIN_GAP_MS) return;
+      if (homeStateInFlight) {
+        if (critical && !homeStateQueued) {
+          homeStateQueued = true;
+          homeQueuedReason = normalizedReason;
+        }
         return;
       }
-      window.setTimeout(() => refreshHomeState(reason || "timer", Boolean(critical)), critical ? 120 : 350);
+      if (critical) homeLastCriticalStateAt = now;
+      const minGap = critical ? HOME_CRITICAL_MIN_GAP_MS : 3500;
+      if (now - homeLastStateAt < minGap) return;
+      window.setTimeout(() => refreshHomeState(normalizedReason, Boolean(critical)), critical ? 180 : 350);
     }
 
     function tickCountdowns() {
@@ -484,7 +493,8 @@
         const card = el.closest("[data-auction-card]");
 
         const status = String(card?.dataset.auctionStatus || "").toLowerCase();
-        if ((status === "scheduled" || status === "relisted") && seconds <= 2) {
+        if ((status === "scheduled" || status === "relisted") && seconds <= 2 && card?.dataset.homePreStartSync !== "true") {
+          card.dataset.homePreStartSync = "true";
           requestHomeStateSoon("pre-start", true);
         }
 
@@ -503,7 +513,10 @@
             el.dataset.homeSyncing = "true";
             if (card) card.classList.add("home-card-syncing");
           }
-          requestHomeStateSoon("zero", true);
+          if (card?.dataset.homeZeroSync !== "true") {
+            card.dataset.homeZeroSync = "true";
+            requestHomeStateSoon("zero", true);
+          }
           return;
         }
 
@@ -513,9 +526,6 @@
         }
       });
 
-      if (Date.now() < homeFastSyncUntil) {
-        requestHomeStateSoon("fast-sync", true);
-      }
     }
 
     async function refreshHomeState(reason, critical) {
@@ -539,15 +549,17 @@
       } finally {
         homeStateInFlight = false;
         if (homeStateQueued) {
+          const queuedReason = homeQueuedReason || "queued-critical";
           homeStateQueued = false;
-          window.setTimeout(() => refreshHomeState("queued-critical", true), 250);
+          homeQueuedReason = "";
+          window.setTimeout(() => requestHomeStateSoon(queuedReason, true), HOME_CRITICAL_MIN_GAP_MS);
         }
       }
     }
 
     tickCountdowns();
     setInterval(tickCountdowns, 1000);
-    window.setTimeout(() => refreshHomeState("initial", true), 180);
+    window.setTimeout(() => refreshHomeState("initial", false), 600);
     setInterval(() => refreshHomeState("poll", false), 30000);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) window.setTimeout(() => refreshHomeState("visible", true), 250);

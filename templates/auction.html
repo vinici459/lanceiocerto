@@ -795,7 +795,7 @@ window.__AUCTION__ = {{ item | tojson }};
       };
       applyAuctionState(auction, "local-start");
       closeAuctionLocally();
-      fetchState("confirm-local-start-ended", 5000);
+      window.setTimeout(() => requestStateAfterLocalTransition("confirm-local-start-ended"), 1800);
       return;
     }
 
@@ -811,7 +811,13 @@ window.__AUCTION__ = {{ item | tojson }};
     };
     applyAuctionState(auction, "local-start");
     setFeedback("Disputa ao vivo. Você já pode participar.");
-    fetchState("confirm-local-start", 5000);
+    window.setTimeout(() => requestStateAfterLocalTransition("confirm-local-start"), 1800);
+  }
+
+  function requestStateAfterLocalTransition(reason){
+    const realtimeFresh = wsConnected && lastWsMessageAt && (Date.now() - lastWsMessageAt < 4500);
+    if(realtimeFresh) return;
+    fetchState(reason, 5000);
   }
 
   function renderAll(){
@@ -1280,7 +1286,7 @@ window.__AUCTION__ = {{ item | tojson }};
   // qualquer resposta atrasada volte preço/lances para trás.
   const liveStateSyncMs = 18000 + Math.floor(Math.random() * 5000);
   const offlineStateSyncMs = 2200 + Math.floor(Math.random() * 900);
-  const scheduledNearStartSyncMs = 1400 + Math.floor(Math.random() * 700);
+  const scheduledNearStartSyncMs = 5000 + Math.floor(Math.random() * 1500);
   const idleStateSyncMs = 22000 + Math.floor(Math.random() * 4000);
   let lastStateSyncAt = 0;
 
@@ -1575,7 +1581,7 @@ window.__AUCTION__ = {{ item | tojson }};
       // uma guarda de recuperação quando esse primeiro pacote não chega.
       setTimeout(() => {
         if(activeSocket === ws && !firstWsStateSeen) fetchState("ws-open-sync-fallback", 4000);
-      }, 900);
+      }, 2200);
       scheduleStateSync();
     };
 
@@ -1655,7 +1661,7 @@ window.__AUCTION__ = {{ item | tojson }};
   // Se o WS não responder, confirma pelo HTTP uma vez.
   setTimeout(() => {
     if(!lastWsMessageAt) fetchState("initial-sync-fallback", 4000);
-  }, 1400);
+  }, 2600);
 
   if(isScheduled(status()) && remaining <= 2) fetchState("initial-zero", 5000);
 })();

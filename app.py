@@ -681,7 +681,7 @@ SLOW_REQUEST_WARN_MS = float(os.getenv("SLOW_REQUEST_WARN_MS", "1500"))
 # para cada navegador a cada poucos segundos.
 STATE_API_CACHE_ENABLED = os.getenv("STATE_API_CACHE_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
 HOME_STATE_CACHE_TTL_MS = int(os.getenv("HOME_STATE_CACHE_TTL_MS", "900"))
-HOME_STATE_CRITICAL_TTL_MS = int(os.getenv("HOME_STATE_CRITICAL_TTL_MS", "350"))
+HOME_STATE_CRITICAL_TTL_MS = int(os.getenv("HOME_STATE_CRITICAL_TTL_MS", "2200"))
 AUCTION_STATE_CACHE_TTL_MS = int(os.getenv("AUCTION_STATE_CACHE_TTL_MS", "650"))
 AUCTION_STATE_CRITICAL_TTL_MS = int(os.getenv("AUCTION_STATE_CRITICAL_TTL_MS", "250"))
 BID_SLOW_WARN_MS = float(os.getenv("BID_SLOW_WARN_MS", "900"))
@@ -692,6 +692,10 @@ AUCTION_STATE_API_CACHE: dict[str, tuple[float, dict]] = {}
 HOME_STATE_API_LOCK = threading.Lock()
 AUCTION_STATE_API_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
 HOME_STATE_SYNC_LAST_MONO = 0.0
+# A Home não é a fonte oficial da disputa em tempo real. Esses limites evitam
+# rajadas de GET /api/home/state quando vários cronômetros chegam ao mesmo ponto.
+HOME_STATE_CRITICAL_MIN_GAP_SECONDS = float(os.getenv("HOME_STATE_CRITICAL_MIN_GAP_SECONDS", "2.2"))
+HOME_STATE_STALE_MAX_MS = int(os.getenv("HOME_STATE_STALE_MAX_MS", "9000"))
 AUCTION_STATE_CACHE_MAX = int(os.getenv("AUCTION_STATE_CACHE_MAX", "1000"))
 
 RATE_LIMIT_BUCKETS: dict[str, deque[float]] = defaultdict(deque)
@@ -746,7 +750,7 @@ app = FastAPI(title=APP_NAME)
 # Mantemos gzip apenas para respostas muito grandes; páginas normais navegam sem esse peso.
 app.add_middleware(GZipMiddleware, minimum_size=int(os.getenv("GZIP_MINIMUM_SIZE", "180000")))
 templates = Jinja2Templates(directory="templates")
-ASSET_VERSION = os.getenv("ASSET_VERSION", "20260616-lance-real-fast-v3")
+ASSET_VERSION = os.getenv("ASSET_VERSION", "20260622-realtime-perf-v2")
 templates.env.globals["asset_version"] = ASSET_VERSION
 
 # Versões dos documentos legais aceitos no cadastro.
@@ -5302,7 +5306,7 @@ def _is_auction_state_critical(reason: str) -> bool:
 def _home_sync_allowed(critical: bool) -> bool:
     global HOME_STATE_SYNC_LAST_MONO
     now = time.monotonic()
-    min_gap = 0.35 if critical else 1.25
+    min_gap = HOME_STATE_CRITICAL_MIN_GAP_SECONDS if critical else 1.25
     if now - HOME_STATE_SYNC_LAST_MONO < min_gap:
         return False
     HOME_STATE_SYNC_LAST_MONO = now
@@ -5454,7 +5458,7 @@ def home_state(request: Request):
     # conhecido em vez de empilhar consultas no banco.
     acquired = HOME_STATE_API_LOCK.acquire(blocking=False)
     if not acquired:
-        stale = _api_cache_get(HOME_STATE_API_CACHE, cache_key, max(HOME_STATE_CACHE_TTL_MS * 4, 1200))
+        stale = _api_cache_get(HOME_STATE_API_CACHE, cache_key, max(HOME_STATE_STALE_MAX_MS, ttl_ms * 2))
         if stale is not None:
             stale["cache"] = "stale"
             stale.update(server_time_payload())
@@ -6299,6 +6303,71 @@ def _select_auction_for_bid_fast(db: Session, auction_id: int) -> Optional[Simpl
     return _auction_row_to_namespace(row) if row else None
 
 
+
+def _select_bid_context_fast(db: Session, auction_id: int, user_id: int) -> tuple[Optional[SimpleNamespace], Optional[SimpleNamespace]]:
+    """Busca o usuário e trava a disputa em uma única ida ao PostgreSQL.
+
+    O caminho anterior fazia um SELECT para o usuário e outro SELECT ... FOR UPDATE
+    para a disputa. Em banco remoto, cada ida/volta pesa bastante. Aqui a disputa
+    continua travada de forma exclusiva, mas os dados necessários vêm juntos.
+    """
+    row = db.execute(text("""
+        SELECT
+            a.id AS a_id, a.title AS a_title, a.description AS a_description,
+            a.image_url AS a_image_url, a.source_price AS a_source_price,
+            a.start_price AS a_start_price, a.current_price AS a_current_price,
+            a.status AS a_status, a.scheduled_start AS a_scheduled_start,
+            a.ends_at AS a_ends_at, a.winner_user_id AS a_winner_user_id,
+            a.winner_deadline AS a_winner_deadline, a.turbo_level AS a_turbo_level,
+            a.initial_duration_seconds AS a_initial_duration_seconds,
+            a.turbo_enabled AS a_turbo_enabled,
+            a.turbo_trigger_percent AS a_turbo_trigger_percent,
+            a.turbo_level_3_percent AS a_turbo_level_3_percent,
+            a.turbo_level_4_percent AS a_turbo_level_4_percent,
+            a.bid_fee_percent AS a_bid_fee_percent,
+            a.winner_min_percent AS a_winner_min_percent,
+            a.target_profit_percent AS a_target_profit_percent,
+            a.turbo_base_value AS a_turbo_base_value,
+            a.total_bid_fees AS a_total_bid_fees,
+            a.total_bid_spent AS a_total_bid_spent,
+            a.bids_count_cached AS a_bids_count_cached,
+            a.chat_paused AS a_chat_paused,
+            u.id AS u_id, u.full_name AS u_full_name,
+            u.public_name AS u_public_name, u.nickname AS u_nickname,
+            u.email AS u_email, u.is_banned AS u_is_banned,
+            u.account_deleted AS u_account_deleted,
+            u.wallet_balance AS u_wallet_balance, u.cpf AS u_cpf
+        FROM auction_items AS a
+        LEFT JOIN users AS u ON u.id = :user_id
+        WHERE a.id = :auction_id
+        FOR UPDATE OF a
+    """), {"auction_id": auction_id, "user_id": user_id}).first()
+    if not row:
+        return None, None
+
+    data = dict(row._mapping if hasattr(row, "_mapping") else row)
+    item_fields = (
+        "id", "title", "description", "image_url", "source_price", "start_price",
+        "current_price", "status", "scheduled_start", "ends_at", "winner_user_id",
+        "winner_deadline", "turbo_level", "initial_duration_seconds", "turbo_enabled",
+        "turbo_trigger_percent", "turbo_level_3_percent", "turbo_level_4_percent",
+        "bid_fee_percent", "winner_min_percent", "target_profit_percent", "turbo_base_value",
+        "total_bid_fees", "total_bid_spent", "bids_count_cached", "chat_paused",
+    )
+    item = SimpleNamespace(**{name: data.get(f"a_{name}") for name in item_fields})
+
+    if data.get("u_id") is None:
+        return item, None
+    user = SimpleNamespace(
+        id=data.get("u_id"), full_name=data.get("u_full_name") or "",
+        public_name=data.get("u_public_name") or "", nickname=data.get("u_nickname") or "",
+        email=data.get("u_email") or "", is_banned=bool(data.get("u_is_banned")),
+        account_deleted=bool(data.get("u_account_deleted")),
+        wallet_balance=data.get("u_wallet_balance") or 0.0,
+        cpf=data.get("u_cpf") or "",
+    )
+    return item, user
+
 def _official_payload_for_fast_error(db: Session, item: SimpleNamespace, user: Optional[SimpleNamespace], detail: str, status_code: int = 400, retry_after: Optional[int] = None) -> None:
     try:
         payload = public_auction_live_payload(item, db, user=user)
@@ -6321,19 +6390,35 @@ def _official_payload_for_fast_error(db: Session, item: SimpleNamespace, user: O
     raise AuctionStateHTTPException(status_code=status_code, detail=detail, auction_payload=payload, retry_after=retry_after)
 
 
-def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float, client_bid_id: str = "") -> tuple[dict, dict, int]:
-    """Caminho quente real do lance em PostgreSQL.
+def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float, client_bid_id: str = "") -> tuple[dict, dict, int, dict[str, float]]:
+    """Caminho quente PostgreSQL com poucas idas ao banco.
 
-    Evita ORM no trecho crítico. Mantém transação, FOR UPDATE, desconto atômico,
-    idempotência por client_bid_id e payload rápido.
+    Mantém débito, histórico, registro fiscal e estado da disputa na mesma
+    transação. A diferença é que as escritas essenciais são agrupadas em uma
+    única instrução SQL, reduzindo a latência acumulada de várias consultas
+    sequenciais em banco remoto.
     """
     now = datetime.utcnow()
+    stages: dict[str, float] = {}
+
+    def mark(stage: str, started: float) -> None:
+        stages[stage] = round(max(0.0, (time.perf_counter() - started) * 1000), 2)
+
     db = SessionLocal()
     try:
-        user = _light_user_for_bid(request, db)
-        item = _select_auction_for_bid_fast(db, auction_id)
+        user_id = _request_user_id(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Faça login para continuar.")
+
+        read_started = time.perf_counter()
+        item, user = _select_bid_context_fast(db, auction_id, user_id)
+        mark("context", read_started)
         if not item:
-            raise HTTPException(status_code=404, detail="Disputa não encontrado.")
+            raise HTTPException(status_code=404, detail="Disputa não encontrada.")
+        if not user or bool(getattr(user, "account_deleted", False)):
+            raise HTTPException(status_code=401, detail="Faça login para continuar.")
+        if bool(getattr(user, "is_banned", False)):
+            raise HTTPException(status_code=403, detail="Conta bloqueada.")
 
         # Início exato no servidor sem depender do polling da Home.
         if item.status in {"scheduled", "relisted"} and item.scheduled_start and item.scheduled_start <= now:
@@ -6345,6 +6430,7 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
 
         # Se acabou, fecha e devolve estado oficial sem aceitar novo lance.
         if item.status == "live" and item.ends_at and item.ends_at <= now:
+            finish_started = time.perf_counter()
             last = db.execute(text("""
                 SELECT id, user_id FROM bids
                 WHERE auction_id = :auction_id
@@ -6375,7 +6461,8 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
                     WHERE id=:auction_id
                 """), {"auction_id": auction_id})
             db.commit()
-            _official_payload_for_fast_error(db, item, user, "Este disputa foi encerrado.", 400)
+            mark("finish", finish_started)
+            _official_payload_for_fast_error(db, item, user, "Esta disputa foi encerrada.", 400)
 
         if item.status != "live":
             _official_payload_for_fast_error(db, item, user, "Disputa não está ao vivo.", 400)
@@ -6386,17 +6473,21 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
 
         mode_for_bid = compute_turbo_level(item)
         if mode_for_bid >= 2:
+            turbo_check_started = time.perf_counter()
             prior = db.execute(text("""
                 SELECT id FROM bids
                 WHERE auction_id=:auction_id AND user_id=:user_id
                 LIMIT 1
             """), {"auction_id": auction_id, "user_id": user.id}).first()
+            mark("turbo_check", turbo_check_started)
             if not prior:
                 _official_payload_for_fast_error(db, item, user, turbo_lock_message(mode_for_bid), 403)
 
         remaining_cd = _get_fast_cooldown_remaining(item.id, user.id, bid_value, now)
         if remaining_cd > 0:
+            last_bid_started = time.perf_counter()
             last_bid_id = auction_last_bid_id(db, item.id)
+            mark("cooldown_lookup", last_bid_started)
             payload = fast_bid_auction_payload(
                 item,
                 bids_count=int(getattr(item, "bids_count_cached", 0) or 0),
@@ -6416,26 +6507,12 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
 
         previous_total_bid_count = int(getattr(item, "bids_count_cached", 0) or 0)
         fee_value, increment = split_bid_amount(bid_value, getattr(item, "bid_fee_percent", DEFAULT_BID_FEE_PERCENT))
-
-        row = db.execute(text("""
-            UPDATE users
-            SET wallet_balance = wallet_balance - :bid_value
-            WHERE id = :user_id
-              AND wallet_balance >= :min_balance
-            RETURNING wallet_balance
-        """), {"bid_value": bid_value, "min_balance": bid_value - 0.000001, "user_id": user.id}).first()
-        if not row:
-            db.rollback()
-            user.wallet_balance = float(getattr(user, "wallet_balance", 0.0) or 0.0)
-            _official_payload_for_fast_error(db, item, user, "Créditos LC insuficientes para dar este lance.", 402)
-        wallet_after_bid = BR(row[0] or 0.0)
-
         total_bid_fees = BR((getattr(item, "total_bid_fees", 0.0) or 0.0) + fee_value)
         total_bid_spent = BR((getattr(item, "total_bid_spent", 0.0) or 0.0) + bid_value)
         current_price = BR((getattr(item, "current_price", 0.0) or 0.0) + increment)
         accepted_count = previous_total_bid_count + 1
 
-        # Calcula turbo depois dos novos totais.
+        # Calcula turbo depois dos novos totais, ainda em memória, antes da escrita atômica.
         item.current_price = current_price
         item.total_bid_fees = total_bid_fees
         item.total_bid_spent = total_bid_spent
@@ -6454,21 +6531,80 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
         item.status = "live"
         item.chat_paused = False
 
+        # Todas as escritas que precisam acompanhar o lance ficam na mesma instrução:
+        # débito protegido por saldo, histórico, movimentação, registro fiscal e estado.
+        write_started = time.perf_counter()
         try:
-            bid_row = db.execute(text("""
-                INSERT INTO bids (auction_id, user_id, bid_value, fee_value, price_increment, client_bid_id, created_at)
-                VALUES (:auction_id, :user_id, :bid_value, :fee_value, :price_increment, :client_bid_id, :created_at)
-                RETURNING id
+            write_row = db.execute(text("""
+                WITH charged_user AS (
+                    UPDATE users
+                    SET wallet_balance = wallet_balance - :bid_value
+                    WHERE id = :user_id
+                      AND wallet_balance >= :min_balance
+                    RETURNING wallet_balance
+                ),
+                created_bid AS (
+                    INSERT INTO bids (auction_id, user_id, bid_value, fee_value, price_increment, client_bid_id, created_at)
+                    SELECT :auction_id, :user_id, :bid_value, :fee_value, :price_increment, :client_bid_id, :now
+                    FROM charged_user
+                    RETURNING id
+                ),
+                ledger_insert AS (
+                    INSERT INTO wallet_transactions (user_id, amount, kind, note, created_at)
+                    SELECT :user_id, -:bid_value, 'bid_spent', :wallet_note, :now
+                    FROM created_bid
+                ),
+                fiscal_insert AS (
+                    INSERT INTO fiscal_pending_records (
+                        source_key, event_type, status, direction, source_entity, source_entity_id,
+                        user_id, auction_id, bid_id, event_amount, estimated_amount, taxable_amount,
+                        payment_method, payment_reference, external_store_name, external_store_document,
+                        external_paid_amount, external_invoice_number, external_invoice_key,
+                        external_invoice_url, external_payment_proof_url, customer_document,
+                        origin, reason, fiscal_classification, internal_note, fiscal_note_number,
+                        fiscal_note_url, occurred_at, created_at
+                    )
+                    SELECT
+                        'bid:' || CAST(created_bid.id AS TEXT), 'bid_credit_consumed', 'pending_review', 'inflow', 'bid', created_bid.id,
+                        :user_id, :auction_id, created_bid.id, :bid_value, 0, 0,
+                        'creditos_lc', '', '', '', 0, '', '', '', '', :customer_document,
+                        :fiscal_origin, '', '', '', '', '', :now, :now
+                    FROM created_bid
+                ),
+                updated_auction AS (
+                    UPDATE auction_items
+                    SET status='live', current_price=:current_price, total_bid_fees=:total_bid_fees,
+                        total_bid_spent=:total_bid_spent, bids_count_cached=:bids_count_cached,
+                        ends_at=:ends_at, turbo_level=:turbo_level, chat_paused=false
+                    WHERE id=:auction_id
+                      AND EXISTS (SELECT 1 FROM created_bid)
+                    RETURNING id
+                )
+                SELECT
+                    (SELECT wallet_balance FROM charged_user) AS wallet_balance,
+                    (SELECT id FROM created_bid) AS bid_id,
+                    (SELECT id FROM updated_auction) AS updated_auction_id
             """), {
                 "auction_id": item.id,
                 "user_id": user.id,
                 "bid_value": bid_value,
+                "min_balance": bid_value - 0.000001,
                 "fee_value": fee_value,
                 "price_increment": increment,
                 "client_bid_id": client_bid_id,
-                "created_at": now,
+                "now": now,
+                "current_price": current_price,
+                "total_bid_fees": total_bid_fees,
+                "total_bid_spent": total_bid_spent,
+                "bids_count_cached": accepted_count,
+                "ends_at": next_ends_at,
+                "turbo_level": turbo_after_bid,
+                "wallet_note": f"Lance na disputa #{item.id}",
+                "customer_document": (getattr(user, "cpf", "") or "")[:40],
+                "fiscal_origin": "Créditos LC consumidos na participação",
             }).first()
         except IntegrityError:
+            mark("write_bundle", write_started)
             db.rollback()
             confirm_db = SessionLocal()
             try:
@@ -6484,62 +6620,30 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
                     private_payload.update({"idempotent": True, "client_bid_id": client_bid_id, "wallet_balance": BR(getattr(user_confirmed, "wallet_balance", 0.0) or 0.0), **server_time_payload()})
                     public_payload = public_auction_live_payload(item_confirmed, confirm_db, last_bid_id_override=int(existing.id), user_turbo_eligible_override=None)
                     public_payload["idempotent"] = True
-                    return private_payload, public_payload, 0
+                    stages["idempotent_recovery"] = round(max(0.0, (time.perf_counter() - write_started) * 1000), 2)
+                    return private_payload, public_payload, 0, stages
             finally:
                 confirm_db.close()
             raise
+        mark("write_bundle", write_started)
 
-        bid_id = int(bid_row.id if hasattr(bid_row, "id") else bid_row[0])
-        # Registro fiscal pendente: não emite NFS-e, apenas preserva o evento de uso dos Créditos LC.
-        db.add(FiscalPendingRecord(
-            source_key=f"bid:{bid_id}",
-            event_type="bid_credit_consumed",
-            status="pending_review",
-            direction="inflow",
-            source_entity="bid",
-            source_entity_id=bid_id,
-            user_id=user.id,
-            auction_id=item.id,
-            bid_id=bid_id,
-            event_amount=bid_value,
-            payment_method="creditos_lc",
-            customer_document=(getattr(user, "cpf", "") or ""),
-            origin="Créditos LC consumidos na participação",
-            occurred_at=now,
-        ))
+        if not write_row or getattr(write_row, "bid_id", None) is None:
+            db.rollback()
+            user.wallet_balance = float(getattr(user, "wallet_balance", 0.0) or 0.0)
+            _official_payload_for_fast_error(db, item, user, "Créditos LC insuficientes para dar este lance.", 402)
 
-        db.execute(text("""
-            INSERT INTO wallet_transactions (user_id, amount, kind, note, created_at)
-            VALUES (:user_id, :amount, :kind, :note, :created_at)
-        """), {
-            "user_id": user.id,
-            "amount": -bid_value,
-            "kind": "bid_spent",
-            "note": f"Lance no disputa #{item.id}",
-            "created_at": now,
-        })
+        wallet_after_bid = BR(getattr(write_row, "wallet_balance", 0.0) or 0.0)
+        bid_id = int(getattr(write_row, "bid_id"))
 
-        db.execute(text("""
-            UPDATE auction_items
-            SET status='live', current_price=:current_price, total_bid_fees=:total_bid_fees,
-                total_bid_spent=:total_bid_spent, bids_count_cached=:bids_count_cached,
-                ends_at=:ends_at, turbo_level=:turbo_level, chat_paused=false
-            WHERE id=:auction_id
-        """), {
-            "auction_id": item.id,
-            "current_price": current_price,
-            "total_bid_fees": total_bid_fees,
-            "total_bid_spent": total_bid_spent,
-            "bids_count_cached": accepted_count,
-            "ends_at": next_ends_at,
-            "turbo_level": turbo_after_bid,
-        })
-
+        commit_started = time.perf_counter()
         db.commit()
+        mark("commit", commit_started)
+
         button_cooldown = bid_button_cooldown_seconds(bid_value, timing_mode_for_bid)
         _set_fast_cooldown(item.id, user.id, bid_value, button_cooldown, now)
         accepted_bidder = public_user_name(user)
 
+        payload_started = time.perf_counter()
         private_payload = fast_bid_auction_payload(
             item,
             bids_count=accepted_count,
@@ -6570,7 +6674,9 @@ def _place_bid_postgres_fast(request: Request, auction_id: int, bid_value: float
             client_bid_id="",
             wallet_balance=None,
         )
-        return private_payload, public_payload, button_cooldown
+        mark("payload", payload_started)
+        stages["db_total"] = round(sum(stages.get(k, 0.0) for k in ("context", "turbo_check", "write_bundle", "commit")), 2)
+        return private_payload, public_payload, button_cooldown, stages
     except HTTPException:
         db.rollback()
         raise
@@ -6898,30 +7004,46 @@ def _bid_perf_headers(
     lock_entered: float,
     process_done: float,
     outcome: str,
+    stages: Optional[dict[str, float]] = None,
 ) -> dict[str, str]:
-    """Métricas leves do caminho crítico, sem registrar dados pessoais.
+    """Métricas leves do caminho crítico, sem dados pessoais.
 
-    Os valores ficam disponíveis no DevTools pelo cabeçalho Server-Timing e,
-    quando lentos, nos logs do Railway. Isso permite descobrir se a demora está
-    na fila local, no banco/commit ou após a confirmação.
+    Além da fila local e do tempo total, a resposta confirma quais etapas do
+    banco consumiram tempo. Isso evita aplicar mudanças por tentativa e erro.
     """
     now = time.perf_counter()
     total_ms = max(0.0, (now - perf_start) * 1000)
     queue_ms = max(0.0, (lock_entered - perf_start) * 1000)
     process_ms = max(0.0, (process_done - lock_entered) * 1000) if process_done >= lock_entered else 0.0
+    safe_stages = {str(k): float(v) for k, v in (stages or {}).items() if isinstance(v, (int, float))}
     if BID_PERF_LOG_ALL or total_ms >= BID_SLOW_WARN_MS:
+        stage_text = " ".join(f"{key}={value:.1f}ms" for key, value in sorted(safe_stages.items()))
         print(
             f"[BID-PERF] auction={auction_id} outcome={outcome} "
             f"total={total_ms:.1f}ms queue={queue_ms:.1f}ms "
             f"process={process_ms:.1f}ms fast_sql={0 if IS_SQLITE else 1}"
+            + (f" {stage_text}" if stage_text else "")
         )
+    timing_parts = [
+        f"bid_queue;dur={queue_ms:.1f}",
+        f"bid_process;dur={process_ms:.1f}",
+        f"bid_total;dur={total_ms:.1f}",
+    ]
+    metric_names = {
+        "context": "bid_context",
+        "turbo_check": "bid_turbo_check",
+        "write_bundle": "bid_write",
+        "commit": "bid_commit",
+        "payload": "bid_payload",
+        "db_total": "bid_db_total",
+        "idempotent_recovery": "bid_idempotent",
+    }
+    for stage_key, metric_name in metric_names.items():
+        if stage_key in safe_stages:
+            timing_parts.append(f"{metric_name};dur={safe_stages[stage_key]:.1f}")
     return {
-        "Server-Timing": (
-            f"bid_queue;dur={queue_ms:.1f}, "
-            f"bid_process;dur={process_ms:.1f}, "
-            f"bid_total;dur={total_ms:.1f}"
-        ),
-        "X-Realtime-Mode": "diagnostic",
+        "Server-Timing": ", ".join(timing_parts),
+        "X-Realtime-Mode": "measured",
     }
 
 
@@ -6931,19 +7053,25 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
     perf_start = time.perf_counter()
     lock_entered = perf_start
     process_done = perf_start
+    bid_stage_timings: dict[str, float] = {}
     try:
         # Uma fila assíncrona por disputa evita ocupar várias threads com lances
         # parados esperando o mesmo lock. O processamento continua serializado,
         # mas o servidor fica mais estável em pico.
         async with AUCTION_BID_ASYNC_LOCKS[auction_id]:
             lock_entered = time.perf_counter()
-            private_payload, public_payload, button_cooldown = await asyncio.to_thread(
+            bid_result = await asyncio.to_thread(
                 _place_bid_sync,
                 request,
                 auction_id,
                 bid_value,
                 client_bid_id,
             )
+            if len(bid_result) == 4:
+                private_payload, public_payload, button_cooldown, bid_stage_timings = bid_result
+            else:
+                private_payload, public_payload, button_cooldown = bid_result
+                bid_stage_timings = {}
             process_done = time.perf_counter()
     except AuctionStateHTTPException as exc:
         body = {"ok": False, "detail": exc.detail, "cooldown_scope": "button"}
@@ -7001,6 +7129,7 @@ async def place_bid(request: Request, auction_id: int, bid_value: float = Form(.
             lock_entered=lock_entered,
             process_done=process_done,
             outcome="confirmed",
+            stages=bid_stage_timings,
         ),
     )
 
